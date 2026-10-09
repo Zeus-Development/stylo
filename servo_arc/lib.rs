@@ -246,7 +246,11 @@ impl<T> Arc<T> {
     /// Note: This returns a pointer to the data T, which is offset in the allocation.
     #[inline]
     pub fn into_raw(this: Self) -> *const T {
-        let ptr = unsafe { &((*this.ptr()).data) as *const _ };
+        // VIPER-PATCH(servo-arc-provenance): project the field through the raw
+        // allocation pointer instead of going through `&data`. A pointer cast
+        // from a reference may only access the referenced `T`, so `from_raw`
+        // could not reach the refcount in front of it (servo/stylo#210, #299).
+        let ptr = unsafe { ptr::addr_of!((*this.ptr()).data) };
         mem::forget(this);
         ptr
     }
@@ -312,7 +316,10 @@ impl<T> Arc<T> {
     /// and can be converted into more `Arc<T>`s if necessary.
     #[inline]
     pub fn borrow_arc<'a>(&'a self) -> ArcBorrow<'a, T> {
-        ArcBorrow(&**self)
+        // VIPER-PATCH(servo-arc-provenance): keep the provenance of the whole
+        // allocation, so that `clone_arc` and `with_arc` can update the
+        // refcount (servo/stylo#299). `&**self` would only cover `T`.
+        unsafe { ArcBorrow::from_ptr(ptr::addr_of!((*self.ptr()).data)) }
     }
 
     /// Returns the address on the heap of the Arc itself -- not the T within it -- for memory
@@ -812,7 +819,12 @@ impl<H, T> Arc<HeaderSlice<H, T>> {
             ptr::write(&mut p.as_mut().data.header, header);
             ptr::write(&mut p.as_mut().data.len, num_items);
             if num_items != 0 {
-                let mut current = std::ptr::addr_of_mut!(p.as_mut().data.data) as *mut T;
+                // VIPER-PATCH(servo-arc-provenance): derive the item pointer from
+                // the raw allocation pointer, not from `p.as_mut()`. A reference
+                // to the sized `ArcInner` ends at the zero-length `data` array,
+                // so a pointer taken through it may not write the items that
+                // follow (servo/stylo#210).
+                let mut current = std::ptr::addr_of_mut!((*p.as_ptr()).data.data) as *mut T;
                 for _ in 0..num_items {
                     ptr::write(
                         current,
@@ -943,8 +955,35 @@ impl<H, T> UniqueArc<HeaderSlice<H, T>> {
 ///
 /// `ArcBorrow` lets us deal with borrows of known-refcounted objects
 /// without needing to worry about where the `Arc<T>` is.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ArcBorrow<'a, T: 'a>(&'a T);
+//
+// VIPER-PATCH(servo-arc-provenance): the field was `&'a T`. A reference only
+// grants access to the `T` it points to, so turning it back into an `Arc` and
+// touching the refcount in front of `T` is undefined behaviour under both
+// Stacked Borrows and Tree Borrows (servo/stylo#299). The field is now a raw
+// pointer that keeps the provenance of the whole `ArcInner` allocation when it
+// comes from an `Arc` or `ArcUnion`; `PhantomData<&'a T>` keeps the lifetime,
+// variance and auto traits of `&'a T`, and `Debug`/`PartialEq`/`Eq` below keep
+// the behaviour of the former derives (they compare and print the `T`).
+pub struct ArcBorrow<'a, T: 'a>(ptr::NonNull<T>, PhantomData<&'a T>);
+
+// VIPER-PATCH(servo-arc-provenance): `&'a T` is `Send` and `Sync` exactly when
+// `T: Sync`; restore that for the raw-pointer field.
+unsafe impl<'a, T: Sync> Send for ArcBorrow<'a, T> {}
+unsafe impl<'a, T: Sync> Sync for ArcBorrow<'a, T> {}
+
+impl<'a, T: fmt::Debug> fmt::Debug for ArcBorrow<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ArcBorrow").field(&self.get()).finish()
+    }
+}
+
+impl<'a, T: PartialEq> PartialEq for ArcBorrow<'a, T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.get() == *other.get()
+    }
+}
+
+impl<'a, T: Eq> Eq for ArcBorrow<'a, T> {}
 
 impl<'a, T> Copy for ArcBorrow<'a, T> {}
 impl<'a, T> Clone for ArcBorrow<'a, T> {
@@ -958,7 +997,9 @@ impl<'a, T> ArcBorrow<'a, T> {
     /// Clone this as an `Arc<T>`. This bumps the refcount.
     #[inline]
     pub fn clone_arc(&self) -> Arc<T> {
-        let arc = unsafe { Arc::from_raw(self.0) };
+        // VIPER-PATCH(servo-arc-provenance): `self.0` keeps the allocation's
+        // provenance (see the struct), so the new `Arc` may update the count.
+        let arc = unsafe { Arc::from_raw(self.0.as_ptr()) };
         // addref it!
         mem::forget(arc.clone());
         arc
@@ -968,13 +1009,28 @@ impl<'a, T> ArcBorrow<'a, T> {
     /// e.g. if we obtain such a reference over FFI
     #[inline]
     pub unsafe fn from_ref(r: &'a T) -> Self {
-        ArcBorrow(r)
+        // VIPER-PATCH(servo-arc-provenance): store the reference as a pointer.
+        // Its provenance is the caller's: only a reference whose provenance
+        // covers the whole allocation may later reach the refcount.
+        ArcBorrow(ptr::NonNull::from(r), PhantomData)
+    }
+
+    // VIPER-PATCH(servo-arc-provenance): crate-internal constructor used by
+    // `Arc::borrow_arc` and `ArcUnion::borrow`. `ptr` must point to the `data`
+    // of a live `ArcInner<T>`, be derived from the allocation pointer without
+    // passing through a reference, and stay valid for `'a`.
+    #[inline]
+    unsafe fn from_ptr(ptr: *const T) -> Self {
+        ArcBorrow(
+            unsafe { ptr::NonNull::new_unchecked(ptr as *mut T) },
+            PhantomData,
+        )
     }
 
     /// Compare two `ArcBorrow`s via pointer equality. Will only return
     /// true if they come from the same allocation
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
-        this.0 as *const T == other.0 as *const T
+        this.0 == other.0
     }
 
     /// Temporarily converts |self| into a bonafide Arc and exposes it to the
@@ -986,7 +1042,11 @@ impl<'a, T> ArcBorrow<'a, T> {
         T: 'static,
     {
         // Synthesize transient Arc, which never touches the refcount.
-        let transient = unsafe { mem::ManuallyDrop::new(Arc::from_raw(self.0)) };
+        //
+        // VIPER-PATCH(servo-arc-provenance): built from the raw pointer, which
+        // keeps the allocation's provenance, so the callback may clone it or
+        // mark it leaked (both write the refcount).
+        let transient = unsafe { mem::ManuallyDrop::new(Arc::from_raw(self.0.as_ptr())) };
 
         // Expose the transient Arc to the callback, which may clone it if it wants.
         let result = f(&transient);
@@ -999,7 +1059,9 @@ impl<'a, T> ArcBorrow<'a, T> {
     /// self, which is incompatible with the signature of the Deref trait.
     #[inline]
     pub fn get(&self) -> &'a T {
-        self.0
+        // VIPER-PATCH(servo-arc-provenance): the field is a raw pointer now;
+        // it is valid for `'a` by construction.
+        unsafe { &*self.0.as_ptr() }
     }
 }
 
@@ -1008,7 +1070,8 @@ impl<'a, T> Deref for ArcBorrow<'a, T> {
 
     #[inline]
     fn deref(&self) -> &T {
-        self.0
+        // VIPER-PATCH(servo-arc-provenance): see `get`.
+        self.get()
     }
 }
 
@@ -1073,13 +1136,18 @@ impl<A, B> ArcUnion<A, B> {
     /// Returns an enum representing a borrow of either A or B.
     #[inline]
     pub fn borrow(&self) -> ArcUnionBorrow<'_, A, B> {
+        // VIPER-PATCH(servo-arc-provenance): project `data` through the raw
+        // pointer (not `&(*ptr).data`) and clear the tag bit with `map_addr`
+        // (not an integer round trip), so the borrow keeps the provenance of
+        // the whole allocation and `clone`/`drop` may update the refcount
+        // (servo/stylo#299).
         if self.is_first() {
             let ptr = self.p.as_ptr() as *const ArcInner<A>;
-            let borrow = unsafe { ArcBorrow::from_ref(&(*ptr).data) };
+            let borrow = unsafe { ArcBorrow::from_ptr(ptr::addr_of!((*ptr).data)) };
             ArcUnionBorrow::First(borrow)
         } else {
-            let ptr = ((self.p.as_ptr() as usize) & !0x1) as *const ArcInner<B>;
-            let borrow = unsafe { ArcBorrow::from_ref(&(*ptr).data) };
+            let ptr = self.p.as_ptr().map_addr(|a| a & !0x1) as *const ArcInner<B>;
+            let borrow = unsafe { ArcBorrow::from_ptr(ptr::addr_of!((*ptr).data)) };
             ArcUnionBorrow::Second(borrow)
         }
     }
@@ -1093,7 +1161,9 @@ impl<A, B> ArcUnion<A, B> {
 
     /// Creates an `ArcUnion` from an instance of the second type.
     pub fn from_second(other: Arc<B>) -> Self {
-        let union = unsafe { Self::new(((other.ptr() as usize) | 0x1) as *mut _) };
+        // VIPER-PATCH(servo-arc-provenance): set the tag bit with `map_addr`,
+        // which keeps the pointer's provenance; an integer round trip drops it.
+        let union = unsafe { Self::new(other.ptr().map_addr(|a| a | 0x1) as *mut _) };
         mem::forget(other);
         union
     }
@@ -1136,12 +1206,15 @@ impl<A, B> Clone for ArcUnion<A, B> {
 
 impl<A, B> Drop for ArcUnion<A, B> {
     fn drop(&mut self) {
+        // VIPER-PATCH(servo-arc-provenance): rebuild the `Arc` from the
+        // borrow's raw pointer, not from `&*x`, whose provenance would only
+        // cover the data and not the refcount the drop decrements (#299).
         match self.borrow() {
             ArcUnionBorrow::First(x) => unsafe {
-                let _ = Arc::from_raw(&*x);
+                let _ = Arc::from_raw(x.0.as_ptr());
             },
             ArcUnionBorrow::Second(x) => unsafe {
-                let _ = Arc::from_raw(&*x);
+                let _ = Arc::from_raw(x.0.as_ptr());
             },
         }
     }
