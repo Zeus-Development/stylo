@@ -3,7 +3,8 @@
 This branch carries a private patch to `servo_arc` for the Viper project. It
 is **never submitted upstream**: no issue, pull request or comment based on it
 goes to `servo/stylo` or any other Servo repository. It lives only in the
-private fork and is consumed by Viper through a Cargo `[patch]` entry.
+private fork and will be consumed by Viper through a Cargo `[patch]` entry,
+added in a later Viper task.
 
 Every changed spot in `lib.rs` carries a `// VIPER-PATCH(servo-arc-provenance)`
 comment.
@@ -11,7 +12,8 @@ comment.
 ## Base
 
 The patch applies to the exact sources of the published crate
-`servo_arc 0.5.0`, which Viper uses through `selectors 0.41.0` and Stylo 0.22.
+`servo_arc 0.5.0`, which Viper uses through `selectors 0.41.0` (the
+selectors release of Stylo 0.22).
 
 - Crate: `https://static.crates.io/crates/servo_arc/servo_arc-0.5.0.crate`,
   SHA-256 `b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198`
@@ -87,7 +89,11 @@ checks the visible parts.
 and `impl Drop for HeaderSlice` reach the items through a reference to that
 sized struct. Stacked Borrows limits a reference to its type's size, so it
 still reports these accesses, for every thin arc with at least one item, after
-the patch. Tree Borrows accepts them by design. Fixing them for Stacked
+the patch. Miri's message names a zero-size retag (`[0x20..0x20]`) created
+by `addr_of!(self.data)` in `HeaderSlice::data` or `addr_of_mut!(self.data)`
+in `HeaderSlice::data_mut` (`lib.rs:748` and `lib.rs:753`): the pointer taken
+from the reference covers no bytes, so the item access that follows has no
+valid tag. Tree Borrows accepts them by design. Fixing them for Stacked
 Borrows would need a different representation or public signatures
 (the `&self` receiver has no other provenance), so it is out of scope. Run
 code that uses thin arcs under Miri with Tree Borrows.
