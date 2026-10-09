@@ -1171,8 +1171,9 @@ impl<A: fmt::Debug, B: fmt::Debug> fmt::Debug for ArcUnion<A, B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arc, ThinArc};
+    use super::{Arc, ArcBorrow, ArcUnion, ThinArc, ThinArcUnion};
     use std::clone::Clone;
+    use std::mem::size_of;
     use std::ops::Drop;
     use std::sync::atomic;
     use std::sync::atomic::Ordering::{Acquire, SeqCst};
@@ -1222,5 +1223,92 @@ mod tests {
             let _ = x == x;
         }
         assert_eq!(canary.load(Acquire), 1);
+    }
+
+    // VIPER-PATCH(servo-arc-provenance): regression tests for the aliasing
+    // (provenance) bugs tracked upstream as servo/stylo#210 and #299. They are
+    // meant for Miri; servo_arc/PATCHES.md lists the commands for both
+    // aliasing models and which test fails where without the patch.
+
+    /// Refcount updates through `ArcBorrow::clone_arc` and
+    /// `ArcBorrow::with_arc` (servo/stylo#299). Unpatched, the borrow only had
+    /// provenance for the data, so the clone wrote the count without
+    /// permission (Stacked Borrows and Tree Borrows).
+    #[test]
+    fn arc_borrow_clone_arc_and_with_arc() {
+        let a = Arc::new(5u64);
+        let b = a.borrow_arc().clone_arc();
+        assert_eq!(*b, 5);
+        assert!(!a.is_unique());
+        drop(b);
+        let c = a.borrow_arc().with_arc(|arc| arc.clone());
+        assert!(Arc::ptr_eq(&a, &c));
+        drop(c);
+        assert!(a.is_unique());
+    }
+
+    /// `Arc::into_raw` followed by `Arc::from_raw` and a drop. Unpatched,
+    /// `into_raw` went through `&data`, so the drop wrote the count without
+    /// permission (Stacked Borrows and Tree Borrows).
+    #[test]
+    fn arc_into_raw_from_raw() {
+        let a = Arc::new(7u32);
+        let keep = a.clone();
+        let raw = Arc::into_raw(a);
+        let a = unsafe { Arc::from_raw(raw) };
+        assert_eq!(*a, 7);
+        drop(a);
+        assert!(keep.is_unique());
+    }
+
+    /// Clones and drops of both `ArcUnion` variants, the path `selectors`
+    /// takes for selector lists (servo/stylo#299).
+    #[test]
+    fn arc_union_clone_and_drop() {
+        let first = Arc::new(1u64);
+        let second = Arc::new(2u32);
+        let u1 = ArcUnion::<u64, u32>::from_first(first.clone());
+        let u2 = ArcUnion::<u64, u32>::from_second(second.clone());
+        let (c1, c2) = (u1.clone(), u2.clone());
+        assert!(ArcUnion::ptr_eq(&u1, &c1) && ArcUnion::ptr_eq(&u2, &c2));
+        assert_eq!(c1.as_first().map(|x| *x), Some(1));
+        assert_eq!(c2.as_second().map(|x| *x), Some(2));
+        assert!(c2.as_first().is_none() && c1.as_second().is_none());
+        drop((u1, u2, c1, c2));
+        assert!(first.is_unique() && second.is_unique());
+    }
+
+    /// The thin-arc paths `selectors` uses: build with
+    /// `from_header_and_iter` (servo/stylo#210), wrap in a `ThinArcUnion`,
+    /// clone through it and through `ArcBorrow`, read and drop (#299). The
+    /// canary checks the header is dropped exactly once.
+    #[test]
+    fn thin_arc_union_clone_and_drop() {
+        let mut canary = atomic::AtomicUsize::new(0);
+        let header = Canary(&mut canary as *mut atomic::AtomicUsize);
+        let a = ThinArc::from_header_and_iter(header, vec![1u32, 2, 3].into_iter());
+        let b = a.borrow_arc().clone_arc();
+        assert_eq!(b.slice(), &[1, 2, 3]);
+        let union = ThinArcUnion::<Canary, u32, (), u8>::from_first(b);
+        let union_clone = union.clone();
+        assert_eq!(union_clone.as_first().map(|x| x.len()), Some(3));
+        drop((union, union_clone));
+        assert!(a.is_unique());
+        drop(a);
+        assert_eq!(canary.load(Acquire), 1);
+    }
+
+    /// The patch changed the field of `ArcBorrow` from a reference to a
+    /// pointer; its traits must behave as the former derives did: compare
+    /// and print the value, keep `Send`/`Sync` of `&T` and the pointer size.
+    #[test]
+    fn arc_borrow_traits_unchanged() {
+        fn send_sync<T: Send + Sync>(_: &T) {}
+        let (a, b) = (Arc::new(3u8), Arc::new(3u8));
+        let (x, y) = (a.borrow_arc(), b.borrow_arc());
+        assert!(x == y && !ArcBorrow::ptr_eq(&x, &y));
+        assert_eq!(format!("{:?}", x), "ArcBorrow(3)");
+        send_sync(&x);
+        assert_eq!(size_of::<Option<ArcBorrow<'_, u8>>>(), size_of::<usize>());
     }
 }
