@@ -32,7 +32,9 @@ selectors release of Stylo 0.22).
     generated at packaging time and have no counterpart in git.
 
 The branch starts at that commit. Its first commit adds the regression tests
-only; the second commit holds the fix and this file.
+only; the second commit holds the fix and this file; the third clarifies this
+file; the fourth adds the `UniqueArc` coverage tests `unique_thin_arc_mutation`
+and `unique_arc_new_uninit`.
 
 ## Problem
 
@@ -114,7 +116,10 @@ MIRIFLAGS=-Zmiri-tree-borrows cargo +nightly-2026-10-08 miri test -p servo_arc
 
 Run one test per invocation for the before/after comparison, because Miri
 stops at the first undefined behaviour. To see the failures, check out the
-first commit of this branch (tests only, unpatched code). Results on
+first commit of this branch (tests only, unpatched code). The two `UniqueArc`
+tests came later; their unpatched results were measured by adding them to
+that commit. They are coverage tests, not regressions: unpatched, Tree
+Borrows already accepts them. Results on
 `nightly-2026-10-08` (aarch64 macOS):
 
 | Test | Unpatched SB | Unpatched TB | Patched SB | Patched TB |
@@ -124,11 +129,14 @@ first commit of this branch (tests only, unpatched code). Results on
 | `arc_union_clone_and_drop` | UB (#299) | UB (#299) | pass | pass |
 | `thin_arc_union_clone_and_drop` | UB (#210) | UB (#299) | UB (known limit) | pass |
 | `arc_borrow_traits_unchanged` | pass | pass | pass | pass |
+| `unique_thin_arc_mutation` | UB (#210) | pass | UB (known limit) | pass |
+| `unique_arc_new_uninit` | pass | pass | pass | pass |
 | `thin_assert_padding` (upstream) | UB (#210) | pass | UB (known limit) | pass |
 | `slices_and_thin` (upstream) | UB (#210) | pass | UB (known limit) | pass |
 | `empty_thin` (upstream) | pass | pass | pass | pass |
 
-"UB (known limit)" is the Stacked Borrows report at `HeaderSlice::slice` or in
+"UB (known limit)" is the Stacked Borrows report at `HeaderSlice::slice`,
+`HeaderSlice::slice_mut` (through `UniqueArc::data_mut`) or in
 `HeaderSlice`'s `Drop` described above. `cargo test -p servo_arc` passes
 before and after the patch.
 

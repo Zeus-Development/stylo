@@ -1244,7 +1244,7 @@ impl<A: fmt::Debug, B: fmt::Debug> fmt::Debug for ArcUnion<A, B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arc, ArcBorrow, ArcUnion, ThinArc, ThinArcUnion};
+    use super::{Arc, ArcBorrow, ArcUnion, ThinArc, ThinArcUnion, UniqueArc};
     use std::clone::Clone;
     use std::mem::size_of;
     use std::ops::Drop;
@@ -1383,5 +1383,40 @@ mod tests {
         assert_eq!(format!("{:?}", x), "ArcBorrow(3)");
         send_sync(&x);
         assert_eq!(size_of::<Option<ArcBorrow<'_, u8>>>(), size_of::<usize>());
+    }
+
+    /// Builds a thin arc as a `UniqueArc`, mutates its header and items in
+    /// place, shares it, reads it and drops it. `UniqueArc::from_header_and_iter`
+    /// goes through `Arc::from_header_and_iter_alloc`, whose item pointer the
+    /// patch derives from the raw allocation pointer (servo/stylo#210); the
+    /// drop then reads the refcount of the shared `Arc`. `data_mut` reaches the
+    /// items through `HeaderSlice::slice_mut`, so Stacked Borrows reports the
+    /// known limit described in PATCHES.md; Tree Borrows must pass.
+    #[test]
+    fn unique_thin_arc_mutation() {
+        let mut u = UniqueArc::from_header_and_iter(1u32, vec![1u16, 2].into_iter());
+        *u.header_mut() = 9;
+        u.data_mut()[1] = 7;
+        let a = u.shareable();
+        assert_eq!(a.header, 9);
+        assert_eq!(a.slice(), &[1, 7]);
+        assert!(a.is_unique());
+    }
+
+    /// Allocates a sized `UniqueArc` with `new_uninit`, writes the value
+    /// through `DerefMut`, converts it with `assume_init`, shares it and drops
+    /// it. The patch does not change these functions; the test checks that
+    /// the refcount written by `new_uninit` and read by `is_unique` and the
+    /// drop stays reachable under both aliasing models.
+    #[test]
+    fn unique_arc_new_uninit() {
+        let mut u = UniqueArc::<u32>::new_uninit();
+        u.write(11);
+        // SAFETY: the `write` above initialised the value, and `u` is still
+        // the only owner of the allocation.
+        let u = unsafe { UniqueArc::assume_init(u) };
+        let a = u.shareable();
+        assert_eq!(*a, 11);
+        assert!(a.is_unique());
     }
 }
