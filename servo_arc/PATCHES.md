@@ -1,13 +1,15 @@
 # Viper patches to servo_arc
 
-This branch carries a private patch to `servo_arc` for the Viper project. It
-is **never submitted upstream**: no issue, pull request or comment based on it
-goes to `servo/stylo` or any other Servo repository. It lives only in the
-private fork and will be consumed by Viper through a Cargo `[patch]` entry,
-added in a later Viper task.
+This file is the detailed record of Viper's two patches to `servo_arc`,
+`servo-arc-provenance` and `servo-arc-header-slice`. The fork's patch ledger,
+with every patch of every crate, is [`PATCHES.md`](../PATCHES.md) at the
+repository root. Neither patch is **ever submitted upstream**: no issue, pull
+request or comment based on them goes to `servo/stylo` or any other Servo
+repository. Viper consumes this crate through a Cargo `[patch.crates-io]`
+entry pinned to an exact commit of a `viper/*` branch.
 
-Every changed spot in `lib.rs` carries a `// VIPER-PATCH(servo-arc-provenance)`
-comment.
+Every changed spot in `lib.rs` carries a `// VIPER-PATCH(<id>)` comment with
+one of the two ids.
 
 ## Base
 
@@ -31,12 +33,15 @@ selectors release of Stylo 0.22).
   - `Cargo.toml` (normalized by `cargo package`) and `Cargo.lock` are
     generated at packaging time and have no counterpart in git.
 
-The branch starts at that commit. Its first commit adds the regression tests
-only; the second commit holds the fix and this file; the third clarifies this
-file; the fourth adds the `UniqueArc` coverage tests `unique_thin_arc_mutation`
-and `unique_arc_new_uninit`.
+The branch `viper/servo-arc-provenance` starts at that commit. Its first
+commit adds the regression tests only; the second commit holds the
+`servo-arc-provenance` fix and this file; the third clarifies this file; the
+fourth adds the `UniqueArc` coverage tests `unique_thin_arc_mutation` and
+`unique_arc_new_uninit`. The branch `viper/stylo-0.22.0` starts at that
+fourth commit (`7a13cd06`) and adds the `servo-arc-header-slice` commit, with
+its tests, on top.
 
-## Problem
+## Patch `servo-arc-provenance`: the problem
 
 `servo_arc` turns pointers to the data of an `Arc` back into the `Arc` and
 then reads or writes the refcount in front of the data, and it writes the
@@ -58,7 +63,7 @@ ends before them. Miri reports these as undefined behaviour:
   cleared its tag bit through an integer round trip, which drops provenance;
   Miri warns that Tree Borrows does not support it.
 
-## Patch spots
+## Patch `servo-arc-provenance`: spots
 
 The fix follows `std::sync::Arc`: pointers into the allocation are projected
 from the raw allocation pointer (`ptr::addr_of!((*p).field)`, `map_addr`)
@@ -84,21 +89,30 @@ allocation. No public signature or behaviour changes.
 its variance and its auto traits; the test `arc_borrow_traits_unchanged`
 checks the visible parts.
 
-## Known limit: Stacked Borrows and `HeaderSlice`
+## Patch `servo-arc-header-slice`: Stacked Borrows and `HeaderSlice`
 
 `HeaderSlice<H, T>` is a sized struct whose items follow a zero-length array.
-`HeaderSlice::slice(&self)`, `slice_mut(&mut self)`, `UniqueArc::data_mut`
-and `impl Drop for HeaderSlice` reach the items through a reference to that
-sized struct. Stacked Borrows limits a reference to its type's size, so it
-still reports these accesses, for every thin arc with at least one item, after
-the patch. Miri's message names a zero-size retag (`[0x20..0x20]`) created
-by `addr_of!(self.data)` in `HeaderSlice::data` or `addr_of_mut!(self.data)`
-in `HeaderSlice::data_mut` (`lib.rs:748` and `lib.rs:753`): the pointer taken
-from the reference covers no bytes, so the item access that follows has no
-valid tag. Tree Borrows accepts them by design. Fixing them for Stacked
-Borrows would need a different representation or public signatures
-(the `&self` receiver has no other provenance), so it is out of scope. Run
-code that uses thin arcs under Miri with Tree Borrows.
+Upstream, `HeaderSlice::slice(&self)`, `slice_mut(&mut self)`,
+`UniqueArc::data_mut` and `impl Drop for HeaderSlice` reach the items through
+a reference to that sized struct. Stacked Borrows limits a reference to its
+type's size, so after `servo-arc-provenance` it still reported these
+accesses for every thin arc with at least one item: a zero-size retag
+(`[0x20..0x20]`) created by `addr_of!(self.data)` in `HeaderSlice::data` or
+`addr_of_mut!(self.data)` in `HeaderSlice::data_mut`, after which the item
+access has no valid tag. Tree Borrows accepts them by design. The `&self`
+receiver carries no other provenance, so the fix stores one.
+
+| Spot | Change |
+| --- | --- |
+| `HeaderSlice` (struct) | The private field `len: usize` becomes `end: NonNull<u8>`, one past the last item, with the provenance of the whole allocation. Same size and alignment as `usize`, so the struct's size and alignment are unchanged (test `header_slice_layout_unchanged`). A `u8` pointer, so the auto traits that depend on `T` stay those of `[T; 0]`. |
+| `Send`, `Sync` for `HeaderSlice` | `unsafe impl` with exactly the former auto-trait conditions (`H: Send, T: Send`; `H: Sync, T: Sync`), because `NonNull` has neither. |
+| `HeaderSlice::data`, `data_mut` | The address of `data` with the provenance of `end` (`with_addr`), not that of `self`. `slice`, `slice_mut`, `UniqueArc::data_mut` and `Drop` use them. |
+| `HeaderSlice::len` | `(end - data) / size_of::<T>()`, from the two addresses. Zero-sized items are refused by the constructor, as upstream. |
+| `Arc::from_header_and_iter_alloc` | Writes `end`, derived from the raw allocation pointer, and starts the item writes at the same pointer. It stays the only constructor (`to_shmem` goes through it too). |
+
+Public signatures, `header`, `Eq`, `PartialEq` and `Debug` are unchanged.
+Gecko's C++ code reads the `len` field, so this layout is servo-mode only;
+one more reason the patch is never offered upstream.
 
 ## Reproducing with Miri
 
@@ -110,38 +124,47 @@ From the repository root:
 cargo +nightly-2026-10-08 miri test -p servo_arc -- --test-threads=1 --exact tests::<name>
 # Tree Borrows
 MIRIFLAGS=-Zmiri-tree-borrows cargo +nightly-2026-10-08 miri test -p servo_arc -- --test-threads=1 --exact tests::<name>
-# All tests under Tree Borrows
+# All tests, under each model
+cargo +nightly-2026-10-08 miri test -p servo_arc
 MIRIFLAGS=-Zmiri-tree-borrows cargo +nightly-2026-10-08 miri test -p servo_arc
 ```
 
 Run one test per invocation for the before/after comparison, because Miri
 stops at the first undefined behaviour. To see the failures, check out the
-first commit of this branch (tests only, unpatched code). The two `UniqueArc`
-tests came later; their unpatched results were measured by adding them to
-that commit. They are coverage tests, not regressions: unpatched, Tree
-Borrows already accepts them. Results on
-`nightly-2026-10-08` (aarch64 macOS):
+first commit of `viper/servo-arc-provenance` (tests only, unpatched code), or
+`7a13cd06` for the state before `servo-arc-header-slice`. Tests added by a
+later commit were measured by adding them to the earlier code. Results on
+`nightly-2026-10-08` (aarch64 macOS); "provenance" is `7a13cd06`, "both" is
+the `servo-arc-header-slice` commit:
 
-| Test | Unpatched SB | Unpatched TB | Patched SB | Patched TB |
-| --- | --- | --- | --- | --- |
-| `arc_borrow_clone_arc_and_with_arc` | UB (#299) | UB (#299) | pass | pass |
-| `arc_into_raw_from_raw` | UB (#299) | UB (#299) | pass | pass |
-| `arc_union_clone_and_drop` | UB (#299) | UB (#299) | pass | pass |
-| `thin_arc_union_clone_and_drop` | UB (#210) | UB (#299) | UB (known limit) | pass |
-| `arc_borrow_traits_unchanged` | pass | pass | pass | pass |
-| `unique_thin_arc_mutation` | UB (#210) | pass | UB (known limit) | pass |
-| `unique_arc_new_uninit` | pass | pass | pass | pass |
-| `thin_assert_padding` (upstream) | UB (#210) | pass | UB (known limit) | pass |
-| `slices_and_thin` (upstream) | UB (#210) | pass | UB (known limit) | pass |
-| `empty_thin` (upstream) | pass | pass | pass | pass |
+| Test | Unpatched SB | Unpatched TB | Provenance SB | Provenance TB | Both SB | Both TB |
+| --- | --- | --- | --- | --- | --- | --- |
+| `arc_borrow_clone_arc_and_with_arc` | UB (#299) | UB (#299) | pass | pass | pass | pass |
+| `arc_into_raw_from_raw` | UB (#299) | UB (#299) | pass | pass | pass | pass |
+| `arc_union_clone_and_drop` | UB (#299) | UB (#299) | pass | pass | pass | pass |
+| `thin_arc_union_clone_and_drop` | UB (#210) | UB (#299) | UB (`HeaderSlice`) | pass | pass | pass |
+| `arc_borrow_traits_unchanged` | pass | pass | pass | pass | pass | pass |
+| `unique_thin_arc_mutation` | UB (#210) | pass | UB (`HeaderSlice`) | pass | pass | pass |
+| `unique_arc_new_uninit` | pass | pass | pass | pass | pass | pass |
+| `header_slice_layout_unchanged` | not run | not run | pass | pass | pass | pass |
+| `header_slice_len_for_item_sizes` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
+| `header_slice_slice_mut_and_data_mut_round_trip` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
+| `header_slice_drops_every_item_once` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
+| `header_slice_refuses_zero_sized_items` | not run | not run | pass | pass | pass | pass |
+| `header_slice_auto_traits_unchanged` | not run | not run | pass | pass | pass | pass |
+| `thin_assert_padding` (upstream) | UB (#210) | pass | UB (`HeaderSlice`) | pass | pass | pass |
+| `slices_and_thin` (upstream) | UB (#210) | pass | UB (`HeaderSlice`) | pass | pass | pass |
+| `empty_thin` (upstream) | pass | pass | pass | pass | pass | pass |
 
-"UB (known limit)" is the Stacked Borrows report at `HeaderSlice::slice`,
+"UB (`HeaderSlice`)" is the Stacked Borrows report at `HeaderSlice::slice`,
 `HeaderSlice::slice_mut` (through `UniqueArc::data_mut`) or in
-`HeaderSlice`'s `Drop` described above. `cargo test -p servo_arc` passes
-before and after the patch.
+`HeaderSlice`'s `Drop` described above. With both patches all 16 tests pass
+`cargo test` and Miri under Stacked Borrows and under Tree Borrows. `cargo
+test -p servo_arc` passes at every commit.
 
 ## Upstream
 
-The upstream issues stay open. When upstream fixes them, drop this patch and
-move Viper back to the published crate; until then rebase it only onto the
-exact commit of the crate version Viper locks, verified as above.
+The upstream issues stay open. When upstream fixes them, retire the patch
+that the fix replaces (the root ledger's rebase procedure); until then rebase
+the patches only onto the exact commit of the crate version Viper locks,
+verified as above.
