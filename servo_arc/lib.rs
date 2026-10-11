@@ -702,12 +702,28 @@ pub struct HeaderSlice<H, T> {
     /// The fixed-sized data.
     pub header: H,
 
-    /// The length of the slice at our end.
-    len: usize,
+    // VIPER-PATCH(servo-arc-header-slice): was `len: usize`. A reference to
+    // this sized struct ends where the items begin, so Stacked Borrows
+    // rejects every item access derived from `&self` or `&mut self`
+    // (servo/stylo#210). `end` points one past the last item and carries the
+    // provenance of the whole allocation (taken from the raw allocation
+    // pointer in `from_header_and_iter_alloc`); the items are reached with
+    // that provenance and the address of `data`. The length is derived from
+    // the two addresses. Same size and alignment as `usize`; a `u8` pointer
+    // so that the auto traits that depend on `T` stay those of `[T; 0]`.
+    // Gecko's C++ code reads `len`, so this layout is servo-mode only.
+    /// One past the last item, with the allocation's provenance.
+    end: ptr::NonNull<u8>,
 
     /// The dynamically-sized data.
     data: [T; 0],
 }
+
+// VIPER-PATCH(servo-arc-header-slice): `NonNull` is neither `Send` nor
+// `Sync`, so these restore exactly the auto-trait conditions the struct had
+// with `len: usize`. `end` only addresses the items this value owns.
+unsafe impl<H: Send, T: Send> Send for HeaderSlice<H, T> {}
+unsafe impl<H: Sync, T: Sync> Sync for HeaderSlice<H, T> {}
 
 impl<H: PartialEq, T: PartialEq> PartialEq for HeaderSlice<H, T> {
     fn eq(&self, other: &Self) -> bool {
@@ -719,7 +735,7 @@ impl<H, T> Drop for HeaderSlice<H, T> {
     fn drop(&mut self) {
         unsafe {
             let mut ptr = self.data_mut();
-            for _ in 0..self.len {
+            for _ in 0..self.len() {
                 std::ptr::drop_in_place(ptr);
                 ptr = ptr.offset(1);
             }
@@ -740,29 +756,38 @@ impl<H, T> HeaderSlice<H, T> {
     /// Returns the dynamically sized slice in this HeaderSlice.
     #[inline(always)]
     pub fn slice(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.data(), self.len) }
+        unsafe { std::slice::from_raw_parts(self.data(), self.len()) }
     }
 
+    // VIPER-PATCH(servo-arc-header-slice): the address of `data`, with the
+    // provenance of `end` instead of that of `self` (see the struct).
     #[inline(always)]
     fn data(&self) -> *const T {
-        std::ptr::addr_of!(self.data) as *const _
+        let start = std::ptr::addr_of!(self.data).addr();
+        self.end.as_ptr().with_addr(start) as *const T
     }
 
+    // VIPER-PATCH(servo-arc-header-slice): as `data`.
     #[inline(always)]
     fn data_mut(&mut self) -> *mut T {
-        std::ptr::addr_of_mut!(self.data) as *mut _
+        let start = std::ptr::addr_of_mut!(self.data).addr();
+        self.end.as_ptr().with_addr(start) as *mut T
     }
 
     /// Returns the dynamically sized slice in this HeaderSlice.
     #[inline(always)]
     pub fn slice_mut(&mut self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(self.data_mut(), self.len) }
+        unsafe { std::slice::from_raw_parts_mut(self.data_mut(), self.len()) }
     }
 
     /// Returns the len of the slice.
+    // VIPER-PATCH(servo-arc-header-slice): derived from the addresses of
+    // `data` and `end`. `from_header_and_iter_alloc` refuses zero-sized
+    // items, so the divisor is never zero; `max(1)` keeps this total.
     #[inline(always)]
     pub fn len(&self) -> usize {
-        self.len
+        let start = std::ptr::addr_of!(self.data).addr();
+        (self.end.addr().get() - start) / size_of::<T>().max(1)
     }
 }
 
@@ -817,14 +842,19 @@ impl<H, T> Arc<HeaderSlice<H, T>> {
             #[cfg(feature = "track_alloc_size")]
             ptr::write(&mut p.as_mut().alloc_size, layout.size());
             ptr::write(&mut p.as_mut().data.header, header);
-            ptr::write(&mut p.as_mut().data.len, num_items);
+            // VIPER-PATCH(servo-arc-header-slice): `end` is derived from the
+            // raw allocation pointer, so it keeps the provenance of the whole
+            // allocation (the item array lies inside it: `layout` above).
+            let start = std::ptr::addr_of_mut!((*p.as_ptr()).data.data) as *mut T;
+            let end = ptr::NonNull::new_unchecked(start.add(num_items).cast::<u8>());
+            ptr::write(std::ptr::addr_of_mut!((*p.as_ptr()).data.end), end);
             if num_items != 0 {
                 // VIPER-PATCH(servo-arc-provenance): derive the item pointer from
                 // the raw allocation pointer, not from `p.as_mut()`. A reference
                 // to the sized `ArcInner` ends at the zero-length `data` array,
                 // so a pointer taken through it may not write the items that
                 // follow (servo/stylo#210).
-                let mut current = std::ptr::addr_of_mut!((*p.as_ptr()).data.data) as *mut T;
+                let mut current = start;
                 for _ in 0..num_items {
                     ptr::write(
                         current,
@@ -1228,7 +1258,7 @@ impl<A: fmt::Debug, B: fmt::Debug> fmt::Debug for ArcUnion<A, B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arc, ArcBorrow, ArcUnion, ThinArc, ThinArcUnion, UniqueArc};
+    use super::{Arc, ArcBorrow, ArcUnion, HeaderSlice, ThinArc, ThinArcUnion, UniqueArc};
     use std::clone::Clone;
     use std::mem::size_of;
     use std::ops::Drop;
@@ -1374,8 +1404,8 @@ mod tests {
     /// goes through `Arc::from_header_and_iter_alloc`, whose item pointer the
     /// patch derives from the raw allocation pointer (servo/stylo#210); the
     /// drop then reads the refcount of the shared `Arc`. `data_mut` reaches the
-    /// items through `HeaderSlice::slice_mut`, so Stacked Borrows reports the
-    /// known limit described in PATCHES.md; Tree Borrows must pass.
+    /// items through `HeaderSlice::slice_mut`; since the
+    /// `servo-arc-header-slice` patch both aliasing models must pass.
     #[test]
     fn unique_thin_arc_mutation() {
         let mut u = UniqueArc::from_header_and_iter(1u32, vec![1u16, 2].into_iter());
@@ -1402,5 +1432,118 @@ mod tests {
         let a = u.shareable();
         assert_eq!(*a, 11);
         assert!(a.is_unique());
+    }
+
+    // VIPER-PATCH(servo-arc-header-slice): tests for the `end` pointer that
+    // replaced `len` (servo/stylo#210 under Stacked Borrows). Meant for Miri
+    // under both aliasing models as well as `cargo test`; PATCHES.md lists
+    // the results.
+
+    /// The base layout: `HeaderSlice` as it was, with `len: usize`.
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct BaseHeaderSlice<H, T> {
+        header: H,
+        len: usize,
+        data: [T; 0],
+    }
+
+    fn same_layout<H, T>() {
+        assert_eq!(
+            size_of::<HeaderSlice<H, T>>(),
+            size_of::<BaseHeaderSlice<H, T>>()
+        );
+        assert_eq!(
+            std::mem::align_of::<HeaderSlice<H, T>>(),
+            std::mem::align_of::<BaseHeaderSlice<H, T>>()
+        );
+    }
+
+    /// The patch keeps the size and alignment of `HeaderSlice` for
+    /// representative headers and items, including the `selectors` header.
+    #[test]
+    fn header_slice_layout_unchanged() {
+        same_layout::<(), u8>();
+        same_layout::<u8, u64>();
+        same_layout::<u32, u16>();
+        same_layout::<(u64, u32), [u8; 3]>();
+        same_layout::<u128, u8>();
+        same_layout::<[u8; 5], u128>();
+    }
+
+    fn len_round_trip<T: Copy + PartialEq + std::fmt::Debug>(item: T) {
+        for n in [0usize, 1, 2, 7] {
+            let a = ThinArc::from_header_and_iter(0u8, std::iter::repeat_n(item, n));
+            assert_eq!(a.len(), n);
+            assert_eq!(a.slice().len(), n);
+            assert!(a.slice().iter().all(|x| *x == item));
+        }
+    }
+
+    /// `len()` is derived from two addresses; it must equal the item count
+    /// for several item sizes and alignments, empty included.
+    #[test]
+    fn header_slice_len_for_item_sizes() {
+        len_round_trip(1u8);
+        len_round_trip(2u16);
+        len_round_trip(3u64);
+        len_round_trip([4u8; 3]);
+        len_round_trip(5u128);
+    }
+
+    /// Writes through `UniqueArc::data_mut` and `HeaderSlice::slice_mut` are
+    /// read back through `slice` after sharing.
+    #[test]
+    fn header_slice_slice_mut_and_data_mut_round_trip() {
+        let mut u = UniqueArc::from_header_and_iter(0u8, vec![0u32; 4].into_iter());
+        for (i, x) in u.data_mut().iter_mut().enumerate() {
+            *x = i as u32 * 10;
+        }
+        let mut a = u.shareable();
+        assert_eq!(a.slice(), &[0, 10, 20, 30]);
+        let inner = Arc::get_mut(&mut a).expect("unique");
+        inner.slice_mut()[3] = 99;
+        assert_eq!(a.slice(), &[0, 10, 20, 99]);
+    }
+
+    /// Every item and the header are dropped exactly once.
+    #[test]
+    fn header_slice_drops_every_item_once() {
+        let mut items = atomic::AtomicUsize::new(0);
+        let mut header = atomic::AtomicUsize::new(0);
+        let p = &mut items as *mut atomic::AtomicUsize;
+        let a = ThinArc::from_header_and_iter(
+            Canary(&mut header as *mut atomic::AtomicUsize),
+            (0..5).map(|_| Canary(p)),
+        );
+        let b = a.clone();
+        drop(a);
+        assert_eq!(items.load(Acquire), 0);
+        drop(b);
+        assert_eq!(items.load(Acquire), 5);
+        assert_eq!(header.load(Acquire), 1);
+    }
+
+    /// Zero-sized items stay refused, as in the base.
+    #[test]
+    #[should_panic(expected = "Need to think about ZST")]
+    fn header_slice_refuses_zero_sized_items() {
+        let _ = ThinArc::from_header_and_iter(0u8, vec![(); 2].into_iter());
+    }
+
+    /// The auto traits stay those of the base: `Send` and `Sync` under the
+    /// same conditions (restored by hand), and unwind safety and `Unpin`.
+    #[test]
+    fn header_slice_auto_traits_unchanged() {
+        fn send_sync<T: ?Sized + Send + Sync>() {}
+        fn unwind_unpin<T: ?Sized + std::panic::UnwindSafe + Unpin>() {}
+        fn ref_unwind<T: ?Sized + std::panic::RefUnwindSafe>() {}
+        send_sync::<HeaderSlice<u32, u64>>();
+        send_sync::<ThinArc<u32, u64>>();
+        unwind_unpin::<HeaderSlice<u32, u64>>();
+        ref_unwind::<HeaderSlice<u32, u64>>();
+        // `Cell` is `UnwindSafe` but not `RefUnwindSafe`: a `NonNull<T>`
+        // field would have made the struct lose `UnwindSafe` here.
+        unwind_unpin::<HeaderSlice<u32, std::cell::Cell<u8>>>();
     }
 }
