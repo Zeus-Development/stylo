@@ -487,14 +487,19 @@ where
                 {
                     return Operation::RejectSkippingChildren;
                 }
-                Operation::from(
-                    *element.local_name()
-                        == ***matching::select_name(
-                            &element,
-                            &local_name.name,
-                            &local_name.lower_name,
-                        ),
-                )
+                // VIPER-PATCH(dom-apis-local-name): match the name through
+                // `Element::has_local_name`, as selector matching does
+                // (`matches_local_name`), instead of comparing
+                // `TElement::local_name` for equality. The fast paths then
+                // agree with the slow path for every element type: Chrome
+                // 154 matches `foreignobject` and `foreignObject` against
+                // SVG's `foreignObject` in an HTML document (Viper's
+                // selector goldens `svg-lower-case-name`,
+                // `svg-upper-case-name`), which Viper's `has_local_name`
+                // implements and the equality test bypassed.
+                Operation::from(element.has_local_name(
+                    &matching::select_name(&element, &local_name.name, &local_name.lower_name).0,
+                ))
             })
         },
         Component::AttributeInNoNamespaceExists {
@@ -799,9 +804,10 @@ where
                 {
                     return Operation::RejectSkippingChildren;
                 }
-                if *element.local_name()
-                    != ***matching::select_name(&element, &local_name.name, &local_name.lower_name)
-                {
+                // VIPER-PATCH(dom-apis-local-name): as above.
+                if !element.has_local_name(
+                    &matching::select_name(&element, &local_name.name, &local_name.lower_name).0,
+                ) {
                     return Operation::Reject;
                 }
                 Operation::from(matching::matches_selector_list(
