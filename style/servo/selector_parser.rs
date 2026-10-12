@@ -608,6 +608,20 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         true
     }
 
+    /// VIPER-PATCH(chrome-attr-s-flag): Chrome match. Chrome 154 refuses the
+    /// Selectors 4 `s` attribute flag (explicitly case-sensitive values) in
+    /// stylesheets as in its DOM selector APIs, so a rule whose selector
+    /// uses it is dropped, and inside a forgiving `:is()` or `:where()` list
+    /// just that selector is (Viper's selector goldens `attr-flag-s`,
+    /// `attr-flag-s-forgiving`; computed-value proof
+    /// `chrome_attr_s_flag_in_stylesheets`). Upstream parses the flag; the
+    /// hook is the `selectors-attr-flag-hook` patch.
+    /// <https://drafts.csswg.org/selectors-4/#attribute-case>
+    #[inline]
+    fn parse_case_sensitive_attribute_flag(&self) -> bool {
+        false
+    }
+
     #[inline]
     fn allow_forgiving_selectors(&self) -> bool {
         !self.for_supports_rule
@@ -1028,4 +1042,26 @@ pub fn extended_filtering(tag: &str, range: &str) -> bool {
         // step 4
         true
     })
+}
+
+// VIPER-PATCH(chrome-attr-s-flag): stylesheets refuse the `s` flag.
+#[cfg(test)]
+mod chrome_attr_s_flag_tests {
+    use super::SelectorParser;
+    use crate::stylesheets::UrlExtraData;
+
+    fn parses(selectors: &str) -> bool {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        SelectorParser::parse_author_origin_no_namespace(selectors, &url).is_ok()
+    }
+
+    #[test]
+    fn chrome_attr_s_flag_refused_in_author_selectors() {
+        assert!(!parses("[a=b s]"));
+        assert!(!parses("[a=b S]"));
+        assert!(parses("[a=b i]"));
+        assert!(parses("[a=b]"));
+        // A forgiving list drops just the refused selector.
+        assert!(parses(":is([a=b s], p)"));
+    }
 }
