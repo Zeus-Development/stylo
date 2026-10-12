@@ -988,6 +988,17 @@ impl FontSize {
                     }
                 },
             };
+        // VIPER-PATCH(chrome-font-size-precision): Chrome match. Chrome keeps
+        // computed font sizes as computed (`font-size: 1.17em` of 16px is
+        // 18.72px, `smaller` of 16px is 13.3333px), while Gecko quantizes
+        // them to 10 bits of precision (18.7188px, 13.3281px), which also
+        // shifts every em length and line height derived from them. Servo
+        // builds keep the exact value; Gecko builds still quantize. Viper's
+        // proofs: `chrome_font_size_precision` and the computed-value goldens
+        // (`ua-structure-font-size`, `cascade-inherit-font-size`).
+        #[cfg(feature = "servo")]
+        let size = NonNegative(size);
+        #[cfg(not(feature = "servo"))]
         let size = NonNegative(Self::quantize_font_size(size));
         computed::FontSize {
             computed_size: size,
