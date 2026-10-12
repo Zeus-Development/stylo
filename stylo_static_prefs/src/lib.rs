@@ -12,7 +12,8 @@ fn test_basic_preferences() {
     set_pref!("layout.unimplemented", true);
     assert!(pref!("layout.unimplemented"));
 
-    assert_eq!(pref!("layout.threads"), -1);
+    // VIPER-PATCH(chrome-prefs): the compiled default is 0 (no thread pool).
+    assert_eq!(pref!("layout.threads"), 0);
     set_pref!("layout.threads", 42);
     assert_eq!(pref!("layout.threads"), 42);
 }
