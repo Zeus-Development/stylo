@@ -319,6 +319,19 @@ pub trait Parser<'i> {
         true
     }
 
+    // VIPER-PATCH(selectors-attr-flag-hook): lets a parser refuse the `s`
+    // attribute flag while parsing, so that `[a=b s]` is a parse error of
+    // that one selector and a forgiving list (`:is()`, `:where()`) drops just
+    // that item. Selectors 4 defines the flag
+    // (https://drafts.csswg.org/selectors-4/#attribute-case); Chrome 154
+    // rejects it (measured on Viper's selector goldens), so Viper's DOM
+    // selector APIs refuse it. Upstream has no such hook: Gecko and Servo
+    // accept the flag.
+    /// Whether to parse the `s` (explicitly case-sensitive) attribute flag.
+    fn parse_case_sensitive_attribute_flag(&self) -> bool {
+        true
+    }
+
     /// This function can return an "Err" pseudo-element in order to support CSS2.1
     /// pseudo-elements.
     fn parse_non_ts_pseudo_class(
@@ -3134,7 +3147,10 @@ where
         Err(e) => return Err(e.into()),
     };
 
-    let attribute_flags = parse_attribute_flags(input)?;
+    // VIPER-PATCH(selectors-attr-flag-hook): the parser decides whether `s`
+    // is a valid flag.
+    let attribute_flags =
+        parse_attribute_flags(input, parser.parse_case_sensitive_attribute_flag())?;
     let value = value.as_ref().into();
     let local_name_lower: Impl::LocalName;
     let local_name_is_ascii_lowercase;
@@ -3266,7 +3282,13 @@ impl AttributeFlags {
     }
 }
 
-fn parse_attribute_flags(input: &mut CssParser) -> Result<AttributeFlags, BasicParseError> {
+// VIPER-PATCH(selectors-attr-flag-hook): `allow_case_sensitive` is the
+// parser's `parse_case_sensitive_attribute_flag`; when false, `s` is an
+// unexpected token like any unknown flag.
+fn parse_attribute_flags(
+    input: &mut CssParser,
+    allow_case_sensitive: bool,
+) -> Result<AttributeFlags, BasicParseError> {
     let token = match input.next() {
         Ok(t) => t,
         Err(..) => {
@@ -3284,7 +3306,7 @@ fn parse_attribute_flags(input: &mut CssParser) -> Result<AttributeFlags, BasicP
     Ok(match_ignore_ascii_case! {
         ident,
         "i" => AttributeFlags::AsciiCaseInsensitive,
-        "s" => AttributeFlags::CaseSensitive,
+        "s" if allow_case_sensitive => AttributeFlags::CaseSensitive,
         _ => return Err(BasicParseError::unexpected_token()),
     })
 }
@@ -3881,13 +3903,15 @@ pub mod tests {
     pub struct DummyParser {
         default_ns: Option<DummyAtom>,
         ns_prefixes: HashMap<DummyAtom, DummyAtom>,
+        // VIPER-PATCH(selectors-attr-flag-hook): refuse the `s` flag.
+        refuse_case_sensitive_flag: bool,
     }
 
     impl DummyParser {
         fn default_with_namespace(default_ns: DummyAtom) -> DummyParser {
             DummyParser {
                 default_ns: Some(default_ns),
-                ns_prefixes: Default::default(),
+                ..Default::default()
             }
         }
     }
@@ -3987,6 +4011,11 @@ pub mod tests {
 
         fn parse_host(&self) -> bool {
             true
+        }
+
+        // VIPER-PATCH(selectors-attr-flag-hook): the test parser's switch.
+        fn parse_case_sensitive_attribute_flag(&self) -> bool {
+            !self.refuse_case_sensitive_flag
         }
 
         fn parse_non_ts_pseudo_class(
@@ -4911,5 +4940,54 @@ pub mod tests {
         let mut test_visitor = TestVisitor { seen: vec![] };
         parse("::before:hover").unwrap().slice()[0].visit(&mut test_visitor);
         assert!(test_visitor.seen.contains(&":hover".into()));
+    }
+
+    // VIPER-PATCH(selectors-attr-flag-hook): the hook's tests.
+    fn refusing_s() -> DummyParser {
+        DummyParser {
+            refuse_case_sensitive_flag: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn attr_flag_hook_default_accepts_s() {
+        assert!(parse_expected("[a=b s]", Some("[a=\"b\" s]")).is_ok());
+        assert!(parse_expected("[a=b i]", Some("[a=\"b\" i]")).is_ok());
+    }
+
+    #[test]
+    fn attr_flag_hook_refuses_s_while_parsing() {
+        let parser = refusing_s();
+        for input in [
+            "[a=b s]",
+            "[a=b S]",
+            "[|a=b s]",
+            "[*|a~=b s]",
+            "p [a='b' s]",
+        ] {
+            assert!(parse_ns(input, &parser).is_err(), "{input}");
+        }
+        assert!(parse_ns_expected("[a=b i]", &parser, Some("[a=\"b\" i]")).is_ok());
+        assert!(parse_ns_expected("[a=b]", &parser, Some("[a=\"b\"]")).is_ok());
+    }
+
+    #[test]
+    fn attr_flag_hook_lets_forgiving_lists_drop_the_item() {
+        let parser = refusing_s();
+        // The item is kept only as an invalid component, which serializes
+        // as written and matches nothing; parsing succeeds.
+        let list = parse_ns(":is([a=b s], p)", &parser).unwrap();
+        let Component::Is(inner) = list.slice()[0].iter_raw_match_order().next().unwrap() else {
+            panic!("expected :is()");
+        };
+        assert!(matches!(
+            inner.slice()[0].iter().next(),
+            Some(Component::Invalid(..))
+        ));
+        assert!(parse_ns(":where([a=b s])", &parser).is_ok());
+        // Not forgiving: :not() and the top-level list fail as a whole.
+        assert!(parse_ns(":not([a=b s], p)", &parser).is_err());
+        assert!(parse_ns("[a=b s], p", &parser).is_err());
     }
 }
