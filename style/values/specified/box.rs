@@ -2637,6 +2637,8 @@ pub enum BoxPack {
 pub enum DirectionProperty {
     Ltr,
     Rtl,
+}
+
 // VIPER-PATCH(chrome-display-ruby): `ruby` and `ruby-text` parse and
 // serialize in servo builds; the other internal ruby values do not.
 #[cfg(all(test, feature = "servo"))]
