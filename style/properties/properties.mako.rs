@@ -8,7 +8,7 @@
 <% from itertools import groupby %>
 <% from data import PropertyRestrictions, to_camel_case, RULE_VALUES, SYSTEM_FONT_LONGHANDS, PRIORITARY_PROPERTIES, PRIORITARY_PROPERTY_DEPENDENCIES %>
 
-use servo_arc::{Arc, UniqueArc};
+use servo_arc::{Arc, ArcBorrow, UniqueArc};
 use std::{ops, ptr, fmt, mem};
 
 #[cfg(feature = "servo")] use euclid::SideOffsets2D;
@@ -2017,6 +2017,15 @@ impl ComputedValuesInner {
             &self.${style_struct.ident}
         }
 
+        /// Borrow the ${style_struct.name} struct's `Arc`, keeping the
+        /// provenance of its allocation.
+        // VIPER-PATCH(style-struct-arc-borrow): `StyleBuilder` keeps these
+        // borrows and turns them back into `Arc`s in `StyleStructRef::build`.
+        #[inline]
+        pub fn borrow_${style_struct.name_lower}(&self) -> ArcBorrow<'_, style_structs::${style_struct.name}> {
+            self.${style_struct.ident}.borrow_arc()
+        }
+
         /// Get a mutable reference to the ${style_struct.name} struct.
         #[inline]
         pub fn mutate_${style_struct.name_lower}(&mut self) -> &mut style_structs::${style_struct.name} {
@@ -2134,7 +2143,14 @@ impl ComputedValuesInner {
 /// A reference to a style struct of the parent, or our own style struct.
 pub enum StyleStructRef<'a, T: 'static> {
     /// A borrowed struct from the parent, for example, for inheriting style.
-    Borrowed(&'a T),
+    // VIPER-PATCH(style-struct-arc-borrow): was `&'a T`. `build` turned that
+    // reference back into an `Arc` with `Arc::from_raw_addrefed`, but a
+    // reference to the struct only grants access to the struct, not to the
+    // refcount in front of it, so the refcount write is undefined behaviour
+    // under both of Miri's aliasing models (Stacked Borrows and Tree
+    // Borrows). An `ArcBorrow` taken with `Arc::borrow_arc` keeps the
+    // provenance of the whole allocation (servo_arc's servo-arc-provenance).
+    Borrowed(ArcBorrow<'a, T>),
     /// An owned struct, that we've already mutated.
     Owned(UniqueArc<T>),
     /// Temporarily vacated, will panic if accessed
@@ -2149,7 +2165,8 @@ where
     /// borrowed value, or returning the owned one.
     pub fn mutate(&mut self) -> &mut T {
         if let StyleStructRef::Borrowed(v) = *self {
-            *self = StyleStructRef::Owned(UniqueArc::new(v.clone()));
+            // VIPER-PATCH(style-struct-arc-borrow): clone the struct, not the borrow.
+            *self = StyleStructRef::Owned(UniqueArc::new(v.get().clone()));
         }
 
         match *self {
@@ -2169,7 +2186,8 @@ where
         match *self {
             StyleStructRef::Owned(..) => false,
             StyleStructRef::Borrowed(s) => {
-                std::ptr::eq(s, struct_to_copy_from)
+                // VIPER-PATCH(style-struct-arc-borrow): compare the struct's address.
+                std::ptr::eq(s.get(), struct_to_copy_from)
             }
             StyleStructRef::Vacated => panic!("Accessed vacated style struct")
         }
@@ -2186,7 +2204,8 @@ where
 
         match inner {
             StyleStructRef::Owned(arc) => arc,
-            StyleStructRef::Borrowed(s) => UniqueArc::new(s.clone()),
+            // VIPER-PATCH(style-struct-arc-borrow): clone the struct, not the borrow.
+            StyleStructRef::Borrowed(s) => UniqueArc::new(s.get().clone()),
             StyleStructRef::Vacated => panic!("Accessed vacated style struct"),
         }
     }
@@ -2212,8 +2231,9 @@ where
     pub fn build(self) -> Arc<T> {
         match self {
             StyleStructRef::Owned(v) => v.shareable(),
-            // SAFETY: We know all style structs are arc-allocated.
-            StyleStructRef::Borrowed(v) => unsafe { Arc::from_raw_addrefed(v) },
+            // VIPER-PATCH(style-struct-arc-borrow): the borrow keeps the
+            // allocation's provenance, so no unsafe code is needed here.
+            StyleStructRef::Borrowed(v) => v.clone_arc(),
             StyleStructRef::Vacated => panic!("Accessed vacated style struct")
         }
     }
@@ -2225,7 +2245,8 @@ impl<'a, T: 'a> ops::Deref for StyleStructRef<'a, T> {
     fn deref(&self) -> &T {
         match *self {
             StyleStructRef::Owned(ref v) => v,
-            StyleStructRef::Borrowed(v) => v,
+            // VIPER-PATCH(style-struct-arc-borrow): `get` keeps the borrow's lifetime.
+            StyleStructRef::Borrowed(v) => v.get(),
             StyleStructRef::Vacated => panic!("Accessed vacated style struct")
         }
     }
@@ -2342,9 +2363,9 @@ impl<'a> StyleBuilder<'a> {
             visited_style: None,
             % for style_struct in data.active_style_structs():
             % if style_struct.inherited:
-            ${style_struct.ident}: StyleStructRef::Borrowed(inherited_style.get_${style_struct.name_lower}()),
+            ${style_struct.ident}: StyleStructRef::Borrowed(inherited_style.borrow_${style_struct.name_lower}()),
             % else:
-            ${style_struct.ident}: StyleStructRef::Borrowed(reset_style.get_${style_struct.name_lower}()),
+            ${style_struct.ident}: StyleStructRef::Borrowed(reset_style.borrow_${style_struct.name_lower}()),
             % endif
             % endfor
         }
@@ -2388,7 +2409,7 @@ impl<'a> StyleBuilder<'a> {
             visited_style: None,
             % for style_struct in data.active_style_structs():
             ${style_struct.ident}: StyleStructRef::Borrowed(
-                style_to_derive_from.get_${style_struct.name_lower}()
+                style_to_derive_from.borrow_${style_struct.name_lower}()
             ),
             % endfor
         }
@@ -2399,7 +2420,7 @@ impl<'a> StyleBuilder<'a> {
         % for style_struct in data.active_style_structs():
         % if not style_struct.inherited:
         self.${style_struct.ident} =
-            StyleStructRef::Borrowed(style.get_${style_struct.name_lower}());
+            StyleStructRef::Borrowed(style.borrow_${style_struct.name_lower}());
         % endif
         % endfor
     }
@@ -2556,7 +2577,7 @@ impl<'a> StyleBuilder<'a> {
         /// Reset the current `${style_struct.name}` style to its default value.
         pub fn reset_${style_struct.name_lower}_struct(&mut self) {
             self.${style_struct.ident} =
-                StyleStructRef::Borrowed(self.reset_style.get_${style_struct.name_lower}());
+                StyleStructRef::Borrowed(self.reset_style.borrow_${style_struct.name_lower}());
         }
     % endfor
     <% del style_struct %>
