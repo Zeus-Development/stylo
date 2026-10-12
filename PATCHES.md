@@ -64,9 +64,10 @@ the other nine on 2026-10-12, when Stylo itself entered Viper's graph:
 Every `.cargo_vcs_info.json` names commit `34d25f741…`. In every crate the
 only other files are generated at packaging time and have no counterpart in
 git: the normalized `Cargo.toml`, `Cargo.lock` and `.cargo_vcs_info.json`.
-Only `servo_arc` (`servo-arc-*`) and `selectors` (`selectors-attr-flag-hook`)
-are patched on this branch; the other nine directories equal the base
-commit's.
+`servo_arc` (`servo-arc-*`), `selectors` (`selectors-attr-flag-hook`) and,
+since Viper's V10a part 3a, `stylo` (`element-data-checked`,
+`dom-apis-local-name`) are patched on this branch; the other eight
+directories equal the base commit's.
 
 ## Ledger
 
@@ -74,7 +75,9 @@ commit's.
 | --- | --- | --- | --- | --- | --- | --- |
 | `servo-arc-provenance` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: refcount access and thin-arc construction without the allocation's provenance (servo/stylo#299, #210); undefined behaviour under both of Miri's aliasing models | `miri` | Never offered (owner decision) | Viper PR #21 (V5b-SERVO-ARC), tests in #22 | 90 / 124 |
 | `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | Viper PR #43 (V10a part 1) | 13 / 137 |
-| `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper V10a part 2 | 25 / 57 |
+| `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper PR #47 (V10a part 2) | 25 / 57 |
+| `element-data-checked` | `stylo`: `data.rs` | Soundness: `ElementDataWrapper::borrow` and `borrow_mut` are safe functions that hand out `&ElementData` and `&mut ElementData` from an `UnsafeCell`, and upstream checks the borrow flag only under `debug_assertions`, so a release build lets safe code alias `&mut`; the flag is now checked in every build, and `try_borrow`/`try_borrow_mut` report a conflict | `viper-style::api fork_patches::element_data_checked_try_borrow_mut_refuses_a_second_borrow` | Candidate; draft to the owner first | Viper V10a part 3a | 47 / 23 |
+| `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -152,6 +155,57 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Upstream.** Generic (it changes no default), so a candidate; a draft goes
   to the Viper owner first, and nothing is sent without the owner's
   go-ahead.
+
+## Patch `element-data-checked`
+
+- **Problem.** `ElementDataWrapper` holds Stylo's per-element data in an
+  `UnsafeCell`. Its `borrow` and `borrow_mut` are safe functions returning
+  `&ElementData` and `&mut ElementData`; the `AtomicRefCell` flag that
+  guards them exists only under `debug_assertions`. In a release build two
+  `borrow_mut` calls on one wrapper alias `&mut` from safe code, which is
+  undefined behaviour.
+- **Change.** The flag and the guards in `ElementDataRef` and
+  `ElementDataMut` exist in every build: a conflicting borrow panics, as
+  `AtomicRefCell` does, and the new `try_borrow` and `try_borrow_mut`
+  return `None` instead. One word per wrapper and an atomic operation per
+  borrow in release builds. Viper's side tables use `try_borrow` and
+  `try_borrow_mut` only, so a conflict never panics there.
+- **Spots.** `style/data.rs`: the import, the `refcell` field, the guards
+  of `ElementDataRef` and `ElementDataMut`, `borrow`, `borrow_mut`, the new
+  `try_borrow` and `try_borrow_mut`, and the test module.
+- **Fork tests.** `element_data_checked_try_borrow_mut_refuses_a_second_borrow`
+  and `element_data_checked_borrow_mut_panics_on_a_second_borrow`, in debug
+  and release builds; all 10 `stylo` library tests pass.
+- **Commands.** `cargo test -p stylo --lib` and
+  `cargo test --release -p stylo --lib element_data`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `dom-apis-local-name`
+
+- **Problem.** `style::dom_apis::query_selector` has fast paths for a
+  selector that is a lone type selector and for a type selector in the
+  rightmost compound. Both compared `TElement::local_name()` with the
+  selector's name for equality, while selector matching itself
+  (`matches_local_name`) asks `Element::has_local_name`. An embedder whose
+  `has_local_name` is not plain equality got different results from the
+  fast and the slow paths. Viper's compares the names of non-HTML elements
+  ASCII case-insensitively, as Chrome 154 does in HTML documents
+  (`foreignobject` and `foreignObject` both match SVG's `foreignObject`),
+  so its selector goldens `svg-lower-case-name` and `svg-upper-case-name`
+  failed through the fast path.
+- **Change.** Both spots call `has_local_name` with the name
+  `select_name` picks, as `matches_local_name` does. For an embedder whose
+  `has_local_name` is equality (Gecko, Servo) nothing changes.
+- **Spots.** `style/dom_apis.rs`: `query_selector_single_query`
+  (`Component::LocalName`) and `query_selector_fast`
+  (`SimpleFilter::LocalName`).
+- **Fork tests.** None in the fork: exercising `dom_apis` needs a
+  `TElement` implementation, which the fork does not have. The Viper proof
+  covers it: the named test above and the whole selector golden suite run
+  through `dom_apis`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Rebase procedure (fork side)
 
