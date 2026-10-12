@@ -20,7 +20,8 @@ use servo_arc::Arc;
 use std::ops::{Deref, DerefMut};
 use std::{fmt, mem};
 
-#[cfg(debug_assertions)]
+// VIPER-PATCH(element-data-checked): the borrow flag below is checked in
+// every build, not only with debug assertions.
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 
 bitflags! {
@@ -322,11 +323,20 @@ pub struct ElementData {
 }
 
 /// A struct that wraps ElementData, giving it the ability of doing thread-safety checks.
+///
+/// VIPER-PATCH(element-data-checked): soundness. `borrow` and `borrow_mut`
+/// are safe functions that hand out `&ElementData` and `&mut ElementData`
+/// from an `UnsafeCell`. Upstream checks the borrow flag only under
+/// `debug_assertions`, so in a release build two `borrow_mut` calls on the
+/// same wrapper alias a `&mut` from safe code, which is undefined behaviour.
+/// The flag is now checked in every build: a conflicting borrow panics, as
+/// `AtomicRefCell` does, and `try_borrow`/`try_borrow_mut` report it
+/// instead. The cost is one word per wrapper and an atomic operation per
+/// borrow in release builds.
 #[derive(Debug, Default)]
 pub struct ElementDataWrapper {
     inner: std::cell::UnsafeCell<ElementData>,
-    /// Implements optional (debug_assertions-only) thread-safety checking.
-    #[cfg(debug_assertions)]
+    /// Implements the thread-safety checking (VIPER-PATCH(element-data-checked)).
     refcell: AtomicRefCell<()>,
 }
 
@@ -334,7 +344,7 @@ pub struct ElementDataWrapper {
 #[derive(Debug)]
 pub struct ElementDataMut<'a> {
     v: &'a mut ElementData,
-    #[cfg(debug_assertions)]
+    // VIPER-PATCH(element-data-checked): held in every build.
     _borrow: AtomicRefMut<'a, ()>,
 }
 
@@ -342,33 +352,61 @@ pub struct ElementDataMut<'a> {
 #[derive(Debug)]
 pub struct ElementDataRef<'a> {
     v: &'a ElementData,
-    #[cfg(debug_assertions)]
+    // VIPER-PATCH(element-data-checked): held in every build.
     _borrow: AtomicRef<'a, ()>,
 }
 
 impl ElementDataWrapper {
     /// Gets a non-exclusive reference to this ElementData.
+    ///
+    /// Panics while an exclusive reference exists
+    /// (VIPER-PATCH(element-data-checked)).
     #[inline(always)]
     pub fn borrow(&self) -> ElementDataRef<'_> {
-        #[cfg(debug_assertions)]
         let borrow = self.refcell.borrow();
         ElementDataRef {
             v: unsafe { &*self.inner.get() },
-            #[cfg(debug_assertions)]
             _borrow: borrow,
         }
     }
 
     /// Gets an exclusive reference to this ElementData.
+    ///
+    /// Panics while any other reference exists
+    /// (VIPER-PATCH(element-data-checked)).
     #[inline(always)]
     pub fn borrow_mut(&self) -> ElementDataMut<'_> {
-        #[cfg(debug_assertions)]
         let borrow = self.refcell.borrow_mut();
         ElementDataMut {
             v: unsafe { &mut *self.inner.get() },
-            #[cfg(debug_assertions)]
             _borrow: borrow,
         }
+    }
+
+    /// A non-exclusive reference, or `None` while an exclusive one exists
+    /// (VIPER-PATCH(element-data-checked)).
+    #[inline]
+    pub fn try_borrow(&self) -> Option<ElementDataRef<'_>> {
+        let borrow = self.refcell.try_borrow().ok()?;
+        // SAFETY: the shared borrow flag is held for the reference's
+        // lifetime, so no exclusive reference exists meanwhile.
+        Some(ElementDataRef {
+            v: unsafe { &*self.inner.get() },
+            _borrow: borrow,
+        })
+    }
+
+    /// An exclusive reference, or `None` while any other reference exists
+    /// (VIPER-PATCH(element-data-checked)).
+    #[inline]
+    pub fn try_borrow_mut(&self) -> Option<ElementDataMut<'_>> {
+        let borrow = self.refcell.try_borrow_mut().ok()?;
+        // SAFETY: the exclusive borrow flag is held for the reference's
+        // lifetime, so no other reference exists meanwhile.
+        Some(ElementDataMut {
+            v: unsafe { &mut *self.inner.get() },
+            _borrow: borrow,
+        })
     }
 }
 
@@ -711,5 +749,33 @@ impl ElementData {
         // We may measure more fields in the future if DMD says it's worth it.
 
         n
+    }
+}
+
+// VIPER-PATCH(element-data-checked): the borrow flag holds in every build.
+#[cfg(test)]
+mod element_data_checked_tests {
+    use super::ElementDataWrapper;
+
+    #[test]
+    fn element_data_checked_try_borrow_mut_refuses_a_second_borrow() {
+        let data = ElementDataWrapper::default();
+        let first = data.try_borrow_mut();
+        assert!(first.is_some());
+        assert!(data.try_borrow_mut().is_none());
+        assert!(data.try_borrow().is_none());
+        drop(first);
+        let shared = data.try_borrow();
+        assert!(shared.is_some());
+        assert!(data.try_borrow().is_some());
+        assert!(data.try_borrow_mut().is_none());
+    }
+
+    #[test]
+    #[should_panic]
+    fn element_data_checked_borrow_mut_panics_on_a_second_borrow() {
+        let data = ElementDataWrapper::default();
+        let _first = data.borrow_mut();
+        let _second = data.borrow_mut();
     }
 }
