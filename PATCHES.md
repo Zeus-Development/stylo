@@ -67,8 +67,12 @@ git: the normalized `Cargo.toml`, `Cargo.lock` and `.cargo_vcs_info.json`.
 `servo_arc` (`servo-arc-*`), `selectors` (`selectors-attr-flag-hook`),
 since Viper's V10a part 3a `stylo` (`element-data-checked`,
 `dom-apis-local-name`, and since part 3b `chrome-attr-s-flag`) and, since
-part 3b, `stylo_static_prefs` (`chrome-prefs`) are patched on this branch;
-the other seven directories equal the base commit's.
+part 3b, `stylo_static_prefs` (`chrome-prefs`) are patched on this branch,
+and since part 4 `stylo_traits` (`owned-slice-into-raw`); Viper's V10b
+part 1 adds `style-struct-arc-borrow`, `stylesheet-contents-arc`,
+`rule-tree-raw-box` and `thread-cache-miri-root` to `stylo` and
+`has-subtree-iterative` to `selectors`.
+The other six directories equal the base commit's.
 
 ## Ledger
 
@@ -84,11 +88,18 @@ the other seven directories equal the base commit's.
 | `chrome-font-size-precision` | `stylo`: `values/specified/font.rs` | Chrome match: computed font sizes stay exact in servo builds (Chrome 154: `1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px); upstream quantizes them to 10 bits of precision, as Gecko does (18.7188px, 13.3281px), which also shifts the em lengths and line heights derived from them (Viper's computed-value goldens `ua-structure-font-size`, `cascade-inherit-font-size`); Gecko builds still quantize | `viper-style::cascade fork_patches::chrome_font_size_precision`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 11 / 0 |
 | `chrome-display-ruby` | `stylo`: `values/specified/box.rs` | Chrome match: servo builds parse and report `display: ruby` and `ruby-text` (Chrome 154 gives them to `ruby` and `rt` and reports them; Viper's golden `ua-text-display`), and a blockified ruby serializes as `block ruby`; upstream has them in Gecko builds only. The other internal ruby values, which Chrome refuses, and the Gecko ruby style adjustments stay Gecko-only | `viper-style::cascade fork_patches::chrome_display_ruby`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 19 / 43 |
 | `owned-slice-into-raw` | `stylo_traits`: `owned_slice.rs` | Soundness: `From<Box<[T]>> for OwnedSlice` took the pointer with `as_mut_ptr()` and then moved the box into `mem::forget`, which under Stacked Borrows invalidates the pointer, so every later access was undefined behaviour (Miri reports it for any `calc()` expression Stylo parses, such as the one in Viper's user-agent sheet); `Box::into_raw` hands the allocation over without the move | `miri` (Viper's `viper-style` library tests parse its user-agent sheet under both models) | Candidate; draft to the owner first | Viper V10a part 4 | 12 / 13 |
+| `style-struct-arc-borrow` | `stylo`: `properties/properties.mako.rs` | Soundness: `StyleStructRef::Borrowed` held a `&T` to a style struct, and `StyleStructRef::build` rebuilt its `Arc` with `Arc::from_raw_addrefed`; a reference to the struct grants no access to the refcount in front of it, so the first restyle was undefined behaviour under both of Miri's aliasing models. The builder now keeps `ArcBorrow`s from servo's new `ComputedValuesInner::borrow_<struct>()` (`Arc::borrow_arc`) | `miri` (Viper's `viper-style` library tests restyle documents under both models) | Candidate; draft to the owner first (Gecko's `ComputedValues` would need the same accessor) | Viper V10b part 1 | 34 / 0 |
+| `stylesheet-contents-arc` | `stylo`: `stylesheets/stylesheet.rs`, `stylist.rs` | Soundness: `CascadeData::collect_applicable_media_query_results_into` rebuilt a stylesheet's contents `Arc` with `Arc::from_raw_addrefed` from the `&StylesheetContents` of `StylesheetInDocument::contents`, undefined behaviour under both models whenever a stylist is flushed. `StylesheetInDocument` gains `contents_arc`, which servo's `Stylesheet` and `DocumentStyleSheet` answer with `Arc::borrow_arc`; the provided default keeps upstream's assumption for other implementors | `miri` | Candidate; draft to the owner first | Viper V10b part 1 | 43 / 0 |
+| `rule-tree-raw-box` | `stylo`: `rule_tree/unsafe_box.rs`, `rule_tree/core.rs` | Soundness: the rule tree's `UnsafeBox` wrapped `ManuallyDrop<Box<T>>` and was copied with `ptr::read`, and `RuleNode::push_on_free_list` stored a pointer cast from `&RuleNode` that `swap_free_list_and_gc` later freed with `Box::from_raw`: undefined behaviour under both models. `UnsafeBox` now holds the pointer from `Box::into_raw`, and the free list stores that pointer | `miri` | Candidate; draft to the owner first | Viper V10b part 1 | 46 / 52 |
+| `has-subtree-iterative` | `selectors`: `matching.rs` | Robustness and Chrome match: `matches_relative_selector_subtree`, the `:has()` subtree search, called itself once per tree level, so `:has()` on a document tens of thousands of levels deep overflowed the stack and aborted the process (`html:has(span)` at depth 50,000), where Chrome 154 answers; the walk is now iterative with the same order, selector flags and early return | `viper-style::api deep_trees_are_walked_without_recursion` | Candidate; draft to the owner first | Viper V10b part 1 | 31 / 0 |
+| `thread-cache-miri-root` | `stylo`: `bloom.rs`, `sharing/mod.rs` | Test tooling: Stylo leaks its bloom-filter and style-sharing thread-local caches by design, once per thread that styles, and Miri's leak check reported them whenever a test thread that restyled exited, so a Miri run that restyles needed `-Zmiri-ignore-leaks`, which hides every other leak too. Under `cfg(miri)` both allocations are registered as Miri static roots (`miri_static_root`); builds outside Miri are unchanged | `miri` (Viper's restyling library tests pass Miri's leak check) | Candidate; draft to the owner first | Viper V10b part 1 | 24 / 0 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
-arcs) under Stacked Borrows and under Tree Borrows.
+arcs) and library tests under Stacked Borrows and under Tree Borrows; since
+Viper's V10b part 1 the library tests include two that restyle a document,
+through the stylist, the rule tree and the style builder.
 
 ## Patch `servo-arc-provenance`
 
@@ -319,6 +330,148 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `MIRIFLAGS=-Zmiri-tree-borrows`.
 - **Upstream.** A generic soundness fix: candidate, draft to the owner
   first.
+
+## Patch `style-struct-arc-borrow`
+
+- **Problem.** `StyleBuilder` starts from the parent's (or the default)
+  style structs without cloning them: `StyleStructRef::Borrowed(&'a T)`.
+  `StyleStructRef::build` turned such a reference back into an `Arc` with
+  `Arc::from_raw_addrefed`, which writes the refcount in front of the
+  struct. A pointer derived from a reference to the struct may access the
+  struct only, so Miri reports the first restyle: Stacked Borrows when
+  `Arc::clone` retags outside the reference's range, Tree Borrows when the
+  refcount is written through a frozen tag.
+- **Change.** `Borrowed` holds an `ArcBorrow<'a, T>`, which keeps the
+  provenance of the whole `ArcInner` allocation (`servo-arc-provenance`).
+  Servo's `ComputedValuesInner` gains `borrow_<struct>()`, `Arc::borrow_arc`
+  of the field, and every `Borrowed` is built from it; `build` calls
+  `clone_arc`, so no unsafe code remains there. `mutate`, `take`, `ptr_eq`
+  and `Deref` read the struct through `ArcBorrow::get`.
+- **Spots.** `style/properties/properties.mako.rs`: the import,
+  `borrow_<struct>()` in servo's `ComputedValuesInner`, `StyleStructRef`
+  and its methods, and the five places that build `Borrowed`
+  (`StyleBuilder::new`, `for_derived_style`, `copy_reset_from`,
+  `reset_<struct>_struct`).
+- **Fork tests.** None: a style builder needs a device and computed values,
+  which the fork's tests do not build. All 14 `stylo` library tests pass.
+- **Viper proof.** `miri`: Viper's restyling library tests run under both
+  models in its gate; before this patch (and the two below) Stacked Borrows
+  and Tree Borrows report undefined behaviour there.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** A generic soundness fix: candidate, draft to the owner
+  first. Gecko builds would need `borrow_<struct>()` on Gecko's
+  `ComputedValues`, which the fork does not build.
+
+## Patch `stylesheet-contents-arc`
+
+- **Problem.** `CascadeData::collect_applicable_media_query_results_into`
+  keeps each effective stylesheet's contents alive in the cascade data
+  cache's key: it rebuilt the contents' `Arc` with
+  `Arc::from_raw_addrefed(stylesheet.contents(guard))`. That reference
+  covers the contents only, so the refcount write is undefined behaviour
+  under both models; Miri reports it when Viper's stylist is flushed with
+  its user-agent sheets.
+- **Change.** A provided method `StylesheetInDocument::contents_arc`
+  returns an `ArcBorrow` of the contents. Servo's `Stylesheet` (whose
+  contents are a `Locked<Arc<StylesheetContents>>`) answers with
+  `Arc::borrow_arc`, and `DocumentStyleSheet` forwards to it; the stylist
+  clones that borrow. The default keeps upstream's assumption
+  (`ArcBorrow::from_ref` of `contents`) for implementors whose contents
+  come from elsewhere, such as Gecko's sheets.
+- **Spots.** `style/stylesheets/stylesheet.rs`: the import, the trait
+  method, the two servo implementations; `style/stylist.rs`:
+  `collect_applicable_media_query_results_into`.
+- **Fork tests.** None: the cascade data cache needs a device and a
+  stylist. All 14 `stylo` library tests pass.
+- **Viper proof.** `miri`, as above.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** A generic soundness fix: candidate, draft to the owner
+  first.
+
+## Patch `rule-tree-raw-box`
+
+- **Problem.** The rule tree's nodes live in `UnsafeBox<RuleNode>`, which
+  wrapped a `ManuallyDrop<Box<RuleNode>>` and was copied with `ptr::read`
+  for every strong and weak reference: several live `Box`es of one
+  allocation, each asserting unique access. `RuleNode::push_on_free_list`
+  stored `RuleNode::as_mut_ptr()`, a pointer cast from `&RuleNode`, in the
+  free list, and `RuleTree::swap_free_list_and_gc` later freed those nodes
+  with `Box::from_raw`. Freeing (or writing) through a pointer derived from
+  a shared reference is undefined behaviour: Stacked Borrows reports a
+  `Unique` retag through a `SharedReadOnly` tag when the tree collects or
+  drops its free list, Tree Borrows a write through such a pointer in
+  `RuleNode::drop_without_free_list`.
+- **Change.** `UnsafeBox` holds a `NonNull<T>` from `Box::into_raw`; `clone`
+  copies it, `deref` and `deref_mut` read through it, and `drop` rebuilds
+  the `Box` only to drop it. The new `UnsafeBox::as_mut_ptr` returns that
+  pointer, with the provenance of the whole allocation, and the free list
+  stores it. Size, niche (`Option<StrongRuleNode>` stays one word) and
+  auto traits stay those of `Box<T>` (explicit `Send` and `Sync`).
+- **Spots.** `style/rule_tree/unsafe_box.rs`: the struct, `Send`/`Sync`,
+  `from_box`, `from_raw`, `clone`, the new `as_mut_ptr`, `deref_mut`,
+  `drop`, `Deref`; `style/rule_tree/core.rs`: `push_on_free_list` (two
+  spots) and the test module.
+- **Fork tests.** `rule_tree_raw_box_frees_nodes_through_the_free_list`
+  (nodes on the free list, collected and dropped with the tree; under Miri
+  it fails on both models without the fix and passes both with it) and
+  `rule_tree_raw_box_frees_nodes_after_the_tree` (the path without a free
+  list; sound before and after). All 14 `stylo` library tests pass.
+- **Viper proof.** `miri`, as above.
+- **Commands.** `cargo test -p stylo --lib`;
+  `cargo +nightly miri test -p stylo --lib rule_tree_raw_box` with and
+  without `MIRIFLAGS=-Zmiri-tree-borrows`.
+- **Upstream.** A generic soundness fix: candidate, draft to the owner
+  first.
+
+## Patch `has-subtree-iterative`
+
+- **Problem.** For `:has()` with a descendant (or sibling-subtree)
+  argument, `matches_relative_selector_subtree` searched the subtree below
+  each candidate by calling itself once per tree level. On a document tens
+  of thousands of levels deep, `html:has(span)` overflowed the thread's
+  stack and aborted the process; Chrome 154 answers such queries. The DOM
+  selector APIs' own walks are iterative.
+- **Change.** The same pre-order walk (each element, then its subtree, then
+  its next sibling), the same selector flags and the same early return,
+  with the ancestors whose later siblings remain kept in a
+  `SmallVec<[E; 16]>` instead of call frames. The bloom filter that
+  `RelativeSelectorFilterMap` builds for a second search of one anchor
+  (`add_to_filter`) also recurses per level, but only when the element adds
+  hashes to it: Viper's elements add none (`add_element_unique_hashes`
+  returns `false` at the first child), so it is not patched.
+- **Spots.** `selectors/matching.rs`: `matches_relative_selector_subtree`.
+- **Fork tests.** None: the crate's tests have no `Element` implementation.
+  All 16 `selectors` tests pass.
+- **Viper proof.** `deep_trees_are_walked_without_recursion` (the `api`
+  test binary): `:has()` found and not found on a 50,000-deep tree; it
+  aborts with a stack overflow without the patch.
+- **Commands.** `cargo test -p selectors`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `thread-cache-miri-root`
+
+- **Problem.** `BLOOM_KEY` (`style/bloom.rs`) and `SHARING_CACHE_KEY`
+  (`style/sharing/mod.rs`) are thread-local `&'static` caches made with
+  `Box::leak`: leaked on purpose, once per thread that styles, because
+  thread-local destructors may not run on worker threads and the caches
+  are borrowed for `'static`. Miri's leak check reports the two
+  allocations of every test thread that restyled once that thread exits,
+  so the run fails unless `-Zmiri-ignore-leaks` turns the whole check off.
+- **Change.** Both caches are made by `leak_thread_cache`, which leaks as
+  before and, under `cfg(miri)` only, passes the allocation to Miri's
+  `miri_static_root`, so Miri treats it like memory a static holds. Only
+  these two intended leaks are exempt; every other leak is still reported.
+  Outside Miri the code is the same as upstream's.
+- **Spots.** `style/bloom.rs`: `BLOOM_KEY` and the new
+  `leak_thread_cache`; `style/sharing/mod.rs`: `SHARING_CACHE_KEY`.
+- **Fork tests.** None: the caches are filled by a traversal. All 14
+  `stylo` library tests pass.
+- **Viper proof.** `miri`: Viper's restyling library tests run under both
+  models with Miri's leak check on; without the patch each run fails with
+  4 leaked allocations (two per restyling test thread).
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** A candidate for test tooling; draft to the owner first.
 
 ## Rebase procedure (fork side)
 
