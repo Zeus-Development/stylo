@@ -92,7 +92,7 @@ The other six directories equal the base commit's.
 | `stylesheet-contents-arc` | `stylo`: `stylesheets/stylesheet.rs`, `stylist.rs` | Soundness: `CascadeData::collect_applicable_media_query_results_into` rebuilt a stylesheet's contents `Arc` with `Arc::from_raw_addrefed` from the `&StylesheetContents` of `StylesheetInDocument::contents`, undefined behaviour under both models whenever a stylist is flushed. `StylesheetInDocument` gains `contents_arc`, which servo's `Stylesheet` and `DocumentStyleSheet` answer with `Arc::borrow_arc`; the provided default keeps upstream's assumption for other implementors | `miri` | Candidate; draft to the owner first | Viper V10b part 1 | 43 / 0 |
 | `rule-tree-raw-box` | `stylo`: `rule_tree/unsafe_box.rs`, `rule_tree/core.rs` | Soundness: the rule tree's `UnsafeBox` wrapped `ManuallyDrop<Box<T>>` and was copied with `ptr::read`, and `RuleNode::push_on_free_list` stored a pointer cast from `&RuleNode` that `swap_free_list_and_gc` later freed with `Box::from_raw`: undefined behaviour under both models. `UnsafeBox` now holds the pointer from `Box::into_raw`, and the free list stores that pointer | `miri` | Candidate; draft to the owner first | Viper V10b part 1 | 46 / 52 |
 | `has-subtree-iterative` | `selectors`: `matching.rs` | Robustness and Chrome match: `matches_relative_selector_subtree`, the `:has()` subtree search, called itself once per tree level, so `:has()` on a document tens of thousands of levels deep overflowed the stack and aborted the process (`html:has(span)` at depth 50,000), where Chrome 154 answers; the walk is now iterative with the same order, selector flags and early return | `viper-style::api deep_trees_are_walked_without_recursion` | Candidate; draft to the owner first | Viper V10b part 1 | 31 / 0 |
-| `thread-cache-miri-root` | `stylo`: `bloom.rs`, `sharing/mod.rs` | Test tooling: Stylo leaks its bloom-filter and style-sharing thread-local caches by design, once per thread that styles, and Miri's leak check reported them whenever a test thread that restyled exited, so a Miri run that restyles needed `-Zmiri-ignore-leaks`, which hides every other leak too. Under `cfg(miri)` both allocations are registered as Miri static roots (`miri_static_root`); builds outside Miri are unchanged | `miri` (Viper's restyling library tests pass Miri's leak check) | Candidate; draft to the owner first | Viper V10b part 1 | 24 / 0 |
+| `thread-cache-miri-root` | `stylo`: `bloom.rs`, `sharing/mod.rs` | Test tooling: Stylo leaks its bloom-filter and style-sharing thread-local caches by design, once per thread that styles, and Miri's leak check reported them whenever a test thread that restyled exited, so a Miri run that restyles needed `-Zmiri-ignore-leaks`, which hides every other leak too. Under `cfg(miri)` only, each of the two allocations is registered with Miri as a static root (`miri_static_root`) when it is made: this exempts exactly those two allocations from Miri's leak report and nothing else. What is leaked, and when, is unchanged, and builds outside Miri are upstream's code | `miri` (Viper's restyling library tests pass Miri's leak check) | Candidate; draft to the owner first | Viper V10b part 1 | 24 / 0 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -100,6 +100,17 @@ and inside the test module. The `miri` proof is Viper's gate step `miri`, which 
 arcs) and library tests under Stacked Borrows and under Tree Borrows; since
 Viper's V10b part 1 the library tests include two that restyle a document,
 through the stylist, the rule tree and the style builder.
+
+## Known unpatched sites
+
+Sites with the same fault as a patch above that no Viper path reaches yet.
+Each is recorded in Viper's deferred-cases register with an owner, and
+must be patched (with a fork test or a Viper proof under Miri) before
+anything makes it reachable.
+
+| Site | Fault | Why unreachable now | Viper register entry |
+| --- | --- | --- | --- |
+| `ComputedValues::to_arc` (`style/properties/properties.mako.rs`), called only from `ContainerCondition`'s container lookup (`style/stylesheets/container_rule.rs`) | Rebuilds an `Arc` with `Arc::from_raw_addrefed` from `&self`, a reference that grants no access to the refcount: the fault `style-struct-arc-borrow` and `stylesheet-contents-arc` fix elsewhere, undefined behaviour under both of Miri's aliasing models | Servo builds parse no `@container` rule (`rule_parser.rs` accepts `container` in Gecko builds only), and `container-type` and `container-name` sit behind `layout.container-queries.enabled`, which is `false`; so no container lookup runs | `adr:style-container-to-arc` |
 
 ## Patch `servo-arc-provenance`
 
@@ -460,9 +471,11 @@ Problem, change, every spot, the Miri commands and the before/after results:
   so the run fails unless `-Zmiri-ignore-leaks` turns the whole check off.
 - **Change.** Both caches are made by `leak_thread_cache`, which leaks as
   before and, under `cfg(miri)` only, passes the allocation to Miri's
-  `miri_static_root`, so Miri treats it like memory a static holds. Only
-  these two intended leaks are exempt; every other leak is still reported.
-  Outside Miri the code is the same as upstream's.
+  `miri_static_root`, so Miri treats it like memory a static holds. The
+  exemption covers exactly these two allocations (one of each per thread
+  that styles): every other leak, in Stylo or in Viper, is still reported,
+  and the leak itself is not changed. Outside Miri the code is the same as
+  upstream's.
 - **Spots.** `style/bloom.rs`: `BLOOM_KEY` and the new
   `leak_thread_cache`; `style/sharing/mod.rs`: `SHARING_CACHE_KEY`.
 - **Fork tests.** None: the caches are filled by a traversal. All 14
