@@ -81,6 +81,9 @@ the other seven directories equal the base commit's.
 | `chrome-attr-s-flag` | `stylo`: `servo/selector_parser.rs` | Chrome match: Stylo's servo `SelectorParser` returns `false` from the `selectors-attr-flag-hook` hook, so a stylesheet rule whose selector uses the `s` attribute flag is dropped and a forgiving list drops just that selector, as in Chrome 154 (which refuses the flag in stylesheets as in its DOM APIs); upstream parses the flag | `viper-style::cascade fork_patches::chrome_attr_s_flag_in_stylesheets` (the cascade test binary) | Chrome-specific; not offered | Viper V10a part 3b | 13 / 19 |
 | `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them) | `viper-style::api fork_patches::chrome_prefs_defaults` | Chrome-specific; not offered | Viper V10a part 3b | 17 / 2 |
 | `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
+| `chrome-font-size-precision` | `stylo`: `values/specified/font.rs` | Chrome match: computed font sizes stay exact in servo builds (Chrome 154: `1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px); upstream quantizes them to 10 bits of precision, as Gecko does (18.7188px, 13.3281px), which also shifts the em lengths and line heights derived from them (Viper's computed-value goldens `ua-structure-font-size`, `cascade-inherit-font-size`); Gecko builds still quantize | `viper-style::cascade fork_patches::chrome_font_size_precision`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 11 / 0 |
+| `chrome-display-ruby` | `stylo`: `values/specified/box.rs` | Chrome match: servo builds parse and report `display: ruby` and `ruby-text` (Chrome 154 gives them to `ruby` and `rt` and reports them; Viper's golden `ua-text-display`), and a blockified ruby serializes as `block ruby`; upstream has them in Gecko builds only. The other internal ruby values, which Chrome refuses, and the Gecko ruby style adjustments stay Gecko-only | `viper-style::cascade fork_patches::chrome_display_ruby`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 19 / 43 |
+| `owned-slice-into-raw` | `stylo_traits`: `owned_slice.rs` | Soundness: `From<Box<[T]>> for OwnedSlice` took the pointer with `as_mut_ptr()` and then moved the box into `mem::forget`, which under Stacked Borrows invalidates the pointer, so every later access was undefined behaviour (Miri reports it for any `calc()` expression Stylo parses, such as the one in Viper's user-agent sheet); `Box::into_raw` hands the allocation over without the move | `miri` (Viper's `viper-style` library tests parse its user-agent sheet under both models) | Candidate; draft to the owner first | Viper V10a part 4 | 12 / 13 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -251,6 +254,72 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo_static_prefs`.
 - **Upstream.** Chrome-specific defaults, so not offered.
 
+## Patch `chrome-font-size-precision`
+
+- **Problem.** Chrome 154 keeps a computed font size as computed:
+  `font-size: 1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px
+  and `28.8px` is 28.8px. Stylo's `FontSize::to_computed_value_against`
+  quantized every computed size to 10 bits of precision
+  (`quantize_font_size`, Gecko's behaviour, which limits the number of
+  font instances Gecko creates), giving 18.7188px, 13.3281px and 28.8125px,
+  and shifting every em length and line height derived from them.
+- **Change.** Servo builds keep the exact size; Gecko builds still quantize.
+- **Spots.** `style/values/specified/font.rs`: the end of
+  `to_computed_value_against`.
+- **Fork tests.** None: a computed font size needs a full style context,
+  which the fork's tests do not build. All 12 `stylo` library tests pass.
+- **Viper proofs.** `chrome_font_size_precision` (the cascade test binary)
+  and the computed-value golden suite (headings, `small`, `big`, `sub`,
+  `sup` and the em margins of headings).
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
+
+## Patch `chrome-display-ruby`
+
+- **Problem.** Chrome 154 parses `display: ruby` and `display: ruby-text`,
+  which its user-agent sheet gives `ruby` and `rt` inside a `ruby`, and
+  reports them as computed values. Stylo parsed them, and had their display
+  types, in Gecko builds only, so servo builds dropped the declarations.
+- **Change.** In servo builds too: `DisplayOutside::InternalRuby`,
+  `DisplayInside::Ruby` and `RubyText`, the constants `Display::Ruby` and
+  `Display::RubyText`, ruby's inline default outside type, the keywords
+  `ruby` and `ruby-text`, and the `block ruby` serialization. `ruby-base`,
+  `ruby-base-container` and `ruby-text-container`, which Chrome refuses,
+  and Gecko's ruby style adjustments (`adjust_for_ruby`) stay Gecko-only.
+- **Spots.** `style/values/specified/box.rs`: the two display enums,
+  `default_display_outside`, two constants, `DisplayKeyword::parse`,
+  `Display::to_css` and the test module.
+- **Fork tests.** `chrome_display_ruby_parses_ruby_and_ruby_text`; all 12
+  `stylo` library tests pass.
+- **Viper proofs.** `chrome_display_ruby` (the cascade test binary) and the
+  computed-value goldens `ua-text-display` and `ua-line-height-display`.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
+
+## Patch `owned-slice-into-raw`
+
+- **Problem.** `impl From<Box<[T]>> for OwnedSlice<T>` took the items'
+  pointer with `b.as_mut_ptr()` and then moved `b` into `mem::forget`.
+  Under Stacked Borrows that move retags the box as unique, which
+  invalidates the pointer taken before, so every later access through the
+  `OwnedSlice` is undefined behaviour. Miri reports it whenever Stylo parses
+  a `calc()` expression (`style/values/generics/calc.rs` stores the
+  children of a sum in an `OwnedSlice`); Viper's user-agent sheet has one.
+  Tree Borrows accepts the code.
+- **Change.** `Box::into_raw` hands the allocation over without a move.
+- **Spots.** `style_traits/owned_slice.rs`: `From<Box<[T]>>` and a test
+  module.
+- **Fork tests.** `owned_slice_from_box_reads_and_writes_its_items`, under
+  Miri on both models (it fails under Stacked Borrows without the fix), and
+  `cargo test -p stylo_traits`.
+- **Viper proof.** `miri`: Viper's `viper-style` library tests parse its
+  user-agent sheet under both models.
+- **Commands.** `cargo test -p stylo_traits`;
+  `cargo +nightly miri test -p stylo_traits owned_slice` with and without
+  `MIRIFLAGS=-Zmiri-tree-borrows`.
+- **Upstream.** A generic soundness fix: candidate, draft to the owner
+  first.
+
 ## Rebase procedure (fork side)
 
 Viper's ADR 0017 holds the whole procedure; these are its fork-side steps.
@@ -282,3 +351,4 @@ Viper's ADR 0017 holds the whole procedure; these are its fork-side steps.
 | Date | From → to | Patches carried / retired | Conflicts | Effort (hours) | Reviewer | Viper PR |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-11 | `viper/servo-arc-provenance` (`7a13cd06`) → `viper/stylo-0.22.0` | `servo-arc-provenance` carried by branching at `7a13cd06`, hashes unchanged; none retired | none | 0 | the review of Viper PR #43 | #43 |
+| 2026-10-12 | dry run: `viper/stylo-0.22.0` (`839e3e03`) → upstream `main` `c81cd9c7` (183 commits after `v0.22.0`; no 0.23.0 published), scratch branch `dry-run/stylo-main-2026-10-12` at `c15f00e5`, not pinned | all 10 patches carried; `chrome-prefs` loses its `layout.grid.enabled` line (upstream removed the preference, grid is always on); none retired | 4, resolved by hand: `servo_arc/lib.rs` (`ArcBorrow::ptr_eq`, upstream's clippy change), `selectors/parser.rs` (the test parser: upstream's `parse_non_ts_pseudo_class` now takes `&str`, which Viper's `selectors::Parser` implementation must follow), `style/dom_apis.rs` (`select_name`'s call and result changed), `stylo_static_prefs/preferences.toml` (the grid preference); `style/values/specified/box.rs` merged again by hand after a wrong end-of-file merge. Fork tests: `servo_arc` 17, `selectors` 16, `stylo` 12, `stylo_traits` 1 and `stylo_static_prefs` 1 pass; Miri on `servo_arc` (17 tests) passes both models; Viper was not built against it | 0.5 | the review of Viper V10a part 4 | V10a part 4 |
