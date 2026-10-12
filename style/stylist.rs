@@ -3815,10 +3815,12 @@ impl CascadeData {
         let contents = stylesheet.contents(guard);
         results.push(contents.to_media_list_key());
 
-        // Safety: StyleSheetContents are reference-counted with Arc.
-        contents_list.push(StylesheetContentsPtr(unsafe {
-            Arc::from_raw_addrefed(contents)
-        }));
+        // VIPER-PATCH(stylesheet-contents-arc): clone the borrowed `Arc`,
+        // which keeps the allocation's provenance, instead of rebuilding it
+        // from `contents` with `Arc::from_raw_addrefed`.
+        contents_list.push(StylesheetContentsPtr(
+            stylesheet.contents_arc(guard).clone_arc(),
+        ));
 
         let mut iter = stylesheet
             .contents(guard)

@@ -23,7 +23,7 @@ use cssparser::{Parser, StyleSheetParser};
 #[cfg(feature = "gecko")]
 use malloc_size_of::{MallocSizeOfOps, MallocUnconditionalShallowSizeOf};
 use rustc_hash::FxHashMap;
-use servo_arc::Arc;
+use servo_arc::{Arc, ArcBorrow};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use style_traits::ParsingMode;
@@ -242,6 +242,24 @@ pub trait StylesheetInDocument: ::std::fmt::Debug {
     /// Returns a reference to the contents of the stylesheet.
     fn contents<'a>(&'a self, guard: &'a SharedRwLockReadGuard) -> &'a StylesheetContents;
 
+    /// Borrows the `Arc` that holds the contents of the stylesheet, so that
+    /// the caller may keep the contents alive.
+    // VIPER-PATCH(stylesheet-contents-arc): the stylist rebuilt that `Arc`
+    // from `contents()` with `Arc::from_raw_addrefed`, but a reference to the
+    // contents only grants access to the contents, not to the refcount in
+    // front of them: undefined behaviour under both of Miri's aliasing
+    // models. Servo's sheets override this with `Arc::borrow_arc`, which
+    // keeps the allocation's provenance; the default keeps upstream's
+    // assumption for other implementors (Gecko's sheets come from C++).
+    fn contents_arc<'a>(
+        &'a self,
+        guard: &'a SharedRwLockReadGuard,
+    ) -> ArcBorrow<'a, StylesheetContents> {
+        // Safety: as upstream's stylist assumed, StylesheetContents are
+        // reference-counted with Arc.
+        unsafe { ArcBorrow::from_ref(self.contents(guard)) }
+    }
+
     /// Returns whether the style-sheet applies for the current device.
     fn is_effective_for_device(
         &self,
@@ -278,6 +296,15 @@ impl StylesheetInDocument for Stylesheet {
         self.contents.read_with(guard)
     }
 
+    // VIPER-PATCH(stylesheet-contents-arc): borrow the `Arc` itself.
+    #[inline]
+    fn contents_arc<'a>(
+        &'a self,
+        guard: &'a SharedRwLockReadGuard,
+    ) -> ArcBorrow<'a, StylesheetContents> {
+        self.contents.read_with(guard).borrow_arc()
+    }
+
     fn implicit_scope_root(&self) -> Option<ImplicitScopeRoot> {
         None
     }
@@ -306,6 +333,15 @@ impl StylesheetInDocument for DocumentStyleSheet {
     #[inline]
     fn contents<'a>(&'a self, guard: &'a SharedRwLockReadGuard) -> &'a StylesheetContents {
         self.0.contents(guard)
+    }
+
+    // VIPER-PATCH(stylesheet-contents-arc): borrow the `Arc` itself.
+    #[inline]
+    fn contents_arc<'a>(
+        &'a self,
+        guard: &'a SharedRwLockReadGuard,
+    ) -> ArcBorrow<'a, StylesheetContents> {
+        self.0.contents_arc(guard)
     }
 
     fn implicit_scope_root(&self) -> Option<ImplicitScopeRoot> {
