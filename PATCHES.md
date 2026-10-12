@@ -44,17 +44,29 @@ exception and the licence obligations) is its ADR 0017, "The Stylo fork".
 `viper/stylo-0.22.0` is based on Stylo commit
 `34d25f741765a0bdb894f8271852e633299352d8` ("Bump stylo to 0.22.0, and more
 (#473)", tag `v0.22.0`). Each crate Viper takes from the fork was verified
-against its published crate on 2026-10-11:
+against its published crate: `servo_arc` and `selectors` on 2026-10-11,
+the other nine on 2026-10-12, when Stylo itself entered Viper's graph:
 
-| Crate | Published `.crate` SHA-256 (equals the crates.io index `cksum`) | `.cargo_vcs_info.json` | Sources compared with the commit's directory |
+| Crate | Published `.crate` SHA-256 (equals the crates.io index `cksum`) | `.cargo_vcs_info.json` `path_in_vcs` | Sources compared with the commit's directory |
 | --- | --- | --- | --- |
-| `servo_arc` 0.5.0 | `b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198` | `34d25f741…`, `path_in_vcs = "servo_arc"` | identical: `lib.rs`, the licence files, `Cargo.toml.orig` = `servo_arc/Cargo.toml`, `README.md` = the root `README.md` (`readme = "../README.md"`) |
-| `selectors` 0.41.0 | `8322aebea94a6cc288ff884e8a49bdbceef60206c400c6c46d22e62fc4fd91a6` | `34d25f741…`, `path_in_vcs = "selectors"` | identical: every source file, `README.md`, `CHANGES.md`, `Cargo.toml.orig` = `selectors/Cargo.toml` |
+| `servo_arc` 0.5.0 | `b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198` | `servo_arc` | identical: `lib.rs`, the licence files, `Cargo.toml.orig` = `servo_arc/Cargo.toml`, `README.md` = the root `README.md` (`readme = "../README.md"`) |
+| `selectors` 0.41.0 | `8322aebea94a6cc288ff884e8a49bdbceef60206c400c6c46d22e62fc4fd91a6` | `selectors` | identical: every source file, `README.md`, `CHANGES.md`, `Cargo.toml.orig` = `selectors/Cargo.toml` |
+| `stylo` 0.22.0 | `7a255e46af2478628c48daab3774090caabd7812b1dd3ca98801c2b9c53491ed` | `style` | identical: all 313 other files (sources, the mako templates, the vendored Python wheels), `Cargo.toml.orig` = `style/Cargo.toml` |
+| `stylo_traits` 0.22.0 | `645d6bfe40eb6e86ebe9f2d2adadcbced41bfa96175de7cb13d4d178d27bc83d` | `style_traits` | identical, `Cargo.toml.orig` = `style_traits/Cargo.toml`, `README.md` = the root `README.md` |
+| `stylo_atoms` 0.22.0 | `ee1771588fd747ef16f8b1990061b6f37c7d3251a0f9b74f405a44c0c5fb8966` | `stylo_atoms` | identical, `Cargo.toml.orig` = `stylo_atoms/Cargo.toml`, `README.md` = the root `README.md` |
+| `stylo_dom` 0.22.0 | `9febcb03f2b669ef06b3e8a5209e6280971ed55cecf83fbf3c0562fcf2aa2ec6` | `stylo_dom` | identical, `Cargo.toml.orig` = `stylo_dom/Cargo.toml`, `README.md` = the root `README.md` |
+| `stylo_static_prefs` 0.22.0 | `6767c48a1590461db79f8b434ccc5a2d65600a3b716751f7999b35ccead1e024` | `stylo_static_prefs` | identical, `Cargo.toml.orig` = `stylo_static_prefs/Cargo.toml`, `README.md` = the root `README.md` |
+| `stylo_malloc_size_of` 0.22.0 | `83ed69d55ee907599f093221004a28371925236f09f20961963020abf38bab6a` | `malloc_size_of` | identical, `Cargo.toml.orig` = `malloc_size_of/Cargo.toml` |
+| `stylo_derive` 0.22.0 | `4ee5c550c2e00a0b3c046bef84a9ee217e04e7c014142eeb96f9e48781c5cfd3` | `style_derive` | identical, `Cargo.toml.orig` = `style_derive/Cargo.toml`, `README.md` = the root `README.md` |
+| `to_shmem` 0.6.0 | `bbf077da8dd01cc18453bd7d9bc3a945c262f5f344562e5f6deb3914b4dd6f14` | `to_shmem` | identical, `Cargo.toml.orig` = `to_shmem/Cargo.toml` |
+| `to_shmem_derive` 0.2.0 | `0f8e91a023810fd2019648410d00eea13a71f21d849e71d6d9ed936fb8061174` | `to_shmem_derive` | identical, `Cargo.toml.orig` = `to_shmem_derive/Cargo.toml` |
 
-In both crates the only other files are generated at packaging time and have
-no counterpart in git: the normalized `Cargo.toml`, `Cargo.lock` and
-`.cargo_vcs_info.json`. `selectors` is unpatched on this branch: its
-directory equals the base commit's.
+Every `.cargo_vcs_info.json` names commit `34d25f741…`. In every crate the
+only other files are generated at packaging time and have no counterpart in
+git: the normalized `Cargo.toml`, `Cargo.lock` and `.cargo_vcs_info.json`.
+Only `servo_arc` (`servo-arc-*`) and `selectors` (`selectors-attr-flag-hook`)
+are patched on this branch; the other nine directories equal the base
+commit's.
 
 ## Ledger
 
@@ -62,9 +74,10 @@ directory equals the base commit's.
 | --- | --- | --- | --- | --- | --- | --- |
 | `servo-arc-provenance` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: refcount access and thin-arc construction without the allocation's provenance (servo/stylo#299, #210); undefined behaviour under both of Miri's aliasing models | `miri` | Never offered (owner decision) | Viper PR #21 (V5b-SERVO-ARC), tests in #22 | 90 / 124 |
 | `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | Viper PR #43 (V10a part 1) | 13 / 137 |
+| `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper V10a part 2 | 25 / 57 |
 
-"Lines" counts added lines in `lib.rs`, comments included, above and inside
-the test module. The `miri` proof is Viper's gate step `miri`, which runs
+"Lines" counts added lines in the patched file, comments included, above
+and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
 arcs) under Stacked Borrows and under Tree Borrows.
 
@@ -109,6 +122,36 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p servo_arc`, then
   `cargo +nightly-2026-10-08 miri test -p servo_arc`, with and without
   `MIRIFLAGS=-Zmiri-tree-borrows`.
+
+## Patch `selectors-attr-flag-hook`
+
+- **Problem.** Selectors 4 defines the `s` attribute flag (explicitly
+  case-sensitive values); `selectors` parses it unconditionally. Chrome 154
+  rejects it, as measured on Viper's selector goldens (`attr-flag-s`,
+  `attr-flag-s-nested`, `attr-flag-s-forgiving`, captured headful): in
+  `querySelectorAll`, `[a=b s]` throws a `SyntaxError`, and inside a
+  forgiving list, `:is([a=b s], p)`, only that selector is dropped. Viper
+  had refused the flag after parsing, which turned the whole forgiving list
+  into an error (its golden case `attr-flag-s-forgiving`).
+- **Change.** A new provided method of `selectors::Parser`,
+  `parse_case_sensitive_attribute_flag(&self) -> bool`, default `true`, so
+  every existing parser (Stylo's own included) behaves as upstream.
+  `parse_attribute_selector` passes it to `parse_attribute_flags`, which
+  treats `s` as an unexpected token when it is `false`, exactly like an
+  unknown flag; the forgiving-list machinery then handles the error as for
+  any invalid selector. Viper's DOM selector parser returns `false`.
+- **Spots.** `selectors/parser.rs`: the trait method, the call in
+  `parse_attribute_selector`, the guard in `parse_attribute_flags`, and the
+  test parser's switch.
+- **References.** [Selectors 4, attribute case-sensitivity](https://drafts.csswg.org/selectors-4/#attribute-case).
+- **Fork tests.** `attr_flag_hook_default_accepts_s`,
+  `attr_flag_hook_refuses_s_while_parsing` and
+  `attr_flag_hook_lets_forgiving_lists_drop_the_item`, plus every existing
+  test: all 16 `selectors` tests pass.
+- **Commands.** `cargo test -p selectors`.
+- **Upstream.** Generic (it changes no default), so a candidate; a draft goes
+  to the Viper owner first, and nothing is sent without the owner's
+  go-ahead.
 
 ## Rebase procedure (fork side)
 
