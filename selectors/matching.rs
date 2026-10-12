@@ -707,15 +707,37 @@ fn do_match_relative_selectors<E: Element>(
     false
 }
 
+// VIPER-PATCH(has-subtree-iterative): this function called itself once per
+// tree level below `element`, so `:has()` on a document tens of thousands of
+// levels deep overflowed the stack and aborted the process (`html:has(span)`
+// at depth 50,000), where Chrome matches. The walk is now iterative: the
+// same pre-order (each element, then its subtree, then its next sibling),
+// the same selector flags and the same early return, with the ancestors
+// whose later siblings remain kept in a heap stack instead of call frames.
 fn matches_relative_selector_subtree<E: Element>(
     selector: &Selector<E::Impl>,
     element: &E,
     context: &mut MatchingContext<E::Impl>,
     rightmost: SubjectOrPseudoElement,
 ) -> bool {
+    // VIPER-PATCH(has-subtree-iterative): elements with a child being
+    // searched, innermost last.
+    let mut ancestors: SmallVec<[E; 16]> = SmallVec::new();
     let mut current = element.first_element_child();
 
-    while let Some(el) = current {
+    loop {
+        // VIPER-PATCH(has-subtree-iterative): after the last sibling, resume
+        // with the next sibling of the innermost ancestor still open.
+        let el = match current {
+            Some(el) => el,
+            None => match ancestors.pop() {
+                Some(parent) => {
+                    current = parent.next_sibling_element();
+                    continue;
+                },
+                None => return false,
+            },
+        };
         if context.needs_selector_flags() {
             el.apply_selector_flags(
                 ElementSelectorFlags::RELATIVE_SELECTOR_SEARCH_DIRECTION_ANCESTOR,
@@ -725,14 +747,15 @@ fn matches_relative_selector_subtree<E: Element>(
             return true;
         }
 
-        if matches_relative_selector_subtree(selector, &el, context, rightmost) {
-            return true;
-        }
-
-        current = el.next_sibling_element();
+        // VIPER-PATCH(has-subtree-iterative): descend first, as the call did.
+        current = match el.first_element_child() {
+            Some(child) => {
+                ancestors.push(el);
+                Some(child)
+            },
+            None => el.next_sibling_element(),
+        };
     }
-
-    false
 }
 
 /// Whether the :hover and :active quirk applies.
