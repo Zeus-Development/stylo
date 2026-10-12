@@ -477,7 +477,8 @@ impl RuleNode {
             // Two threads can never attempt to push the same node on the free
             // list both at the same time, so whoever else pushed a node on the
             // free list cannot have done so with this node.
-            debug_assert_ne!(head, this.as_mut_ptr());
+            // VIPER-PATCH(rule-tree-raw-box): the box's own pointer (below).
+            debug_assert_ne!(head, UnsafeBox::as_mut_ptr(this));
 
             // Store the current head of the free list in this node.
             this.next_free.store(head, Ordering::Relaxed);
@@ -485,9 +486,12 @@ impl RuleNode {
             // Any thread acquiring the free list must observe the previous
             // next_free changes that occured, hence the release ordering
             // on success.
+            // VIPER-PATCH(rule-tree-raw-box): push the box's pointer, which
+            // keeps the allocation's provenance, not one cast from `&self`:
+            // `swap_free_list_and_gc` frees the nodes through these pointers.
             match root.next_free.compare_exchange_weak(
                 head,
-                this.as_mut_ptr(),
+                UnsafeBox::as_mut_ptr(this),
                 Ordering::Release,
                 Ordering::Relaxed,
             ) {
@@ -785,3 +789,55 @@ impl hash::Hash for StrongRuleNode {
 size_of_test!(RuleNode, 80);
 // StrongRuleNode should be pointer-sized even inside an option.
 size_of_test!(Option<StrongRuleNode>, 8);
+
+// VIPER-PATCH(rule-tree-raw-box): nodes freed from the free list (by a
+// collection and by dropping the tree), which before the patch was undefined
+// behaviour under Miri's Stacked Borrows and Tree Borrows (the first test),
+// and without it once the tree is gone (the second, sound before and after).
+#[cfg(test)]
+mod rule_tree_raw_box_tests {
+    use super::{CascadePriority, RuleTree, StrongRuleNode};
+    use crate::properties::PropertyDeclarationBlock;
+    use crate::rule_tree::{CascadeLevel, CascadeOrigin, RuleCascadeFlags, StyleSource};
+    use crate::shared_lock::SharedRwLock;
+    use crate::stylesheets::layer_rule::LayerOrder;
+    use servo_arc::Arc;
+
+    fn child(lock: &SharedRwLock, tree: &RuleTree, parent: &StrongRuleNode) -> StrongRuleNode {
+        let source =
+            StyleSource::from_declarations(Arc::new(lock.wrap(PropertyDeclarationBlock::new())));
+        let priority = CascadePriority::new(
+            CascadeLevel::new(CascadeOrigin::Author),
+            LayerOrder::root(),
+            RuleCascadeFlags::empty(),
+        );
+        parent.ensure_child(tree.root(), source, priority)
+    }
+
+    #[test]
+    fn rule_tree_raw_box_frees_nodes_through_the_free_list() {
+        let lock = SharedRwLock::new();
+        let tree = RuleTree::new();
+        let a = child(&lock, &tree, tree.root());
+        let b = child(&lock, &tree, &a);
+        drop(b);
+        drop(a);
+        tree.gc();
+        let c = child(&lock, &tree, tree.root());
+        let d = child(&lock, &tree, &c);
+        drop(d);
+        drop(c);
+        drop(tree);
+    }
+
+    #[test]
+    fn rule_tree_raw_box_frees_nodes_after_the_tree() {
+        let lock = SharedRwLock::new();
+        let tree = RuleTree::new();
+        let a = child(&lock, &tree, tree.root());
+        let b = child(&lock, &tree, &a);
+        drop(a);
+        drop(tree);
+        drop(b);
+    }
+}
