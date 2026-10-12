@@ -19,7 +19,9 @@ selectors release of Stylo 0.22).
 
 - Crate: `https://static.crates.io/crates/servo_arc/servo_arc-0.5.0.crate`,
   SHA-256 `b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198`
-  (the same checksum as the `servo_arc` entry in Viper's `Cargo.lock`).
+  (the checksum of the crates.io index, which Viper's `Cargo.lock` held
+  before Viper pinned this fork; a git source has no checksum in
+  `Cargo.lock`).
 - Its `.cargo_vcs_info.json` names git commit
   `34d25f741765a0bdb894f8271852e633299352d8` ("Bump stylo to 0.22.0, and
   more (#473)", tag `v0.22.0`) with `path_in_vcs = "servo_arc"`.
@@ -38,8 +40,9 @@ commit adds the regression tests only; the second commit holds the
 `servo-arc-provenance` fix and this file; the third clarifies this file; the
 fourth adds the `UniqueArc` coverage tests `unique_thin_arc_mutation` and
 `unique_arc_new_uninit`. The branch `viper/stylo-0.22.0` starts at that
-fourth commit (`7a13cd06`) and adds the `servo-arc-header-slice` commit, with
-its tests, on top.
+fourth commit (`7a13cd06`) and adds `servo-arc-header-slice` on top: first
+commit `e9c48256`, whose design was unsound under `swap` (below), then the
+replacement design in a later commit.
 
 ## Patch `servo-arc-provenance`: the problem
 
@@ -94,25 +97,42 @@ checks the visible parts.
 `HeaderSlice<H, T>` is a sized struct whose items follow a zero-length array.
 Upstream, `HeaderSlice::slice(&self)`, `slice_mut(&mut self)`,
 `UniqueArc::data_mut` and `impl Drop for HeaderSlice` reach the items through
-a reference to that sized struct. Stacked Borrows limits a reference to its
-type's size, so after `servo-arc-provenance` it still reported these
-accesses for every thin arc with at least one item: a zero-size retag
-(`[0x20..0x20]`) created by `addr_of!(self.data)` in `HeaderSlice::data` or
-`addr_of_mut!(self.data)` in `HeaderSlice::data_mut`, after which the item
-access has no valid tag. Tree Borrows accepts them by design. The `&self`
-receiver carries no other provenance, so the fix stores one.
+a pointer derived from a reference to that sized struct. Stacked Borrows
+limits a reference to its type's size, so after `servo-arc-provenance` it
+still reported these accesses for every thin arc with at least one item: a
+zero-size retag (`[0x20..0x20]`) created by `addr_of!(self.data)` in
+`HeaderSlice::data` or `addr_of_mut!(self.data)` in `HeaderSlice::data_mut`,
+after which the item access has no valid tag. Tree Borrows accepts them by
+design. The `&self` receiver carries no other provenance.
 
 | Spot | Change |
 | --- | --- |
-| `HeaderSlice` (struct) | The private field `len: usize` becomes `end: NonNull<u8>`, one past the last item, with the provenance of the whole allocation. Same size and alignment as `usize`, so the struct's size and alignment are unchanged (test `header_slice_layout_unchanged`). A `u8` pointer, so the auto traits that depend on `T` stay those of `[T; 0]`. |
-| `Send`, `Sync` for `HeaderSlice` | `unsafe impl` with exactly the former auto-trait conditions (`H: Send, T: Send`; `H: Sync, T: Sync`), because `NonNull` has neither. |
-| `HeaderSlice::data`, `data_mut` | The address of `data` with the provenance of `end` (`with_addr`), not that of `self`. `slice`, `slice_mut`, `UniqueArc::data_mut` and `Drop` use them. |
-| `HeaderSlice::len` | `(end - data) / size_of::<T>()`, from the two addresses. Zero-sized items are refused by the constructor, as upstream. |
-| `Arc::from_header_and_iter_alloc` | Writes `end`, derived from the raw allocation pointer, and starts the item writes at the same pointer. It stays the only constructor (`to_shmem` goes through it too). |
+| `Arc::from_header_and_iter_alloc` | Exposes the provenance of the whole allocation (`buffer.expose_provenance()`). It is the only constructor (`to_shmem` goes through it too). |
+| `HeaderSlice::data`, `data_mut` | The address of `data` with the allocation's exposed provenance (`ptr::with_exposed_provenance` and `_mut`), not a pointer derived from `self`. `slice`, `slice_mut`, `UniqueArc::data_mut` and `Drop` use them. |
 
-Public signatures, `header`, `Eq`, `PartialEq` and `Debug` are unchanged.
-Gecko's C++ code reads the `len` field, so this layout is servo-mode only;
-one more reason the patch is never offered upstream.
+The struct, its layout (`len: usize` is still stored), public signatures,
+auto traits, `Eq`, `PartialEq` and `Debug` are upstream's, byte for byte, so
+swapping two `HeaderSlice` values through safe code (`DerefMut`,
+`Arc::get_mut`) behaves exactly as upstream: sound for equal lengths, and
+unsound for unequal lengths in upstream and here alike, because the length
+moves without its items (servo_arc's own limit, not this patch's).
+
+**Superseded first design.** Commit `e9c48256` replaced `len` with a stored
+`end: NonNull<u8>` carrying the provenance. A swap through safe code moved
+`end` to the other value, so even equal lengths broke (a wrong `len()` and
+undefined behaviour; the test `header_slice_swap_of_equal_lengths_stays_sound`
+panics there under `cargo test` and both Miri models). The current design
+stores no pointer and keeps upstream's struct.
+
+**Limit of the Miri checks.** Item accesses use exposed ("wildcard")
+provenance, so Miri warns about an integer-to-pointer cast and checks those
+accesses against any exposed tag of the allocation: bounds, liveness and
+initialization are still checked, but aliasing violations among item
+accesses may be missed. The refcount accesses (`servo-arc-provenance`) keep
+strict provenance. Being exposed, the allocation's provenance is also
+available to any other integer-to-pointer cast to these addresses; that is
+defined behaviour under Rust's exposed-provenance rules and is how
+`ptr::with_exposed_provenance` is meant to be used.
 
 ## Reproducing with Miri
 
@@ -135,7 +155,7 @@ first commit of `viper/servo-arc-provenance` (tests only, unpatched code), or
 `7a13cd06` for the state before `servo-arc-header-slice`. Tests added by a
 later commit were measured by adding them to the earlier code. Results on
 `nightly-2026-10-08` (aarch64 macOS); "provenance" is `7a13cd06`, "both" is
-the `servo-arc-header-slice` commit:
+the current `servo-arc-header-slice` design:
 
 | Test | Unpatched SB | Unpatched TB | Provenance SB | Provenance TB | Both SB | Both TB |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -150,6 +170,7 @@ the `servo-arc-header-slice` commit:
 | `header_slice_len_for_item_sizes` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
 | `header_slice_slice_mut_and_data_mut_round_trip` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
 | `header_slice_drops_every_item_once` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
+| `header_slice_swap_of_equal_lengths_stays_sound` | not run | not run | UB (`HeaderSlice`) | pass | pass | pass |
 | `header_slice_refuses_zero_sized_items` | not run | not run | pass | pass | pass | pass |
 | `header_slice_auto_traits_unchanged` | not run | not run | pass | pass | pass | pass |
 | `thin_assert_padding` (upstream) | UB (#210) | pass | UB (`HeaderSlice`) | pass | pass | pass |
@@ -158,9 +179,12 @@ the `servo-arc-header-slice` commit:
 
 "UB (`HeaderSlice`)" is the Stacked Borrows report at `HeaderSlice::slice`,
 `HeaderSlice::slice_mut` (through `UniqueArc::data_mut`) or in
-`HeaderSlice`'s `Drop` described above. With both patches all 16 tests pass
-`cargo test` and Miri under Stacked Borrows and under Tree Borrows. `cargo
-test -p servo_arc` passes at every commit.
+`HeaderSlice`'s `Drop` described above. With both patches all 17 tests pass
+`cargo test` and Miri under Stacked Borrows and under Tree Borrows (with the
+integer-to-pointer warning described above). At the superseded design
+`e9c48256`, `header_slice_swap_of_equal_lengths_stays_sound` panics under
+`cargo test` and both models. `cargo test -p servo_arc` passes at every
+other commit.
 
 ## Upstream
 

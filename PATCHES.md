@@ -60,8 +60,8 @@ directory equals the base commit's.
 
 | Id | Crates and files | Reason | Viper proof | Upstream status | Added by (Viper PR) | Lines (code / tests) |
 | --- | --- | --- | --- | --- | --- | --- |
-| `servo-arc-provenance` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: refcount access and thin-arc construction without the allocation's provenance (servo/stylo#299, #210); undefined behaviour under both of Miri's aliasing models | `miri` | Never offered (owner decision) | V5b-SERVO-ARC (#21), tests in #22 | 90 / 124 |
-| `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | V10a part 1 | 40 / 116 |
+| `servo-arc-provenance` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: refcount access and thin-arc construction without the allocation's provenance (servo/stylo#299, #210); undefined behaviour under both of Miri's aliasing models | `miri` | Never offered (owner decision) | Viper PR #21 (V5b-SERVO-ARC), tests in #22 | 90 / 124 |
+| `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | Viper PR #43 (V10a part 1) | 13 / 137 |
 
 "Lines" counts added lines in `lib.rs`, comments included, above and inside
 the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -82,23 +82,29 @@ Problem, change, every spot, the Miri commands and the before/after results:
 ## Patch `servo-arc-header-slice`
 
 - **Problem.** `HeaderSlice::slice`, `slice_mut`, `UniqueArc::data_mut` and
-  `HeaderSlice`'s `Drop` reached the items through a reference to the sized
-  `HeaderSlice`, which ends where the items begin. Stacked Borrows rejects
-  every such access for a thin arc with items; Tree Borrows accepts it.
-- **Change.** The private `len: usize` becomes `end: NonNull<u8>`, one past
-  the last item, with the allocation's provenance; the items are reached
-  with that provenance and the address of `data`, and the length is derived
-  from the two addresses. Size, alignment, public signatures and auto traits
-  are unchanged; `Send` and `Sync` are restored by hand with the former
-  conditions. Servo mode only (Gecko's C++ reads `len`).
+  `HeaderSlice`'s `Drop` reached the items through a pointer derived from a
+  reference to the sized `HeaderSlice`, which ends where the items begin.
+  Stacked Borrows rejects every such access for a thin arc with items; Tree
+  Borrows accepts it.
+- **Change.** The only constructor exposes the provenance of the whole
+  allocation; `HeaderSlice::data` and `data_mut` take the address of `data`
+  with that exposed provenance. The struct and its layout stay upstream's
+  (`len` is stored), so public signatures, auto traits and swap behaviour
+  are unchanged. Limit: Miri checks item accesses through exposed
+  (wildcard) provenance, so aliasing among item accesses is checked less
+  strictly; bounds, liveness and initialization are still checked.
+- **History.** The first design (commit `e9c48256`) stored an `end` pointer
+  instead of `len`; a safe `swap` of two values moved it, which broke even
+  equal lengths. It was replaced before any Viper merge pinned it.
 - **Spots.** `servo_arc/PATCHES.md`, section "Patch `servo-arc-header-slice`".
 - **References.** [servo/stylo#210](https://github.com/servo/stylo/issues/210).
 - **Fork tests.** `header_slice_layout_unchanged`,
   `header_slice_len_for_item_sizes`,
   `header_slice_slice_mut_and_data_mut_round_trip`,
   `header_slice_drops_every_item_once`,
+  `header_slice_swap_of_equal_lengths_stays_sound`,
   `header_slice_refuses_zero_sized_items` and
-  `header_slice_auto_traits_unchanged`, plus every existing test. All 16
+  `header_slice_auto_traits_unchanged`, plus every existing test. All 17
   pass `cargo test` and Miri under both models.
 - **Commands.** `cargo test -p servo_arc`, then
   `cargo +nightly-2026-10-08 miri test -p servo_arc`, with and without
@@ -134,4 +140,4 @@ Viper's ADR 0017 holds the whole procedure; these are its fork-side steps.
 
 | Date | From → to | Patches carried / retired | Conflicts | Effort (hours) | Reviewer | Viper PR |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-10-11 | `viper/servo-arc-provenance` (`7a13cd06`) → `viper/stylo-0.22.0` | `servo-arc-provenance` carried by branching at `7a13cd06`, hashes unchanged; none retired | none | 0 | the review of V10a part 1 | V10a part 1 |
+| 2026-10-11 | `viper/servo-arc-provenance` (`7a13cd06`) → `viper/stylo-0.22.0` | `servo-arc-provenance` carried by branching at `7a13cd06`, hashes unchanged; none retired | none | 0 | the review of Viper PR #43 | #43 |
