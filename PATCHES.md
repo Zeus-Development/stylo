@@ -64,10 +64,11 @@ the other nine on 2026-10-12, when Stylo itself entered Viper's graph:
 Every `.cargo_vcs_info.json` names commit `34d25f741…`. In every crate the
 only other files are generated at packaging time and have no counterpart in
 git: the normalized `Cargo.toml`, `Cargo.lock` and `.cargo_vcs_info.json`.
-`servo_arc` (`servo-arc-*`), `selectors` (`selectors-attr-flag-hook`) and,
-since Viper's V10a part 3a, `stylo` (`element-data-checked`,
-`dom-apis-local-name`) are patched on this branch; the other eight
-directories equal the base commit's.
+`servo_arc` (`servo-arc-*`), `selectors` (`selectors-attr-flag-hook`),
+since Viper's V10a part 3a `stylo` (`element-data-checked`,
+`dom-apis-local-name`, and since part 3b `chrome-attr-s-flag`) and, since
+part 3b, `stylo_static_prefs` (`chrome-prefs`) are patched on this branch;
+the other seven directories equal the base commit's.
 
 ## Ledger
 
@@ -77,6 +78,8 @@ directories equal the base commit's.
 | `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | Viper PR #43 (V10a part 1) | 13 / 137 |
 | `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper PR #47 (V10a part 2) | 25 / 57 |
 | `element-data-checked` | `stylo`: `data.rs` | Soundness: `ElementDataWrapper::borrow` and `borrow_mut` are safe functions that hand out `&ElementData` and `&mut ElementData` from an `UnsafeCell`, and upstream checks the borrow flag only under `debug_assertions`, so a release build lets safe code alias `&mut`; the flag is now checked in every build, and `try_borrow`/`try_borrow_mut` report a conflict | `viper-style::api fork_patches::element_data_checked_try_borrow_mut_refuses_a_second_borrow` | Candidate; draft to the owner first | Viper V10a part 3a | 47 / 23 |
+| `chrome-attr-s-flag` | `stylo`: `servo/selector_parser.rs` | Chrome match: Stylo's servo `SelectorParser` returns `false` from the `selectors-attr-flag-hook` hook, so a stylesheet rule whose selector uses the `s` attribute flag is dropped and a forgiving list drops just that selector, as in Chrome 154 (which refuses the flag in stylesheets as in its DOM APIs); upstream parses the flag | `viper-style::api fork_patches::chrome_attr_s_flag_in_stylesheets` | Chrome-specific; not offered | Viper V10a part 3b | 13 / 19 |
+| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them) | `viper-style::api fork_patches::chrome_prefs_defaults` | Chrome-specific; not offered | Viper V10a part 3b | 17 / 2 |
 | `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
 
 "Lines" counts added lines in the patched file, comments included, above
@@ -206,6 +209,47 @@ Problem, change, every spot, the Miri commands and the before/after results:
   through `dom_apis`.
 - **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
   first.
+
+## Patch `chrome-attr-s-flag`
+
+- **Problem.** Chrome 154 refuses the Selectors 4 `s` attribute flag
+  (explicitly case-sensitive values) in stylesheets, as in its DOM selector
+  APIs: a rule whose selector list uses it is dropped, and inside a
+  forgiving `:is()` or `:where()` only that selector is. Stylo's servo
+  `SelectorParser` accepted the flag.
+- **Change.** `SelectorParser` implements the hook of
+  `selectors-attr-flag-hook`, `parse_case_sensitive_attribute_flag`, as
+  `false`. Viper's DOM selector parser already did.
+- **Spots.** `style/servo/selector_parser.rs`: the hook and the test module.
+- **Fork tests.** `chrome_attr_s_flag_refused_in_author_selectors`; all 11
+  `stylo` library tests pass.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific (the specification defines the flag), so
+  not offered.
+
+## Patch `chrome-prefs`
+
+- **Problem.** Stylo reads its preferences from process-wide atomics with
+  compiled defaults that `set_pref!` can change at run time. Viper never
+  changes a preference at run time (its gate step `style-policy` refuses
+  `set_pref!` in Viper's sources), so the defaults must be Chrome's where
+  Viper relies on them. Upstream's servo defaults leave `:has()`,
+  `:nth-child(An+B of S)` and grid layout off, and `layout.threads = -1`
+  starts a style thread pool of up to six threads on first use.
+- **Change.** In `preferences.toml`: `layout.threads` 0 (no pool even if
+  one were forced; Viper styles sequentially on its engine thread),
+  `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and
+  `layout.grid.enabled` true. Each line carries the marker and names its
+  Viper proof. `test_basic_preferences` now expects `layout.threads` 0.
+- **Spots.** `stylo_static_prefs/preferences.toml` (four values) and
+  `stylo_static_prefs/src/lib.rs` (the test's expectation).
+- **Fork tests.** `test_basic_preferences`.
+- **Viper proofs.** `chrome_prefs_defaults` (the four values) in the gate's
+  patch proofs, and Viper's cascade tests `has_in_a_stylesheet`,
+  `nth_child_of_in_a_stylesheet` and `display_grid_is_accepted`, and the
+  thread test `restyle_spawns_no_thread`.
+- **Commands.** `cargo test -p stylo_static_prefs`.
+- **Upstream.** Chrome-specific defaults, so not offered.
 
 ## Rebase procedure (fork side)
 
