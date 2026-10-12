@@ -26,7 +26,28 @@ thread_local! {
     /// We could change this once https://github.com/rayon-rs/rayon/issues/688
     /// is fixed, hopefully, which point we'd need to change the filter member below to be an
     /// arc and carry an owning reference around or so.
-    static BLOOM_KEY: &'static AtomicRefCell<BloomFilter> = Box::leak(Default::default());
+    // VIPER-PATCH(thread-cache-miri-root): leaked through `leak_thread_cache`.
+    static BLOOM_KEY: &'static AtomicRefCell<BloomFilter> = leak_thread_cache();
+}
+
+/// Leaks a default `T` for a thread-local cache that lives as long as the
+/// process (see `BLOOM_KEY`).
+// VIPER-PATCH(thread-cache-miri-root): the leak is intended, once per thread
+// that styles, but Miri's leak check reports it when a test thread exits.
+// Under Miri the allocation is registered as a static root (Miri's
+// `miri_static_root`), so that only this intended leak is exempt and every
+// other leak is still reported. Builds outside Miri are unchanged.
+pub(crate) fn leak_thread_cache<T: Default>() -> &'static T {
+    let cache: &'static T = Box::leak(Box::default());
+    #[cfg(miri)]
+    {
+        unsafe extern "Rust" {
+            fn miri_static_root(ptr: *const u8);
+        }
+        // Safety: Miri's own function; it only marks the allocation.
+        unsafe { miri_static_root((cache as *const T).cast()) };
+    }
+    cache
 }
 
 /// A struct that allows us to fast-reject deep descendant selectors avoiding

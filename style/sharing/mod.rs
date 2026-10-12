@@ -552,8 +552,9 @@ type TypelessSharingCache = SharingCacheBase<StyleSharingCandidate<usize>>;
 
 thread_local! {
     // See the comment on bloom.rs about why do we leak this.
+    // VIPER-PATCH(thread-cache-miri-root): leaked through `leak_thread_cache`.
     static SHARING_CACHE_KEY: &'static AtomicRefCell<[TypelessSharingCache; SHARING_MAX_LEVELS]> =
-        Box::leak(Default::default());
+        crate::bloom::leak_thread_cache();
 }
 
 /// A set of LRU caches of the last few nodes seen, one per DOM depth, so that we can try to
