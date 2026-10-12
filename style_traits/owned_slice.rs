@@ -135,10 +135,17 @@ impl<T> DerefMut for OwnedSlice<T> {
 
 impl<T> From<Box<[T]>> for OwnedSlice<T> {
     #[inline]
-    fn from(mut b: Box<[T]>) -> Self {
+    fn from(b: Box<[T]>) -> Self {
         let len = b.len();
-        let ptr = unsafe { NonNull::new_unchecked(b.as_mut_ptr()) };
-        mem::forget(b);
+        // VIPER-PATCH(owned-slice-into-raw): soundness. Upstream took the
+        // pointer with `b.as_mut_ptr()` and then moved `b` into
+        // `mem::forget`; under Stacked Borrows that move retags the box as
+        // unique and invalidates the pointer, so every later access through
+        // the `OwnedSlice` (any `calc()` expression Stylo parses, for
+        // example) was undefined behaviour reported by Miri. `Box::into_raw`
+        // hands over the allocation without the move. Viper's proof: its
+        // user-agent sheet's `calc()` parsed under Miri (`miri`).
+        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(b).cast::<T>()) };
         Self {
             len,
             ptr,
@@ -204,5 +211,20 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for OwnedSlice<T> {
 impl<T: Hash> Hash for OwnedSlice<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         T::hash_slice(&**self, state)
+    }
+}
+
+// VIPER-PATCH(owned-slice-into-raw): the slice made from a box is used
+// after the conversion; Miri's Stacked Borrows rejected the old conversion.
+#[cfg(test)]
+mod owned_slice_into_raw_tests {
+    use super::OwnedSlice;
+
+    #[test]
+    fn owned_slice_from_box_reads_and_writes_its_items() {
+        let mut slice = OwnedSlice::from(vec![1u32, 2, 3].into_boxed_slice());
+        slice[1] = 20;
+        assert_eq!(&*slice, &[1, 20, 3]);
+        assert_eq!(slice.into_vec(), vec![1, 20, 3]);
     }
 }
