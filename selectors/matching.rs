@@ -1254,6 +1254,14 @@ where
 }
 
 /// Determines whether the given element matches the given single selector.
+// VIPER-PATCH(matches-simple-selector-inline): always inlined into its two
+// callers, the loops over a compound's simple selectors in
+// `matches_compound_selector` (selector matching) and
+// `matches_compound_selector_from` (Stylo's invalidation). Upstream leaves
+// the choice to the optimizer, which merges the function into its caller
+// only while one of the two is reachable for an element type; an embedder
+// that uses both gets a call for every simple selector. No behaviour changes.
+#[inline(always)]
 fn matches_simple_selector<E>(
     selector: &Component<E::Impl>,
     element: &E,
