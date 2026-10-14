@@ -71,7 +71,8 @@ part 3b, `stylo_static_prefs` (`chrome-prefs`) are patched on this branch,
 and since part 4 `stylo_traits` (`owned-slice-into-raw`); Viper's V10b
 part 1 adds `style-struct-arc-borrow`, `stylesheet-contents-arc`,
 `rule-tree-raw-box` and `thread-cache-miri-root` to `stylo` and
-`has-subtree-iterative` to `selectors`.
+`has-subtree-iterative` to `selectors`; Viper's V10b part 3 adds
+`matches-simple-selector-inline` to `selectors`.
 The other six directories equal the base commit's.
 
 ## Ledger
@@ -93,6 +94,7 @@ The other six directories equal the base commit's.
 | `rule-tree-raw-box` | `stylo`: `rule_tree/unsafe_box.rs`, `rule_tree/core.rs` | Soundness: the rule tree's `UnsafeBox` wrapped `ManuallyDrop<Box<T>>` and was copied with `ptr::read`, and `RuleNode::push_on_free_list` stored a pointer cast from `&RuleNode` that `swap_free_list_and_gc` later freed with `Box::from_raw`: undefined behaviour under both models. `UnsafeBox` now holds the pointer from `Box::into_raw`, and the free list stores that pointer | `miri` | Candidate; draft to the owner first | Viper V10b part 1 | 46 / 52 |
 | `has-subtree-iterative` | `selectors`: `matching.rs` | Robustness and Chrome match: `matches_relative_selector_subtree`, the `:has()` subtree search, called itself once per tree level, so `:has()` on a document tens of thousands of levels deep overflowed the stack and aborted the process (`html:has(span)` at depth 50,000), where Chrome 154 answers; the walk is now iterative with the same order, selector flags and early return | `viper-style::api deep_trees_are_walked_without_recursion` | Candidate; draft to the owner first | Viper V10b part 1 | 31 / 0 |
 | `thread-cache-miri-root` | `stylo`: `bloom.rs`, `sharing/mod.rs` | Test tooling: Stylo leaks its bloom-filter and style-sharing thread-local caches by design, once per thread that styles, and Miri's leak check reported them whenever a test thread that restyled exited, so a Miri run that restyles needed `-Zmiri-ignore-leaks`, which hides every other leak too. Under `cfg(miri)` only, each of the two allocations is registered with Miri as a static root (`miri_static_root`) when it is made: this exempts exactly those two allocations from Miri's leak report and nothing else. What is leaked, and when, is unchanged, and builds outside Miri are upstream's code | `miri` (Viper's restyling library tests pass Miri's leak check) | Candidate; draft to the owner first | Viper V10b part 1 | 24 / 0 |
+| `matches-simple-selector-inline` | `selectors`: `matching.rs` | Performance: `matches_simple_selector` is `#[inline(always)]`. It has two callers, the loops over a compound's simple selectors in `matches_compound_selector` (selector matching) and in `matches_compound_selector_from` (Stylo's invalidation). The optimizer merges it into its caller only while one of the two is reachable for an element type; once an embedder uses both (Viper's incremental restyle makes the invalidation reachable for its element), the function stays out of line and every simple selector costs a call: measured against Viper's build before on a Linux bench host, `querySelectorAll` of 20 selectors over 10,000 elements ran 3.86% more instructions and took 1.034 to 1.037 times as long, and a restyle from scratch of 10,000 elements with 50 rules ran 2.85% more and took 1.033. With the attribute the function is part of both callers again: the queries run 1.58% fewer instructions than before the invalidation was reachable and take 0.990 to 0.994, the restyle runs the same instructions within 0.02% and takes 1.007 to 1.022 (40 pairs each, two builds). An `#[inline]` hint is not enough (the build is unchanged). No behaviour changes | `viper-style::selector_goldens selector_suite_matches_chrome_goldens` (behaviour kept); the paired measurement in Viper's `viper-style` README (the effect) | Candidate; draft to the owner first | Viper V10b part 3 | 8 / 0 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -485,6 +487,52 @@ Problem, change, every spot, the Miri commands and the before/after results:
   4 leaked allocations (two per restyling test thread).
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** A candidate for test tooling; draft to the owner first.
+
+## Patch `matches-simple-selector-inline`
+
+- **Problem.** `matches_simple_selector`, the match of one simple selector
+  against an element, is called from two loops: `matches_compound_selector`
+  (inlined into `matches_complex_selector_internal`, the selector matcher)
+  and `matches_compound_selector_from` (called by `TreeStyleInvalidator`,
+  Stylo's invalidation). It carries no inlining attribute. While an
+  embedder's build reaches only the matcher for an element type, LLVM
+  merges the function into that one caller; when the invalidation is
+  reachable for the same element type too, the function has two callers,
+  is too large for the inliner's threshold and stays out of line, so every
+  simple selector of every compound costs a call. In Viper this happened
+  when the incremental restyle (V10b part 3) made `TElement::has_snapshot`
+  able to return `true`: on a Linux bench host, against Viper's build
+  before, `querySelectorAll` of 20 selectors over 10,000 elements ran 3.86%
+  more instructions (49,461,589 per round against 47,625,054) and took
+  1.034 to 1.037 times as long (80 pairs), and a restyle from scratch of
+  10,000 elements with 50 author rules ran 2.85% more (190,421,428 against
+  185,139,250) and took 1.033 (1.031–1.035). The control confirms the
+  cause: that earlier build, with only this function kept out of line
+  (`#[inline(never)]`), runs 4.36% and 2.37% more instructions.
+  One codegen unit for the embedding crate does not change it (the two
+  callers remain), and neither does `#[inline]`: with the hint the build
+  has the same two call sites and runs the same instructions.
+- **Change.** `#[inline(always)]` on `matches_simple_selector`. The function
+  does not call itself directly (`:is()`, `:where()`, `:not()` and `:has()`
+  re-enter the matcher through `matches_complex_selector_list` and
+  `match_relative_selectors`, which this patch leaves as they are), so the
+  attribute is honoured.
+  With it Viper's build has no call site of the function, runs
+  46,871,488 instructions per round of the queries (1.58% fewer than the
+  earlier build) and 185,170,135 per restyle (0.02% more), and measures
+  0.990 to 0.994 for the queries and 1.007 to 1.022 for the restyle over
+  40 pairs each in two builds (Stylo taken from a local path, and from a
+  local git source as a pinned commit is).
+- **Spots.** `selectors/matching.rs`: `matches_simple_selector`.
+- **Fork tests.** None: an attribute, with no behaviour to test. All 16
+  `selectors` tests pass.
+- **Viper proof.** `selector_suite_matches_chrome_goldens` (the
+  `selector_goldens` test binary) keeps every result; the effect is a
+  paired measurement, recorded in Viper's `viper-style` README, and the
+  marker and ledger check fails if a rebase drops the patch.
+- **Commands.** `cargo test -p selectors`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Rebase procedure (fork side)
 
