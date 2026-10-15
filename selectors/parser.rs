@@ -309,6 +309,20 @@ pub trait Parser<'i> {
         false
     }
 
+    // VIPER-PATCH(selectors-compound-is-alias): an alias of `:is()` that
+    // takes a non-empty, non-forgiving list of compound selectors, as
+    // Chrome's legacy `:-webkit-any()` does (a complex selector, an empty
+    // argument or one invalid item make the whole selector invalid).
+    // `is_is_alias` parses the forgiving complex-selector list of `:is()`
+    // instead. Upstream has no such hook: Gecko and Servo have no
+    // `:-webkit-any()`. Its WebKit origin:
+    // https://www.w3.org/TR/2011/WD-selectors4-20110929/#matches
+    /// Whether the given function name is an alias for `:is()` over a list
+    /// of compound selectors.
+    fn parse_compound_is_alias(&self, _name: &str) -> bool {
+        false
+    }
+
     /// Whether to parse the `:host` pseudo-class.
     fn parse_host(&self) -> bool {
         false
@@ -3538,6 +3552,11 @@ where
         return parse_is_where(parser, input, state, Component::Is);
     }
 
+    // VIPER-PATCH(selectors-compound-is-alias): the compound-list alias.
+    if parser.parse_compound_is_alias(&name) {
+        return parse_compound_is_alias(parser, input, state);
+    }
+
     if state.intersects(
         SelectorParsingState::AFTER_NON_ELEMENT_BACKED_PSEUDO | SelectorParsingState::AFTER_SLOTTED,
     ) {
@@ -3547,6 +3566,32 @@ where
     let after_part = state.intersects(SelectorParsingState::AFTER_PART_LIKE);
     P::parse_non_ts_functional_pseudo_class(parser, name, input, after_part)
         .map(Component::NonTSPseudoClass)
+}
+
+// VIPER-PATCH(selectors-compound-is-alias): a non-empty, comma-separated
+// list of compound selectors, none forgiven, as one `:is()`.
+fn parse_compound_is_alias<'i, P, Impl>(
+    parser: &P,
+    input: &mut CssParser<'i>,
+    state: SelectorParsingState,
+) -> Result<Component<Impl>, ParseError<P::Error>>
+where
+    P: Parser<'i, Impl = Impl>,
+    Impl: SelectorImpl,
+{
+    let state = state | SelectorParsingState::SKIP_DEFAULT_NAMESPACE;
+    let mut values = SmallVec::<[_; 4]>::new();
+    loop {
+        values.push(input.parse_until_before(Delimiter::Comma, |input| {
+            parse_inner_compound_selector(parser, input, state)
+        })?);
+        match input.next() {
+            Ok(&Token::Comma) => {},
+            Ok(_) => unreachable!(),
+            Err(_) => break,
+        }
+    }
+    Ok(Component::Is(SelectorList::from_iter(values.into_iter())))
 }
 
 fn parse_nth_pseudo_class<'i, P, Impl>(
@@ -4011,6 +4056,11 @@ pub mod tests {
 
         fn parse_host(&self) -> bool {
             true
+        }
+
+        // VIPER-PATCH(selectors-compound-is-alias): the test parser's alias.
+        fn parse_compound_is_alias(&self, name: &str) -> bool {
+            name.eq_ignore_ascii_case("-webkit-any")
         }
 
         // VIPER-PATCH(selectors-attr-flag-hook): the test parser's switch.
@@ -4989,5 +5039,39 @@ pub mod tests {
         // Not forgiving: :not() and the top-level list fail as a whole.
         assert!(parse_ns(":not([a=b s], p)", &parser).is_err());
         assert!(parse_ns("[a=b s], p", &parser).is_err());
+    }
+
+    // VIPER-PATCH(selectors-compound-is-alias): the hook's tests.
+    #[test]
+    fn compound_is_alias_takes_a_compound_list() {
+        // It is one `:is()`, and serializes as one.
+        let list = parse_expected(
+            ":-webkit-any(p.a, div:hover, *)",
+            Some(":is(p.a, div:hover, *)"),
+        )
+        .unwrap();
+        let Component::Is(inner) = list.slice()[0].iter_raw_match_order().next().unwrap() else {
+            panic!("expected :is()");
+        };
+        assert_eq!(inner.len(), 3);
+        assert!(parse_expected("a:not(:-webkit-any(p, div))", Some("a:not(:is(p, div))")).is_ok());
+        assert!(parse_expected(":-WEBKIT-ANY(p)", Some(":is(p)")).is_ok());
+    }
+
+    #[test]
+    fn compound_is_alias_refuses_what_is_accepts() {
+        for input in [
+            ":-webkit-any(div p)",
+            ":-webkit-any(div > p)",
+            ":-webkit-any()",
+            ":-webkit-any(p, )",
+            ":-webkit-any(p, :unknown)",
+            ":-webkit-any(p, [)",
+            ":-webkit-any(::before)",
+        ] {
+            assert!(parse(input).is_err(), "{input}");
+        }
+        // `:is()` forgives, and takes complex selectors.
+        assert!(parse(":is(div p, :unknown)").is_ok());
     }
 }
