@@ -80,10 +80,20 @@ pub enum PseudoElement {
     ServoAnonymousTableRow,
     ServoTableGrid,
     ServoTableWrapper,
+
+    // VIPER-PATCH(chrome-dom-api-pseudos): Chrome match. A pseudo-element
+    // Chrome 154's DOM selector APIs accept and that never matches an
+    // element there (`::cue`, `::highlight(x)`, `::-webkit-scrollbar`, any
+    // other `::-webkit-*` name, ...). Servo's own parser never produces it;
+    // only an embedder's DOM-API parser builds it, so the cascade never
+    // meets it. Upstream has no such variant: Servo refuses those names.
+    // Keep it last. https://drafts.csswg.org/css-pseudo-4/
+    Unmatched,
 }
 
 /// The count of all pseudo-elements.
-pub const PSEUDO_COUNT: usize = PseudoElement::ServoTableWrapper as usize + 1;
+// VIPER-PATCH(chrome-dom-api-pseudos): `Unmatched` is the last variant.
+pub const PSEUDO_COUNT: usize = PseudoElement::Unmatched as usize + 1;
 
 impl ToCss for PseudoElement {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
@@ -114,6 +124,8 @@ impl ToCss for PseudoElement {
             ServoAnonymousTableRow => "::-servo-anonymous-table-row",
             ServoTableGrid => "::-servo-table-grid",
             ServoTableWrapper => "::-servo-table-wrapper",
+            // VIPER-PATCH(chrome-dom-api-pseudos): a name no stylesheet uses.
+            Unmatched => "::-internal-unmatched",
         })
     }
 }
@@ -121,6 +133,12 @@ impl ToCss for PseudoElement {
 impl ::selectors::parser::PseudoElement for PseudoElement {
     fn parses_as_element_backed(&self) -> bool {
         matches!(self, Self::DetailsContent)
+    }
+
+    // VIPER-PATCH(chrome-dom-api-pseudos): Chrome accepts a user-action
+    // pseudo-class after these names, as in `::-webkit-scrollbar:hover`.
+    fn accepts_state_pseudo_classes(&self) -> bool {
+        matches!(self, Self::Unmatched)
     }
 }
 
@@ -267,6 +285,8 @@ impl PseudoElement {
             | PseudoElement::MozProgressBar
             | PseudoElement::ServoTextControlInnerContainer
             | PseudoElement::ServoTextControlInnerEditor => PseudoElementCascadeType::Lazy,
+            // VIPER-PATCH(chrome-dom-api-pseudos): never cascaded.
+            PseudoElement::Unmatched => PseudoElementCascadeType::Lazy,
             PseudoElement::ServoAnonymousBox
             | PseudoElement::ServoAnonymousTable
             | PseudoElement::ServoAnonymousTableCell
@@ -410,6 +430,17 @@ pub enum NonTSPseudoClass {
     UserValid,
     Valid,
     Visited,
+    // VIPER-PATCH(chrome-dom-api-pseudos): Chrome match. `:dir(<ident>)`,
+    // with the identifier as written, matched by an embedder from the
+    // element's directionality, and any other pseudo-class Chrome 154's DOM
+    // selector APIs accept and Servo does not, holding its serialization
+    // (`:horizontal`, `:host-context(div)`); Chrome matches nearly all of
+    // those on no element of a static page, and the embedder decides. Servo's
+    // own parser never produces either, so the cascade never meets them;
+    // upstream Servo refuses those names.
+    // https://drafts.csswg.org/selectors-4/#the-dir-pseudo
+    Dir(Box<str>),
+    Unmatched(Box<str>),
 }
 
 impl ::selectors::parser::NonTSPseudoClass for NonTSPseudoClass {
@@ -441,6 +472,16 @@ impl ToCss for NonTSPseudoClass {
             dest.write_str(":lang(")?;
             serialize_identifier(lang, dest)?;
             return dest.write_char(')');
+        }
+        // VIPER-PATCH(chrome-dom-api-pseudos): the two DOM-API variants.
+        match *self {
+            Dir(ref dir) => {
+                dest.write_str(":dir(")?;
+                serialize_identifier(dir, dest)?;
+                return dest.write_char(')');
+            },
+            Unmatched(ref css) => return dest.write_str(css),
+            _ => {},
         }
 
         dest.write_str(match *self {
@@ -484,7 +525,8 @@ impl ToCss for NonTSPseudoClass {
             Self::UserValid => ":user-valid",
             Self::Valid => ":valid",
             Self::Visited => ":visited",
-            Self::Lang(_) => unreachable!(),
+            // VIPER-PATCH(chrome-dom-api-pseudos): written above.
+            Self::Lang(_) | Self::Dir(_) | Self::Unmatched(_) => unreachable!(),
         })
     }
 }
@@ -531,6 +573,8 @@ impl NonTSPseudoClass {
             Self::CustomState(_) | Self::Lang(_) | Self::ServoNonZeroBorder => {
                 ElementState::empty()
             },
+            // VIPER-PATCH(chrome-dom-api-pseudos): no element state.
+            Self::Dir(_) | Self::Unmatched(_) => ElementState::empty(),
         }
     }
 
@@ -1068,5 +1112,50 @@ mod chrome_attr_s_flag_tests {
         assert!(parses("[a=b]"));
         // A forgiving list drops just the refused selector.
         assert!(parses(":is([a=b s], p)"));
+    }
+}
+
+// VIPER-PATCH(chrome-dom-api-pseudos): the DOM-API variants' tests.
+#[cfg(test)]
+mod chrome_dom_api_pseudos_tests {
+    use super::{NonTSPseudoClass, PseudoElement, SelectorParser, PSEUDO_COUNT};
+    use crate::stylesheets::UrlExtraData;
+    use cssparser::ToCss;
+    use selectors::parser::PseudoElement as _;
+
+    fn parses(selectors: &str) -> bool {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        SelectorParser::parse_author_origin_no_namespace(selectors, &url).is_ok()
+    }
+
+    #[test]
+    fn chrome_dom_api_pseudos_serialize_with_no_state() {
+        let dir = NonTSPseudoClass::Dir("RTL".into());
+        assert_eq!(dir.to_css_string(), ":dir(RTL)");
+        let unmatched = NonTSPseudoClass::Unmatched(":host-context(div)".into());
+        assert_eq!(unmatched.to_css_string(), ":host-context(div)");
+        assert!(dir.state_flag().is_empty() && unmatched.state_flag().is_empty());
+        assert_eq!(
+            PseudoElement::Unmatched.to_css_string(),
+            "::-internal-unmatched"
+        );
+        assert!(PseudoElement::Unmatched.is_lazy());
+        assert!(PseudoElement::Unmatched.accepts_state_pseudo_classes());
+        assert!(!PseudoElement::Before.accepts_state_pseudo_classes());
+        assert_eq!(PseudoElement::Unmatched.index(), PSEUDO_COUNT - 1);
+    }
+
+    #[test]
+    fn chrome_dom_api_pseudos_stay_out_of_servo_parsing() {
+        for selectors in [
+            ":dir(ltr)",
+            ":horizontal",
+            "::cue",
+            "::-webkit-scrollbar",
+            "::-internal-unmatched",
+        ] {
+            assert!(!parses(selectors), "{selectors}");
+        }
+        assert!(parses(":lang(en)"));
     }
 }
