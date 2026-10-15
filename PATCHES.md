@@ -72,8 +72,15 @@ and since part 4 `stylo_traits` (`owned-slice-into-raw`); Viper's V10b
 part 1 adds `style-struct-arc-borrow`, `stylesheet-contents-arc`,
 `rule-tree-raw-box` and `thread-cache-miri-root` to `stylo` and
 `has-subtree-iterative` to `selectors`; Viper's V10b part 3 adds
-`matches-simple-selector-inline` to `selectors`.
-The other six directories equal the base commit's.
+`matches-simple-selector-inline` to `selectors`; Viper's V10b part 4a adds
+`chrome-dom-api-pseudos` to `stylo` and `selectors-compound-is-alias` to
+`selectors`.
+The other six directories equal the base commit's. V10b part 4a pins no new
+crate; on 2026-10-15 it checked the two crates it patches again, as above:
+the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
+the index `cksum`, both `.cargo_vcs_info.json` name `34d25f741…`, and the
+unpacked sources equal the commit's `selectors` and `style` directories
+apart from the packaging files.
 
 ## Ledger
 
@@ -95,6 +102,8 @@ The other six directories equal the base commit's.
 | `has-subtree-iterative` | `selectors`: `matching.rs` | Robustness and Chrome match: `matches_relative_selector_subtree`, the `:has()` subtree search, called itself once per tree level, so `:has()` on a document tens of thousands of levels deep overflowed the stack and aborted the process (`html:has(span)` at depth 50,000), where Chrome 154 answers; the walk is now iterative with the same order, selector flags and early return | `viper-style::api deep_trees_are_walked_without_recursion` | Candidate; draft to the owner first | Viper V10b part 1 | 31 / 0 |
 | `thread-cache-miri-root` | `stylo`: `bloom.rs`, `sharing/mod.rs` | Test tooling: Stylo leaks its bloom-filter and style-sharing thread-local caches by design, once per thread that styles, and Miri's leak check reported them whenever a test thread that restyled exited, so a Miri run that restyles needed `-Zmiri-ignore-leaks`, which hides every other leak too. Under `cfg(miri)` only, each of the two allocations is registered with Miri as a static root (`miri_static_root`) when it is made: this exempts exactly those two allocations from Miri's leak report and nothing else. What is leaked, and when, is unchanged, and builds outside Miri are upstream's code | `miri` (Viper's restyling library tests pass Miri's leak check) | Candidate; draft to the owner first | Viper V10b part 1 | 24 / 0 |
 | `matches-simple-selector-inline` | `selectors`: `matching.rs` | Performance: `matches_simple_selector` is `#[inline(always)]`. It has two callers, the loops over a compound's simple selectors in `matches_compound_selector` (selector matching) and in `matches_compound_selector_from` (Stylo's invalidation). The optimizer merges it into its caller only while one of the two is reachable for an element type; once an embedder uses both (Viper's incremental restyle makes the invalidation reachable for its element), the function stays out of line and every simple selector costs a call: measured against Viper's build before on a Linux bench host, `querySelectorAll` of 20 selectors over 10,000 elements ran 3.86% more instructions and took 1.034 to 1.037 times as long, and a restyle from scratch of 10,000 elements with 50 rules ran 2.85% more and took 1.033. With the attribute the function is part of both callers again: the queries run 1.58% fewer instructions than before the invalidation was reachable and take 0.990 to 0.994, the restyle runs the same instructions within 0.02% and takes 1.007 to 1.022 (40 pairs each, two builds). An `#[inline]` hint is not enough (the build is unchanged). No behaviour changes | `viper-style::selector_goldens selector_suite_matches_chrome_goldens` (behaviour kept); the paired measurement in Viper's `viper-style` README (the effect) | Candidate; draft to the owner first | Viper V10b part 3 | 8 / 0 |
+| `selectors-compound-is-alias` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_compound_is_alias`, names an alias of `:is()` whose argument is a non-empty, non-forgiving, comma-separated list of compound selectors, as Chrome 154's legacy `:-webkit-any()` takes (Viper's selector goldens `names-webkit-any-list`, `names-webkit-any-complex`, `names-webkit-any-empty`, `names-webkit-any-invalid-item`, `names-webkit-any-in-not`); the existing `is_is_alias` parses the forgiving complex-selector list of `:is()` instead, and upstream has no `:-webkit-any()` | `viper-style::api fork_patches::compound_is_alias_parses_webkit_any` | Candidate; draft to the owner first | Viper V10b part 4a | 45 / 39 |
+| `chrome-dom-api-pseudos` | `stylo`: `servo/selector_parser.rs` | Chrome match: three variants for the names Chrome 154's DOM selector APIs accept and servo's parser refuses, which only an embedder's DOM-API parser builds (servo's own parser never produces them, so the cascade never meets them): `NonTSPseudoClass::Dir` (the `:dir()` identifier as written), `NonTSPseudoClass::Unmatched` (any other such pseudo-class, holding its serialization) and the unit `PseudoElement::Unmatched`, appended last (`PSEUDO_COUNT` follows it; it serializes as `::-internal-unmatched`, cascades lazily and accepts user-action pseudo-classes after it). Neither pseudo-class has element state | `viper-style::api fork_patches::chrome_dom_api_pseudos_parse_and_match_nothing` | Chrome-specific; not offered | Viper V10b part 4a | 49 / 42 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -533,6 +542,74 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p selectors`.
 - **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
   first.
+
+## Patch `selectors-compound-is-alias`
+
+- **Problem.** Chrome 154's DOM selector APIs accept the legacy
+  `:-webkit-any()`: an alias of `:is()` that takes a list of compound
+  selectors, where a complex selector, an empty argument or one invalid
+  item make the whole selector invalid. `selectors` has `is_is_alias`,
+  which parses such an alias as `:is()` itself: a forgiving list of complex
+  selectors. Neither Gecko nor Servo has `:-webkit-any()`.
+- **Change.** A provided `Parser::parse_compound_is_alias(&self, name)`,
+  `false` by default. When it returns `true`, `parse_functional_pseudo_class`
+  parses the argument as comma-separated compound selectors
+  (`parse_inner_compound_selector`, with the default namespace skipped as
+  in `:is()`), none forgiven, and returns one `Component::Is` over them,
+  which serializes as `:is(...)`.
+- **Spots.** `selectors/parser.rs`: the `Parser` trait,
+  `parse_functional_pseudo_class` and the new `parse_compound_is_alias`
+  function; the test parser's hook.
+- **Fork tests.** `compound_is_alias_takes_a_compound_list` (three
+  compounds give one `:is()` of three; inside `:not()`; the name in upper
+  case) and `compound_is_alias_refuses_what_is_accepts` (a descendant and a
+  child combinator, an empty argument, a trailing comma, an unknown
+  pseudo-class, a broken item and a pseudo-element each fail the whole
+  selector, while `:is()` still forgives). All 18 `selectors` tests pass.
+- **Viper proof.** `compound_is_alias_parses_webkit_any` (`viper-style`'s
+  `api` test binary) and the selector goldens `names-webkit-any-*`.
+- **Commands.** `cargo test -p selectors`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `chrome-dom-api-pseudos`
+
+- **Problem.** Chrome 154's DOM selector APIs (`querySelector`,
+  `querySelectorAll`, `matches`, `closest`) accept pseudo-classes and
+  pseudo-elements servo's `SelectorParser` refuses: `:dir()`,
+  `:host-context()`, `:horizontal` and 35 more, `::cue`, `::highlight()`,
+  `::view-transition-*()`, every `::-webkit-*` name and others (Viper's ADR
+  0017, "The selector names Chrome accepts"). Viper's own DOM-API parser
+  needs values of servo's `SelectorImpl` for them; servo's enums have no
+  variants to hold them.
+- **Change.** `NonTSPseudoClass::Dir(Box<str>)` and
+  `NonTSPseudoClass::Unmatched(Box<str>)`, appended to the enum: `Dir`
+  serializes as `:dir(<ident>)`, `Unmatched` as the serialization it holds,
+  and both have empty `state_flag`. The unit `PseudoElement::Unmatched`,
+  appended last: `PSEUDO_COUNT` is `Unmatched as usize + 1`, it serializes
+  as `::-internal-unmatched`, its `cascade_type` is `Lazy`, and it is the
+  one pseudo-element whose `accepts_state_pseudo_classes` is `true` (Chrome
+  accepts `::-webkit-scrollbar:hover` and `::cue:hover`). Servo's parser
+  never builds any of the three, so stylesheets keep refusing those names
+  and the cascade never meets them; what the embedder matches is its own
+  decision (Viper: `:dir()` by directionality, Chrome's
+  `:-internal-text-field` on text fields, everything else on nothing).
+  The payloads are boxed strings, as `Lang`'s, so the enum keeps its size
+  (24 bytes on 64-bit targets).
+- **Spots.** `style/servo/selector_parser.rs`: the two enums, `PSEUDO_COUNT`,
+  both `ToCss` implementations, `impl selectors::parser::PseudoElement`,
+  `PseudoElement::cascade_type` and `NonTSPseudoClass::state_flag`. Every
+  other match on the two enums in servo code has a wildcard arm.
+- **Fork tests.** `chrome_dom_api_pseudos_serialize_with_no_state` (the
+  three serializations, empty state, lazy cascade, the state pseudo-class
+  rule and the last index) and
+  `chrome_dom_api_pseudos_stay_out_of_servo_parsing` (servo's author parser
+  still refuses `:dir(ltr)`, `:horizontal`, `::cue`, `::-webkit-scrollbar`
+  and `::-internal-unmatched`). All 16 `stylo` library tests pass.
+- **Viper proof.** `chrome_dom_api_pseudos_parse_and_match_nothing`
+  (`viper-style`'s `api` test binary) and the selector goldens `names-*`.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific; not offered.
 
 ## Rebase procedure (fork side)
 
