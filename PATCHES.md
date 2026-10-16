@@ -104,6 +104,7 @@ apart from the packaging files.
 | `matches-simple-selector-inline` | `selectors`: `matching.rs` | Performance: `matches_simple_selector` is `#[inline(always)]`. It has two callers, the loops over a compound's simple selectors in `matches_compound_selector` (selector matching) and in `matches_compound_selector_from` (Stylo's invalidation). The optimizer merges it into its caller only while one of the two is reachable for an element type; once an embedder uses both (Viper's incremental restyle makes the invalidation reachable for its element), the function stays out of line and every simple selector costs a call: measured against Viper's build before on a Linux bench host, `querySelectorAll` of 20 selectors over 10,000 elements ran 3.86% more instructions and took 1.034 to 1.037 times as long, and a restyle from scratch of 10,000 elements with 50 rules ran 2.85% more and took 1.033. With the attribute the function is part of both callers again: the queries run 1.58% fewer instructions than before the invalidation was reachable and take 0.990 to 0.994, the restyle runs the same instructions within 0.02% and takes 1.007 to 1.022 (40 pairs each, two builds). An `#[inline]` hint is not enough (the build is unchanged). No behaviour changes | `viper-style::selector_goldens selector_suite_matches_chrome_goldens` (behaviour kept); the paired measurement in Viper's `viper-style` README (the effect) | Candidate; draft to the owner first | Viper V10b part 3 | 8 / 0 |
 | `selectors-compound-is-alias` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_compound_is_alias`, names an alias of `:is()` whose argument is a non-empty, non-forgiving, comma-separated list of compound selectors, as Chrome 154's legacy `:-webkit-any()` takes (Viper's selector goldens `names-webkit-any-list`, `names-webkit-any-complex`, `names-webkit-any-empty`, `names-webkit-any-invalid-item`, `names-webkit-any-in-not`); the existing `is_is_alias` parses the forgiving complex-selector list of `:is()` instead, and upstream has no `:-webkit-any()` | `viper-style::api fork_patches::compound_is_alias_parses_webkit_any` | Candidate; draft to the owner first | Viper V10b part 4a | 45 / 39 |
 | `chrome-dom-api-pseudos` | `stylo`: `servo/selector_parser.rs` | Chrome match: three variants for the names Chrome 154's DOM selector APIs accept and servo's parser refuses, which only an embedder's DOM-API parser builds (servo's own parser never produces them, so the cascade never meets them): `NonTSPseudoClass::Dir` (the `:dir()` identifier as written), `NonTSPseudoClass::Unmatched` (any other such pseudo-class, holding its serialization) and the unit `PseudoElement::Unmatched`, appended last (`PSEUDO_COUNT` follows it; it serializes as `::-internal-unmatched`, cascades lazily and accepts user-action pseudo-classes after it). Neither pseudo-class has element state | `viper-style::api fork_patches::chrome_dom_api_pseudos_parse_and_match_nothing` | Chrome-specific; not offered | Viper V10b part 4a | 49 / 42 |
+| `servo-first-line` | `stylo`: `servo/selector_parser.rs`, `data.rs`, `properties/data.py` | Chrome match: servo mode had no ::first-line; Chrome 154 styles it. `PseudoElement::FirstLine`, the fifth eager pseudo-element (after `FirstLetter`; `EAGER_PSEUDO_COUNT` 5, and `data.rs`'s empty eager array is sized by the count instead of four `None`s), parsed as `::first-line` and the CSS 2 `:first-line`, serialized as `::first-line`, with `is_first_line()` true and the `APPLIES_TO_FIRST_LINE` property restriction. Servo builds also apply `visibility` to the first line, as Blink 154 does (`valid_for_first_line` in `css_properties.json5`) and Gecko does not. The cascade's first-line reparenting was already shared code. Servo has no first-line layout, which is why upstream lacks it (register entry `adr:layout-first-line`) | `viper-style::api fork_patches::servo_first_line_parses_and_restricts`, and the computed-value golden suite (`first-line.html`) | Candidate; draft to the owner first | Viper V10b part 4b2 | 32 / 43 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -610,6 +611,54 @@ Problem, change, every spot, the Miri commands and the before/after results:
   (`viper-style`'s `api` test binary) and the selector goldens `names-*`.
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Chrome-specific; not offered.
+
+## Patch `servo-first-line`
+
+- **Problem.** Chrome 154 styles `::first-line`: `getComputedStyle(element,
+  '::first-line')` reports its values, and the first formatted line of a
+  block takes them. Stylo's servo mode has no such pseudo-element (Servo
+  lays out no first line), so its parser refuses `::first-line` and
+  `:first-line`, and a stylesheet rule naming one is dropped. Gecko's
+  cascade already computes first-line styles and reparents the elements on
+  the first line (`FirstLineReparenting`, `Stylist::cascade_style_and_visited`,
+  the `APPLIES_TO_FIRST_LINE` flags and the adjuster's
+  `IS_IN_FIRST_LINE_SUBTREE`), all in shared code.
+- **Change.** `PseudoElement::FirstLine`, an eager pseudo-element placed
+  right after `FirstLetter`, so that the eager ones stay first and
+  `eager_index()` and `from_eager_index()` keep working; `EAGER_PSEUDO_COUNT`
+  is 5, and `cascade_type` returns `Eager` for it, as Gecko cascades it.
+  `parse_pseudo_element` accepts `first-line` (the CSS 2 `:first-line`
+  reaches it through `selectors::parser::is_css2_pseudo_element`); it
+  serializes as `::first-line`; `is_first_line()` is true for it; and
+  `property_restriction()` returns `APPLIES_TO_FIRST_LINE`.
+  `may_generate_pseudo` keeps its default. In `data.rs` the empty eager
+  array is `[const { None }; EAGER_PSEUDO_COUNT]` instead of a literal of
+  four `None`s, which no longer has the array's length in servo builds
+  (Gecko's count stays four). In `properties/data.py`, servo builds add
+  `visibility` to the first-line properties: Blink 154 marks it
+  `valid_for_first_line` (`third_party/blink/renderer/core/css/css_properties.json5`),
+  and it is the one difference between that list and Stylo's among the 51
+  properties Viper reports. Other differences outside those 51 (Chrome
+  also lists `box-shadow` and `text-justify`; Stylo also lists SVG text
+  properties and some font and text properties under other names) are
+  left as they are.
+- **Spots.** `style/servo/selector_parser.rs`: the enum, `ToCss`,
+  `EAGER_PSEUDO_COUNT`, `is_first_line`, `cascade_type`,
+  `property_restriction` and `parse_pseudo_element`; `style/data.rs`:
+  `EMPTY_PSEUDO_ARRAY`; `style/properties/data.py`:
+  `PropertyRestrictions.first_line`.
+- **Fork tests.** `servo_first_line_parses_serializes_and_restricts`: the
+  two spellings in any case parse in author selectors and
+  `p::first-line::before` does not; the serialization; `is_first_line`,
+  eagerness and the eager index round trip, the last eager pseudo-element;
+  the restriction, which `color` and `visibility` pass and `margin-top` and
+  `display` do not. All 17 `stylo` library tests pass.
+- **Viper proof.** `servo_first_line_parses_and_restricts`
+  (`viper-style`'s `api` test binary), and the computed-value golden
+  fixture `first-line.html`: all 51 cases equal Chrome 154, after a full
+  restyle and after incremental ones.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Candidate; draft to the owner first. Nothing sent.
 
 ## Rebase procedure (fork side)
 
