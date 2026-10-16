@@ -1279,6 +1279,12 @@ class PropertyRestrictions:
         props.remove("box-shadow")
 
         _remove_common_first_line_and_first_letter_properties(props, data.engine)
+        # VIPER-PATCH(servo-first-line): Chrome match. Blink 154 applies
+        # `visibility` to ::first-line (`valid_for_first_line` in
+        # third_party/blink/renderer/core/css/css_properties.json5); Gecko
+        # does not, so servo mode alone follows Chrome.
+        if data.engine == "servo":
+            props.add("visibility")
         return props
 
     # https://drafts.csswg.org/css-pseudo/#placeholder

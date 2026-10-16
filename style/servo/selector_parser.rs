@@ -52,6 +52,13 @@ pub enum PseudoElement {
     // Also, make sure the UA sheet has the !important rules some of the
     // APPLIES_TO_PLACEHOLDER properties expect!
     FirstLetter,
+    // VIPER-PATCH(servo-first-line): Chrome match. Chrome 154 styles
+    // `::first-line` (`getComputedStyle(element, '::first-line')` and the
+    // first formatted line); servo mode had no such pseudo-element because
+    // Servo lays out no first line. Eager, as in Gecko, and the last eager
+    // one so that `eager_index()` keeps working.
+    // https://drafts.csswg.org/css-pseudo-4/#first-line-pseudo
+    FirstLine,
 
     // Non-eager pseudos.
     Backdrop,
@@ -106,6 +113,8 @@ impl ToCss for PseudoElement {
             Before => "::before",
             Selection => "::selection",
             FirstLetter => "::first-letter",
+            // VIPER-PATCH(servo-first-line): its serialization.
+            FirstLine => "::first-line",
             Backdrop => "::backdrop",
             DetailsContent => "::details-content",
             Marker => "::marker",
@@ -143,7 +152,8 @@ impl ::selectors::parser::PseudoElement for PseudoElement {
 }
 
 /// The number of eager pseudo-elements. Keep this in sync with cascade_type.
-pub const EAGER_PSEUDO_COUNT: usize = 4;
+// VIPER-PATCH(servo-first-line): `FirstLine` is the fifth eager one.
+pub const EAGER_PSEUDO_COUNT: usize = 5;
 
 impl PseudoElement {
     /// Gets the canonical index of this eagerly-cascaded pseudo-element.
@@ -219,7 +229,9 @@ impl PseudoElement {
     /// Whether the current pseudo element is :first-line
     #[inline]
     pub fn is_first_line(&self) -> bool {
-        false
+        // VIPER-PATCH(servo-first-line): the cascade's adjuster marks the
+        // first line's subtree through this.
+        *self == PseudoElement::FirstLine
     }
 
     /// Whether this pseudo-element is representing the color swatch
@@ -273,6 +285,8 @@ impl PseudoElement {
             | PseudoElement::Before
             | PseudoElement::FirstLetter
             | PseudoElement::Selection => PseudoElementCascadeType::Eager,
+            // VIPER-PATCH(servo-first-line): eager, as in Gecko.
+            PseudoElement::FirstLine => PseudoElementCascadeType::Eager,
             PseudoElement::Backdrop
             | PseudoElement::ColorSwatch
             | PseudoElement::FileSelectorButton
@@ -312,6 +326,9 @@ impl PseudoElement {
     pub fn property_restriction(&self) -> Option<PropertyFlags> {
         Some(match self {
             PseudoElement::FirstLetter => PropertyFlags::APPLIES_TO_FIRST_LETTER,
+            // VIPER-PATCH(servo-first-line): only the properties that apply
+            // to the first line, as for Gecko's.
+            PseudoElement::FirstLine => PropertyFlags::APPLIES_TO_FIRST_LINE,
             PseudoElement::Marker if crate::pref!("layout.css.marker.restricted") => {
                 PropertyFlags::APPLIES_TO_MARKER
             },
@@ -753,6 +770,9 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             "selection" => Selection,
             "file-selector-button" => FileSelectorButton,
             "first-letter" => FirstLetter,
+            // VIPER-PATCH(servo-first-line): Chrome parses `::first-line`
+            // and the CSS 2 `:first-line`, which reaches here too.
+            "first-line" => FirstLine,
             "marker" => Marker,
             "details-content" => DetailsContent,
             "color-swatch" => ColorSwatch,
@@ -1157,5 +1177,49 @@ mod chrome_dom_api_pseudos_tests {
             assert!(!parses(selectors), "{selectors}");
         }
         assert!(parses(":lang(en)"));
+    }
+}
+
+// VIPER-PATCH(servo-first-line): the pseudo-element's tests.
+#[cfg(test)]
+mod servo_first_line_tests {
+    use super::{PseudoElement, SelectorImpl, SelectorParser, EAGER_PSEUDO_COUNT};
+    use crate::properties::{LonghandId, PropertyFlags};
+    use crate::stylesheets::UrlExtraData;
+    use cssparser::ToCss;
+
+    fn parses(selectors: &str) -> bool {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        SelectorParser::parse_author_origin_no_namespace(selectors, &url).is_ok()
+    }
+
+    #[test]
+    fn servo_first_line_parses_serializes_and_restricts() {
+        for selectors in [
+            "p::first-line",
+            "p:first-line",
+            "P::FIRST-LINE",
+            "::first-line",
+        ] {
+            assert!(parses(selectors), "{selectors}");
+        }
+        assert!(!parses("p::first-line::before"));
+        let line = PseudoElement::FirstLine;
+        assert_eq!(line.to_css_string(), "::first-line");
+        assert!(line.is_first_line() && line.is_eager());
+        assert!(!PseudoElement::FirstLetter.is_first_line());
+        assert_eq!(EAGER_PSEUDO_COUNT, 5);
+        assert_eq!(PseudoElement::from_eager_index(line.eager_index()), line);
+        let mut eager = Vec::new();
+        SelectorImpl::each_eagerly_cascaded_pseudo_element(|p| eager.push(p));
+        assert_eq!(eager.last(), Some(&line));
+        let restriction = line.property_restriction().map(|f| f.bits());
+        assert_eq!(
+            restriction,
+            Some(PropertyFlags::APPLIES_TO_FIRST_LINE.bits())
+        );
+        let applies = |id: LonghandId| id.flags().contains(PropertyFlags::APPLIES_TO_FIRST_LINE);
+        assert!(applies(LonghandId::Color) && applies(LonghandId::Visibility));
+        assert!(!applies(LonghandId::MarginTop) && !applies(LonghandId::Display));
     }
 }

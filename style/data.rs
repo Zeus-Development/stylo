@@ -111,7 +111,9 @@ impl fmt::Debug for EagerPseudoArray {
 
 // Can't use [None; EAGER_PSEUDO_COUNT] here because it complains
 // about Copy not being implemented for our Arc type.
-const EMPTY_PSEUDO_ARRAY: &EagerPseudoArrayInner = &[None, None, None, None];
+// VIPER-PATCH(servo-first-line): sized by the count, which servo's
+// `FirstLine` raises to five (Gecko's stays four).
+const EMPTY_PSEUDO_ARRAY: &EagerPseudoArrayInner = &[const { None }; EAGER_PSEUDO_COUNT];
 
 impl EagerPseudoStyles {
     /// Returns whether there are any pseudo styles.
