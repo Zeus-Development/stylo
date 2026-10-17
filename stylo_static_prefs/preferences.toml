@@ -2,7 +2,12 @@
 "dom.viewTransitions.cross-document.enabled" = false
 "gfx.font_rendering.opentype_svg.enabled" = false
 "layout.columns.enabled" = false
-"layout.container-queries.enabled" = false
+# VIPER-PATCH(chrome-prefs): Chrome match. Chrome 154 parses `container-type`
+# and `container-name`; upstream's servo default leaves both out. Servo builds
+# still parse no `@container` rule and no container unit, so no container
+# lookup runs (PATCHES.md, "Known unpatched sites"). Proof: Viper's
+# `fork_patches::chrome_prefs_defaults`.
+"layout.container-queries.enabled" = true
 "layout.css.alpha-color-function.enabled" = true
 "layout.css.anchor-positioning.enabled" = false
 "layout.css.appearance-base.enabled" = false

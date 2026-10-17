@@ -20,4 +20,5 @@ fn test_basic_preferences() {
     // VIPER-PATCH(chrome-prefs): Chrome parses `writing-mode` and `subgrid`.
     assert!(pref!("layout.writing-mode.enabled"));
     assert!(pref!("layout.css.grid-template-subgrid-value.enabled"));
+    assert!(pref!("layout.container-queries.enabled"));
 }
