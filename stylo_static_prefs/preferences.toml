@@ -20,7 +20,11 @@
 "layout.css.font-palette.enabled" = false
 "layout.css.font-tech.enabled" = false
 "layout.css.grid-template-masonry-value.enabled" = false
-"layout.css.grid-template-subgrid-value.enabled" = false
+# VIPER-PATCH(chrome-prefs): Chrome match. Chrome 154 parses `subgrid` in
+# `grid-template-columns` and `grid-template-rows`; upstream's servo default
+# refuses it. Proof: Viper's
+# `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute`.
+"layout.css.grid-template-subgrid-value.enabled" = true
 # VIPER-PATCH(chrome-prefs): Chrome match. Chrome 154 parses `:has()` in
 # stylesheets; upstream's servo default leaves it off. Proof:
 # Viper's `cascade::has_in_a_stylesheet`.
@@ -67,4 +71,8 @@
 "layout.threads" = 0
 "layout.unimplemented" = false
 "layout.variable_fonts.enabled" = false
-"layout.writing-mode.enabled" = false
+# VIPER-PATCH(chrome-prefs): Chrome match. Chrome 154 parses `writing-mode`
+# (`vertical-rl`, `vertical-lr` and the others); upstream's servo default
+# leaves the property out, so a declaration of it is dropped. Proof: Viper's
+# `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute`.
+"layout.writing-mode.enabled" = true

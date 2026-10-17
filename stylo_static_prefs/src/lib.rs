@@ -16,4 +16,8 @@ fn test_basic_preferences() {
     assert_eq!(pref!("layout.threads"), 0);
     set_pref!("layout.threads", 42);
     assert_eq!(pref!("layout.threads"), 42);
+
+    // VIPER-PATCH(chrome-prefs): Chrome parses `writing-mode` and `subgrid`.
+    assert!(pref!("layout.writing-mode.enabled"));
+    assert!(pref!("layout.css.grid-template-subgrid-value.enabled"));
 }

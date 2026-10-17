@@ -91,7 +91,7 @@ apart from the packaging files.
 | `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper PR #47 (V10a part 2) | 25 / 57 |
 | `element-data-checked` | `stylo`: `data.rs` | Soundness: `ElementDataWrapper::borrow` and `borrow_mut` are safe functions that hand out `&ElementData` and `&mut ElementData` from an `UnsafeCell`, and upstream checks the borrow flag only under `debug_assertions`, so a release build lets safe code alias `&mut`; the flag is now checked in every build, and `try_borrow`/`try_borrow_mut` report a conflict | `viper-style::api fork_patches::element_data_checked_try_borrow_mut_refuses_a_second_borrow` | Candidate; draft to the owner first | Viper V10a part 3a | 47 / 23 |
 | `chrome-attr-s-flag` | `stylo`: `servo/selector_parser.rs` | Chrome match: Stylo's servo `SelectorParser` returns `false` from the `selectors-attr-flag-hook` hook, so a stylesheet rule whose selector uses the `s` attribute flag is dropped and a forgiving list drops just that selector, as in Chrome 154 (which refuses the flag in stylesheets as in its DOM APIs); upstream parses the flag | `viper-style::cascade fork_patches::chrome_attr_s_flag_in_stylesheets` (the cascade test binary) | Chrome-specific; not offered | Viper V10a part 3b | 13 / 19 |
-| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them) | `viper-style::api fork_patches::chrome_prefs_defaults` | Chrome-specific; not offered | Viper V10a part 3b | 17 / 2 |
+| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them); since Viper V13b part 2f1 also `layout.writing-mode.enabled` and `layout.css.grid-template-subgrid-value.enabled` true (Chrome 154 computes `writing-mode` and the `subgrid` value of `grid-template-columns` and `-rows`; upstream's servo defaults drop both declarations) | `viper-style::api fork_patches::chrome_prefs_defaults`, and `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute` | Chrome-specific; not offered | Viper V10a part 3b; extended by Viper V13b part 2f1 | 27 / 5 |
 | `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
 | `chrome-font-size-precision` | `stylo`: `values/specified/font.rs` | Chrome match: computed font sizes stay exact in servo builds (Chrome 154: `1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px); upstream quantizes them to 10 bits of precision, as Gecko does (18.7188px, 13.3281px), which also shifts the em lengths and line heights derived from them (Viper's computed-value goldens `ua-structure-font-size`, `cascade-inherit-font-size`); Gecko builds still quantize | `viper-style::cascade fork_patches::chrome_font_size_precision`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 11 / 0 |
 | `chrome-display-ruby` | `stylo`: `values/specified/box.rs` | Chrome match: servo builds parse and report `display: ruby` and `ruby-text` (Chrome 154 gives them to `ruby` and `rt` and reports them; Viper's golden `ua-text-display`), and a blockified ruby serializes as `block ruby`; upstream has them in Gecko builds only. The other internal ruby values, which Chrome refuses, and the Gecko ruby style adjustments stay Gecko-only | `viper-style::cascade fork_patches::chrome_display_ruby`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 19 / 43 |
@@ -279,13 +279,28 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and
   `layout.grid.enabled` true. Each line carries the marker and names its
   Viper proof. `test_basic_preferences` now expects `layout.threads` 0.
-- **Spots.** `stylo_static_prefs/preferences.toml` (four values) and
-  `stylo_static_prefs/src/lib.rs` (the test's expectation).
+- **Extension (Viper V13b part 2f1).** `layout.writing-mode.enabled` and
+  `layout.css.grid-template-subgrid-value.enabled` true: upstream's servo
+  defaults leave the `writing-mode` property out and refuse `subgrid` in
+  `grid-template-columns` and `-rows`, so both declarations were dropped,
+  every writing mode computed to `horizontal-tb` and a subgrid had no
+  explicit tracks; Chrome 154 computes both (owner decision of 2026-10-14
+  in Viper's ADR 0023). `test_basic_preferences` also expects the two
+  values. In Viper's layout corpus (development split) the change loses no
+  value: `block-18-vertical-rl` gains 24 values at each of its two
+  viewports (156 to 180 of 263) and `grid-19-subgrid` is unchanged, since
+  Viper's conversion already gave `subgrid` no explicit tracks. Laying out
+  vertical modes and subgrids is still Viper's work, not the patch's.
+- **Spots.** `stylo_static_prefs/preferences.toml` (six values) and
+  `stylo_static_prefs/src/lib.rs` (the test's expectations).
 - **Fork tests.** `test_basic_preferences`.
-- **Viper proofs.** `chrome_prefs_defaults` (the four values) in the gate's
+- **Viper proofs.** `chrome_prefs_defaults` (the six values) in the gate's
   patch proofs, and Viper's cascade tests `has_in_a_stylesheet`,
-  `nth_child_of_in_a_stylesheet` and `display_grid_is_accepted`, and the
-  thread test `restyle_spawns_no_thread`.
+  `nth_child_of_in_a_stylesheet` and `display_grid_is_accepted`, the
+  thread test `restyle_spawns_no_thread`, and since V13b part 2f1
+  `chrome_prefs_writing_mode_and_subgrid_compute` (a stylesheet's
+  `writing-mode: vertical-rl` and `grid-template-columns: subgrid` are
+  computed).
 - **Commands.** `cargo test -p stylo_static_prefs`.
 - **Upstream.** Chrome-specific defaults, so not offered.
 
