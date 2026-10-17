@@ -105,6 +105,7 @@ apart from the packaging files.
 | `selectors-compound-is-alias` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_compound_is_alias`, names an alias of `:is()` whose argument is a non-empty, non-forgiving, comma-separated list of compound selectors, as Chrome 154's legacy `:-webkit-any()` takes (Viper's selector goldens `names-webkit-any-list`, `names-webkit-any-complex`, `names-webkit-any-empty`, `names-webkit-any-invalid-item`, `names-webkit-any-in-not`); the existing `is_is_alias` parses the forgiving complex-selector list of `:is()` instead, and upstream has no `:-webkit-any()` | `viper-style::api fork_patches::compound_is_alias_parses_webkit_any` | Candidate; draft to the owner first | Viper V10b part 4a | 45 / 39 |
 | `chrome-dom-api-pseudos` | `stylo`: `servo/selector_parser.rs` | Chrome match: three variants for the names Chrome 154's DOM selector APIs accept and servo's parser refuses, which only an embedder's DOM-API parser builds (servo's own parser never produces them, so the cascade never meets them): `NonTSPseudoClass::Dir` (the `:dir()` identifier as written), `NonTSPseudoClass::Unmatched` (any other such pseudo-class, holding its serialization) and the unit `PseudoElement::Unmatched`, appended last (`PSEUDO_COUNT` follows it; it serializes as `::-internal-unmatched`, cascades lazily and accepts user-action pseudo-classes after it). Neither pseudo-class has element state | `viper-style::api fork_patches::chrome_dom_api_pseudos_parse_and_match_nothing` | Chrome-specific; not offered | Viper V10b part 4a | 49 / 42 |
 | `servo-first-line` | `stylo`: `servo/selector_parser.rs`, `data.rs`, `properties/data.py` | Chrome match: servo mode had no ::first-line; Chrome 154 styles it. `PseudoElement::FirstLine`, the fifth eager pseudo-element (after `FirstLetter`; `EAGER_PSEUDO_COUNT` 5, and `data.rs`'s empty eager array is sized by the count instead of four `None`s), parsed as `::first-line` and the CSS 2 `:first-line`, serialized as `::first-line`, with `is_first_line()` true and the `APPLIES_TO_FIRST_LINE` property restriction. Servo builds also apply `visibility` to the first line, as Blink 154 does (`valid_for_first_line` in `css_properties.json5`) and Gecko does not. The cascade's first-line reparenting was already shared code. Servo has no first-line layout, which is why upstream lacks it (register entry `adr:layout-first-line`) | `viper-style::api fork_patches::servo_first_line_parses_and_restricts`, and the computed-value golden suite (`first-line.html`) | Candidate; draft to the owner first | Viper V10b part 4b2 | 32 / 43 |
+| `stack-limit-miri` | `stylo`: `context.rs` | Test tooling: Stylo's stack-depth sanity check assumes a contiguous stack, which Miri does not model. `StackLimitChecker` records the address of a local variable when a thread-local style context is made, and `limit_exceeded`, which Stylo's invalidation calls (`TreeStyleInvalidator`), checks in debug builds that a later local lies within the style thread's stack size of it; under Miri every local is its own allocation at an address of Miri's allocator, so the check failed Viper's incremental-restyle tests under Miri (`distance_to_stack_bottom <= max_allowable_distance`), and `new`'s subtraction could overflow. Under `cfg(miri)` only, `limit_exceeded` returns `false` before its checks and `new` saturates; builds outside Miri are upstream's code | `miri` (Viper's slow Miri run requires its two incremental-restyle tests by name, under both models) | Candidate; draft to the owner first | Viper V13b part 2f1 | 22 / 0 |
 
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -659,6 +660,45 @@ Problem, change, every spot, the Miri commands and the before/after results:
   restyle and after incremental ones.
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Candidate; draft to the owner first. Nothing sent.
+
+## Patch `stack-limit-miri`
+
+- **Problem.** `StackLimitChecker` (`style/context.rs`) is made with every
+  `ThreadLocalStyleContext` and records the address of a local variable
+  less the allowed stack size. `limit_exceeded`, which the invalidation
+  calls before it descends (`TreeStyleInvalidator`,
+  `style/invalidation/element/invalidator.rs`), compares a later local's
+  address with it, and in debug builds first checks that the distance to
+  the stack's bottom stays within `STYLE_THREAD_STACK_SIZE_KB` plus 10 KiB.
+  That assumes one contiguous stack that grows downwards. Miri does not
+  model one: each local is a separate allocation at an address of Miri's
+  allocator, so the distance means nothing and grows with what was
+  allocated since the checker was made. Viper's slow Miri run of
+  2026-10-16 failed two incremental-restyle tests on it (`assertion failed:
+  distance_to_stack_bottom <= max_allowable_distance` at
+  `style/context.rs:582`), with no undefined behaviour and no leak; `new`'s
+  subtraction can also overflow when Miri's address is below the limit.
+  Real builds are unaffected: their stacks are contiguous.
+- **Change.** Under `cfg(miri)` only (`cfg!(miri)`, which is `false`
+  outside Miri), `limit_exceeded` returns `false` before its checks, so the
+  invalidation recurses as it does on a real stack well within its limit,
+  and `new` takes `saturating_sub`. Builds outside Miri run upstream's
+  code; nothing else in either function changes. Neither of the other ways
+  works: `SERVO_STYLE_THREAD_STACK_SIZE_KB` moves the threshold, and `new`
+  then subtracts a larger limit from Miri's address; turning Stylo's debug
+  assertions off under Miri hides every other assertion.
+- **Spots.** `style/context.rs`: `StackLimitChecker::new` and
+  `StackLimitChecker::limit_exceeded`.
+- **Fork tests.** None: the checker is reached by an invalidation under
+  Miri. All 17 `stylo` library tests pass.
+- **Viper proof.** `miri`: Viper's slow Miri run (`miri_slow_all` in its
+  `scripts/gate/miri.sh`) requires the two tests by name,
+  `incremental::a_mixed_case_attribute_restyles_what_lowercase_selectors_read`
+  and `incremental::display_none_subtrees_follow_changes_anywhere`, under
+  Stacked Borrows and Tree Borrows; without the patch both fail on the
+  assertion.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** A candidate for test tooling; draft to the owner first.
 
 ## Rebase procedure (fork side)
 

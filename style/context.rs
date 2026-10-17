@@ -542,6 +542,16 @@ impl StackLimitChecker {
     /// of up to |stack_size| bytes beyond (below) the current stack pointer.
     #[inline(never)]
     pub fn new(stack_size_limit: usize) -> Self {
+        // VIPER-PATCH(stack-limit-miri): Miri gives every local its own
+        // allocation, so the "stack pointer" below is an arbitrary address
+        // that may be smaller than the limit, and the subtraction would
+        // overflow. Under Miri only, saturate instead; `limit_exceeded` then
+        // ignores the value. Builds outside Miri are upstream's code.
+        if cfg!(miri) {
+            return StackLimitChecker {
+                lower_limit: StackLimitChecker::get_sp().saturating_sub(stack_size_limit),
+            };
+        }
         StackLimitChecker {
             lower_limit: StackLimitChecker::get_sp() - stack_size_limit,
         }
@@ -550,6 +560,18 @@ impl StackLimitChecker {
     /// Checks whether the previously stored stack limit has now been exceeded.
     #[inline(never)]
     pub fn limit_exceeded(&self) -> bool {
+        // VIPER-PATCH(stack-limit-miri): the checks below assume one
+        // contiguous stack that grows downwards. Miri does not model one:
+        // each local is a separate allocation at an address of Miri's
+        // allocator, so the distance to the recorded limit is meaningless and
+        // the debug sanity check fails once enough was allocated since the
+        // checker was made (Viper's incremental-restyle tests under Miri).
+        // Under Miri only, the limit is never exceeded: the invalidation
+        // recurses as it does on a real stack well within the limit. Builds
+        // outside Miri are upstream's code.
+        if cfg!(miri) {
+            return false;
+        }
         let curr_sp = StackLimitChecker::get_sp();
 
         // Do some sanity-checking to ensure that our invariants hold, even in
