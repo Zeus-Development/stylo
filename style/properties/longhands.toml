@@ -345,7 +345,7 @@ struct = "effects"
 vector = { simple_bindings = true, separator = "Space", animation_type = "with_zero" }
 gecko_ffi_name = "mBackdropFilters"
 gecko_pref = "layout.css.backdrop-filter.enabled"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(chrome-layout-properties): see contain.
 spec = "https://drafts.fxtf.org/filter-effects-2/#propdef-backdrop-filter"
 affects = "overflow"
 
@@ -630,7 +630,10 @@ affects = "layout"
 type = "Contain"
 initial = "specified::Contain::empty()"
 struct = "box"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(chrome-layout-properties): parsed in servo builds, as in
+# Chrome 154 (upstream: behind layout.unimplemented); likewise
+# backdrop-filter and offset-path, and content-visibility and transform-box
+# (upstream: Gecko only). Viper's layout and paint ignore them so far.
 animation_type = "none"
 spec = "https://drafts.csswg.org/css-contain/#contain-property"
 affects = "layout"
@@ -704,7 +707,7 @@ affects = "layout"
 type = "ContentVisibility"
 initial = "computed::ContentVisibility::Visible"
 struct = "box"
-engine = "gecko"
+# VIPER-PATCH(chrome-layout-properties): see contain.
 spec = "https://drafts.csswg.org/css-contain/#content-visibility"
 affects = "layout"
 
@@ -1463,7 +1466,7 @@ affects = "overflow"
 type = "OffsetPath"
 initial = "computed::OffsetPath::none()"
 struct = "box"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(chrome-layout-properties): see contain.
 flags = "CAN_ANIMATE_ON_COMPOSITOR SCROLL_LINKED_EFFECTIVE"
 spec = "https://drafts.fxtf.org/motion-1/#offset-path-property"
 servo_restyle_damage = "rebuild_box"
@@ -2118,7 +2121,7 @@ affects = "overflow"
 type = "TransformBox"
 initial = "computed::TransformBox::ViewBox"
 struct = "box"
-engine = "gecko"
+# VIPER-PATCH(chrome-layout-properties): see contain.
 spec = "https://drafts.csswg.org/css-transforms/#transform-box"
 animation_type = "discrete"
 affects = "overflow"

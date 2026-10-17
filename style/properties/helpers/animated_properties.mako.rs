@@ -20,9 +20,11 @@ use crate::properties::{
 };
 #[cfg(feature = "gecko")] use crate::properties::{
     gecko,
-    longhands::content_visibility::computed_value::T as ContentVisibility,
     NonCustomPropertyId,
 };
+// VIPER-PATCH(chrome-layout-properties): content-visibility's animation in
+// servo builds too, which parse it (longhands.toml).
+use crate::properties::longhands::content_visibility::computed_value::T as ContentVisibility;
 use std::ptr;
 use std::mem;
 use rustc_hash::FxHashMap;
@@ -689,7 +691,8 @@ impl ToAnimatedZero for Display {
 }
 
 /// <https://drafts.csswg.org/css-contain-3/#content-visibility-animation>
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(chrome-layout-properties): in servo builds too (above), as are
+// the next two impls.
 impl Animate for ContentVisibility {
     #[inline]
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
@@ -711,7 +714,6 @@ impl Animate for ContentVisibility {
     }
 }
 
-#[cfg(feature = "gecko")]
 impl ComputeSquaredDistance for ContentVisibility {
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
@@ -719,7 +721,6 @@ impl ComputeSquaredDistance for ContentVisibility {
     }
 }
 
-#[cfg(feature = "gecko")]
 impl ToAnimatedZero for ContentVisibility {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {

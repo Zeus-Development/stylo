@@ -2279,3 +2279,27 @@ mod chrome_display_ruby_tests {
         assert_eq!(blockified.to_css_string(), "block ruby");
     }
 }
+
+// VIPER-PATCH(chrome-layout-properties): the patch's fork test.
+#[cfg(all(test, feature = "servo"))]
+mod chrome_layout_properties_tests {
+    #[test]
+    fn chrome_layout_properties_parse_in_servo_builds() {
+        use crate::values::specified::text::viper_parse_tests::supports;
+        for (property, value) in [
+            ("contain", "strict"),
+            ("contain", "inline-size layout style paint"),
+            ("container-type", "size"),
+            ("container-name", "a b"),
+            ("backdrop-filter", "blur(2px) brightness(1)"),
+            ("content-visibility", "auto"),
+            ("transform-box", "content-box"),
+            ("transform-box", "stroke-box"),
+            ("offset-path", "path(\"M0 0 L10 10\")"),
+            ("will-change", "contain, content-visibility"),
+        ] {
+            assert!(supports(property, value), "{property}: {value}");
+        }
+        assert!(!supports("contain", "block-size"));
+    }
+}
