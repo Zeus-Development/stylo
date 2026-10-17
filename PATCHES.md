@@ -74,8 +74,11 @@ part 1 adds `style-struct-arc-borrow`, `stylesheet-contents-arc`,
 `has-subtree-iterative` to `selectors`; Viper's V10b part 3 adds
 `matches-simple-selector-inline` to `selectors`; Viper's V10b part 4a adds
 `chrome-dom-api-pseudos` to `stylo` and `selectors-compound-is-alias` to
-`selectors`.
-The other six directories equal the base commit's. V10b part 4a pins no new
+`selectors`; Viper's V10b-6 adds `chrome-value-parsing` to `stylo` and
+`stylo_atoms` (its `static_atoms.txt`, which has no comment syntax, so the
+patch's marker sits beside the `atom!("scripting")` that uses the new atom)
+and `chrome-layout-properties` to `stylo`.
+The other five directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
 the index `cksum`, both `.cargo_vcs_info.json` name `34d25f741…`, and the
@@ -91,7 +94,7 @@ apart from the packaging files.
 | `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper PR #47 (V10a part 2) | 25 / 57 |
 | `element-data-checked` | `stylo`: `data.rs` | Soundness: `ElementDataWrapper::borrow` and `borrow_mut` are safe functions that hand out `&ElementData` and `&mut ElementData` from an `UnsafeCell`, and upstream checks the borrow flag only under `debug_assertions`, so a release build lets safe code alias `&mut`; the flag is now checked in every build, and `try_borrow`/`try_borrow_mut` report a conflict | `viper-style::api fork_patches::element_data_checked_try_borrow_mut_refuses_a_second_borrow` | Candidate; draft to the owner first | Viper V10a part 3a | 47 / 23 |
 | `chrome-attr-s-flag` | `stylo`: `servo/selector_parser.rs` | Chrome match: Stylo's servo `SelectorParser` returns `false` from the `selectors-attr-flag-hook` hook, so a stylesheet rule whose selector uses the `s` attribute flag is dropped and a forgiving list drops just that selector, as in Chrome 154 (which refuses the flag in stylesheets as in its DOM APIs); upstream parses the flag | `viper-style::cascade fork_patches::chrome_attr_s_flag_in_stylesheets` (the cascade test binary) | Chrome-specific; not offered | Viper V10a part 3b | 13 / 19 |
-| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them); since Viper V13b part 2f1 also `layout.writing-mode.enabled` and `layout.css.grid-template-subgrid-value.enabled` true (Chrome 154 computes `writing-mode` and the `subgrid` value of `grid-template-columns` and `-rows`; upstream's servo defaults drop both declarations) | `viper-style::api fork_patches::chrome_prefs_defaults`, and `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute` | Chrome-specific; not offered | Viper V10a part 3b; extended by Viper V13b part 2f1 | 27 / 5 |
+| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them); since Viper V13b part 2f1 also `layout.writing-mode.enabled` and `layout.css.grid-template-subgrid-value.enabled` true (Chrome 154 computes `writing-mode` and the `subgrid` value of `grid-template-columns` and `-rows`; upstream's servo defaults drop both declarations); since Viper V10b-6 also `layout.container-queries.enabled` true (Chrome 154 parses `container-type` and `container-name`; servo builds still parse no `@container` rule) | `viper-style::api fork_patches::chrome_prefs_defaults`, and `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute` | Chrome-specific; not offered | Viper V10a part 3b; extended by Viper V13b part 2f1 and V10b-6 | 33 / 6 |
 | `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
 | `chrome-font-size-precision` | `stylo`: `values/specified/font.rs` | Chrome match: computed font sizes stay exact in servo builds (Chrome 154: `1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px); upstream quantizes them to 10 bits of precision, as Gecko does (18.7188px, 13.3281px), which also shifts the em lengths and line heights derived from them (Viper's computed-value goldens `ua-structure-font-size`, `cascade-inherit-font-size`); Gecko builds still quantize | `viper-style::cascade fork_patches::chrome_font_size_precision`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 11 / 0 |
 | `chrome-display-ruby` | `stylo`: `values/specified/box.rs` | Chrome match: servo builds parse and report `display: ruby` and `ruby-text` (Chrome 154 gives them to `ruby` and `rt` and reports them; Viper's golden `ua-text-display`), and a blockified ruby serializes as `block ruby`; upstream has them in Gecko builds only. The other internal ruby values, which Chrome refuses, and the Gecko ruby style adjustments stay Gecko-only | `viper-style::cascade fork_patches::chrome_display_ruby`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 19 / 43 |
@@ -107,6 +110,8 @@ apart from the packaging files.
 | `servo-first-line` | `stylo`: `servo/selector_parser.rs`, `data.rs`, `properties/data.py` | Chrome match: servo mode had no ::first-line; Chrome 154 styles it. `PseudoElement::FirstLine`, the fifth eager pseudo-element (after `FirstLetter`; `EAGER_PSEUDO_COUNT` 5, and `data.rs`'s empty eager array is sized by the count instead of four `None`s), parsed as `::first-line` and the CSS 2 `:first-line`, serialized as `::first-line`, with `is_first_line()` true and the `APPLIES_TO_FIRST_LINE` property restriction. Servo builds also apply `visibility` to the first line, as Blink 154 does (`valid_for_first_line` in `css_properties.json5`) and Gecko does not. The cascade's first-line reparenting was already shared code. Servo has no first-line layout, which is why upstream lacks it (register entry `adr:layout-first-line`) | `viper-style::api fork_patches::servo_first_line_parses_and_restricts`, and the computed-value golden suite (`first-line.html`) | Candidate; draft to the owner first | Viper V10b part 4b2 | 32 / 43 |
 | `stack-limit-miri` | `stylo`: `context.rs` | Test tooling: Stylo's stack-depth sanity check assumes a contiguous stack, which Miri does not model. `StackLimitChecker` records the address of a local variable when a thread-local style context is made, and `limit_exceeded`, which Stylo's invalidation calls (`TreeStyleInvalidator`), checks in debug builds that a later local lies within the style thread's stack size of it; under Miri every local is its own allocation at an address of Miri's allocator, so the check failed Viper's incremental-restyle tests under Miri (`distance_to_stack_bottom <= max_allowable_distance`), and `new`'s subtraction could overflow. Under `cfg(miri)` only, `limit_exceeded` returns `false` before its checks and `new` saturates; builds outside Miri are upstream's code | `miri` (Viper's slow Miri run requires its two incremental-restyle tests by name, under both models) | Candidate; draft to the owner first | Viper V13b part 2f1 | 22 / 0 |
 
+| `chrome-value-parsing` | `stylo`: `values/specified/text.rs`, `values/specified/ui.rs`, `values/specified/font.rs`, `values/specified/counters.rs`, `counter_style/mod.rs`, `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Chrome match: servo builds accept and refuse the values the pinned Chrome 154's `CSS.supports` does where Viper's parse probe (its `tests/parse` suite) found a keyword list or one parse branch apart: `text-align` refuses `match-parent` and the `-moz-` legacy spellings and parses `-webkit-match-parent` and `-webkit-auto`; `text-transform` refuses `full-width` and `full-size-kana`; `text-decoration-line` parses `spelling-error` and `grammar-error`, `text-indent` `hanging` and `each-line`; the `text-wrap` shorthand and `text-wrap-style` (with `pretty`), `counter-reset`, `counter-increment` and `counter-set` parse, without `reversed()`; `list-style-type` refuses `symbols()`; `cursor`, `unicode-bidi` and `font-size` take Chrome's `-webkit-` aliases; the `scripting` media feature evaluates to `enabled`. Upstream builds these for Gecko or behind `layout.unimplemented` | `viper-style::api fork_patches::chrome_value_parsing_accepts_what_chrome_accepts`, and the parse golden suite | Chrome-specific; not offered | Viper V10b-6 | 93 / 87 |
+| `chrome-layout-properties` | `stylo`: `properties/longhands.toml`, `properties/helpers/animated_properties.mako.rs`, `values/specified/transform.rs`, `values/specified/box.rs` (its test) | Chrome match: servo builds parse `contain`, `backdrop-filter` and `offset-path` (upstream: behind `layout.unimplemented`), `content-visibility` and `transform-box` (upstream: Gecko only; with `content-visibility`'s animation impls, and all five boxes), as Chrome 154 does; their names in `will-change` follow. Viper's layout corpus loses no value with them | `viper-style::api fork_patches::chrome_layout_properties_parse_and_compute`, and viper-layout's `contained_floats_stay_inside_their_box` | Chrome-specific; not offered | Viper V10b-6 | 16 / 24 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -123,7 +128,7 @@ anything makes it reachable.
 
 | Site | Fault | Why unreachable now | Viper register entry |
 | --- | --- | --- | --- |
-| `ComputedValues::to_arc` (`style/properties/properties.mako.rs`), called only from `ContainerCondition`'s container lookup (`style/stylesheets/container_rule.rs`) | Rebuilds an `Arc` with `Arc::from_raw_addrefed` from `&self`, a reference that grants no access to the refcount: the fault `style-struct-arc-borrow` and `stylesheet-contents-arc` fix elsewhere, undefined behaviour under both of Miri's aliasing models | Servo builds parse no `@container` rule (`rule_parser.rs` accepts `container` in Gecko builds only), and `container-type` and `container-name` sit behind `layout.container-queries.enabled`, which is `false`; so no container lookup runs | `adr:style-container-to-arc` |
+| `ComputedValues::to_arc` (`style/properties/properties.mako.rs`), called only from `ContainerCondition`'s container lookup (`style/stylesheets/container_rule.rs`) | Rebuilds an `Arc` with `Arc::from_raw_addrefed` from `&self`, a reference that grants no access to the refcount: the fault `style-struct-arc-borrow` and `stylesheet-contents-arc` fix elsewhere, undefined behaviour under both of Miri's aliasing models | Servo builds parse no `@container` rule (`rule_parser.rs` accepts `container` in Gecko builds only) and no container unit (`cqw` and the others, `values/specified/length.rs`, Gecko builds only), so no container condition exists and no container lookup runs. Since Viper V10b-6 `container-type` and `container-name` parse (`layout.container-queries.enabled` is `true`), which nothing reads in servo builds | `adr:style-container-to-arc` |
 
 ## Patch `servo-arc-provenance`
 
@@ -291,7 +296,13 @@ Problem, change, every spot, the Miri commands and the before/after results:
   viewports (156 to 180 of 263) and `grid-19-subgrid` is unchanged, since
   Viper's conversion already gave `subgrid` no explicit tracks. Laying out
   vertical modes and subgrids is still Viper's work, not the patch's.
-- **Spots.** `stylo_static_prefs/preferences.toml` (six values) and
+- **Extension (Viper V10b-6).** `layout.container-queries.enabled` true:
+  upstream's servo default leaves `container-type` and `container-name`
+  out, which Chrome 154 parses. Servo builds still parse no `@container`
+  rule and no container unit, so `ComputedValues::to_arc` stays
+  unreachable (see "Known unpatched sites"). `test_basic_preferences`
+  also expects the value.
+- **Spots.** `stylo_static_prefs/preferences.toml` (seven values) and
   `stylo_static_prefs/src/lib.rs` (the test's expectations).
 - **Fork tests.** `test_basic_preferences`.
 - **Viper proofs.** `chrome_prefs_defaults` (the six values) in the gate's
@@ -300,7 +311,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   thread test `restyle_spawns_no_thread`, and since V13b part 2f1
   `chrome_prefs_writing_mode_and_subgrid_compute` (a stylesheet's
   `writing-mode: vertical-rl` and `grid-template-columns: subgrid` are
-  computed).
+  computed); since V10b-6 `chrome_prefs_defaults` asserts the container
+  queries' preference, and `chrome_layout_properties_parse_and_compute`
+  computes `container-type`.
 - **Commands.** `cargo test -p stylo_static_prefs`.
 - **Upstream.** Chrome-specific defaults, so not offered.
 
@@ -714,6 +727,91 @@ Problem, change, every spot, the Miri commands and the before/after results:
   assertion.
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** A candidate for test tooling; draft to the owner first.
+
+## Patch `chrome-value-parsing`
+
+- **Problem.** Viper's parse probe (the suite `crates/viper-style/tests/parse`)
+  asks the pinned headful Chrome 154 `CSS.supports(property, value)` for
+  2,809 values of 65 properties, and `matchMedia` for the `scripting` media
+  feature, and compares Stylo's own `Declaration::eval` in an author style
+  rule. Before this patch 33 of the 66 cases agreed. Servo builds accept
+  `text-align: match-parent`, the `-moz-` legacy alignments and cursors,
+  `text-transform: full-width` and `full-size-kana`, `reversed()` in
+  `counter-reset` and `symbols()` in `list-style-type`, which Chrome
+  refuses; they refuse the `-webkit-` spellings Chrome takes
+  (`-webkit-match-parent`, `-webkit-auto`, `-webkit-grab` and three more
+  cursors, `-webkit-isolate`, `-webkit-isolate-override`,
+  `-webkit-plaintext`, `-webkit-xxx-large`), `spelling-error`,
+  `grammar-error`, `text-indent`'s `hanging` and `each-line`, the
+  `text-wrap` shorthand, `text-wrap-style`, the three counter properties
+  and the `scripting` media feature, which Chrome accepts.
+- **Change.** Servo builds only, Gecko builds unchanged: keyword aliases
+  and spellings through `cfg_attr` on the derives (`TextAlignKeyword`,
+  `TextAlign::MatchParent`, `CursorKind`, `FontSizeKeyword`), Chrome's
+  `-webkit-` aliases for `unicode-bidi` (`servo_aliases`), one refusal in
+  `TextTransform::validate_mixed_flags`, `TextDecorationLine`'s Gecko
+  keyword list for both, `TextIndent::parse` without its servo early stop,
+  `counter-reset` and `counter-increment` without `layout.unimplemented`,
+  `counter-set`, `text-wrap-style` (with `pretty` as an extra servo value)
+  and the `text-wrap` shorthand for servo, `reversed()` and `symbols()`
+  refused, and a `scripting` feature (`none | initial-only | enabled`)
+  that always evaluates to `enabled`, because Viper runs scripts (Viper's
+  S3-SCRIPTING-OFF will add a device flag) with its atom. The legacy
+  alignments now serialize as `-webkit-center`, `-webkit-left` and
+  `-webkit-right`, as Chrome reports them. Afterwards 50 of the 66 cases
+  agree; the 16 others need values or layouts Viper does not have and stay
+  excluded in Viper's register.
+- **Spots.** `style/values/specified/text.rs` (`TextAlignKeyword`,
+  `TextAlign`, `TextTransform::validate_mixed_flags`,
+  `TextDecorationLine`, `TextIndent::parse`, the test module),
+  `style/values/specified/ui.rs` (`CursorKind`),
+  `style/values/specified/font.rs` (`FontSizeKeyword::XXXLarge`),
+  `style/values/specified/counters.rs` (`parse_counters`),
+  `style/counter_style/mod.rs` (`CounterStyle::parse`),
+  `style/properties/longhands.toml` (`unicode-bidi`, the three counter
+  properties, `text-wrap-style`), `style/properties/shorthands.toml` and
+  `style/properties/shorthands.rs` (`text-wrap`),
+  `style/servo/media_features.rs` (`scripting`) and
+  `stylo_atoms/static_atoms.txt` (the atom).
+- **Fork tests.** `chrome_value_parsing_accepts_what_chrome_accepts` and
+  `chrome_value_parsing_knows_the_scripting_media_feature`; all 20 `stylo`
+  library tests pass.
+- **Viper proofs.** `chrome_value_parsing_accepts_what_chrome_accepts` in
+  the gate's patch proofs, the parse golden suite, and the computed-value
+  goldens `parse-differences-text-align`, `-text-transform` and
+  `-text-wrap-mode`, which equal Chrome since this patch.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
+
+## Patch `chrome-layout-properties`
+
+- **Problem.** Servo builds parse `contain`, `backdrop-filter` and
+  `offset-path` only behind `layout.unimplemented`, and build
+  `content-visibility` and `transform-box` for Gecko only, refusing
+  `transform-box`'s `content-box` and `stroke-box`; Chrome 154 parses all
+  of them, and `will-change` keeps their names. A stylesheet's
+  declarations of them were dropped.
+- **Change.** The two preference gates and the two Gecko-only engines go;
+  `content-visibility`'s `Animate`, `ComputeSquaredDistance` and
+  `ToAnimatedZero` impls, which the generated animation code needs, are
+  built for servo too; servo's `all_transform_boxes_are_enabled` answers
+  `true`. `container-type` and `container-name` follow from `chrome-prefs`.
+  Viper's decision rule: with the patch, its layout corpus (development
+  split) loses no value and its `contain` test meets Chrome's values (a
+  contained float's box 50px tall, the next block at y 58), so every
+  property landed.
+- **Spots.** `style/properties/longhands.toml` (five properties),
+  `style/properties/helpers/animated_properties.mako.rs` (the import and
+  three impls), `style/values/specified/transform.rs`
+  (`all_transform_boxes_are_enabled`) and `style/values/specified/box.rs`
+  (the test module).
+- **Fork tests.** `chrome_layout_properties_parse_in_servo_builds`; all 20
+  `stylo` library tests pass.
+- **Viper proofs.** `chrome_layout_properties_parse_and_compute` in the
+  gate's patch proofs, and viper-layout's
+  `contained_floats_stay_inside_their_box`.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
 
 ## Rebase procedure (fork side)
 
