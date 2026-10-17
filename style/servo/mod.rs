@@ -9,6 +9,8 @@
 pub mod animation;
 #[allow(missing_docs)] // TODO.
 pub mod attr;
+// VIPER-PATCH(chrome-selector-names): Chrome's selector names.
+mod chrome_names;
 mod encoding_support;
 pub mod media_features;
 pub mod restyle_damage;

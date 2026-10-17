@@ -15,6 +15,8 @@ use crate::invalidation::element::element_wrapper::ElementSnapshot;
 use crate::properties::longhands::display::computed_value::T as Display;
 use crate::properties::{ComputedValues, PropertyFlags};
 use crate::selector_parser::AttrValue as SelectorAttrValue;
+// VIPER-PATCH(chrome-selector-names): Chrome's names.
+use super::chrome_names;
 use crate::selector_parser::{PseudoElementCascadeType, SelectorParser};
 use crate::values::{AtomIdent, AtomString};
 use crate::{Atom, CaseSensitivityExt, LocalName, Namespace, Prefix};
@@ -91,9 +93,9 @@ pub enum PseudoElement {
     // VIPER-PATCH(chrome-dom-api-pseudos): Chrome match. A pseudo-element
     // Chrome 154's DOM selector APIs accept and that never matches an
     // element there (`::cue`, `::highlight(x)`, `::-webkit-scrollbar`, any
-    // other `::-webkit-*` name, ...). Servo's own parser never produces it;
-    // only an embedder's DOM-API parser builds it, so the cascade never
-    // meets it. Upstream has no such variant: Servo refuses those names.
+    // other `::-webkit-*` name, ...). Since `chrome-selector-names` servo's
+    // parser builds it too, so stylesheets keep its rules; it cascades
+    // lazily. Upstream has no such variant: Servo refuses those names.
     // Keep it last. https://drafts.csswg.org/css-pseudo-4/
     Unmatched,
 }
@@ -299,7 +301,7 @@ impl PseudoElement {
             | PseudoElement::MozProgressBar
             | PseudoElement::ServoTextControlInnerContainer
             | PseudoElement::ServoTextControlInnerEditor => PseudoElementCascadeType::Lazy,
-            // VIPER-PATCH(chrome-dom-api-pseudos): never cascaded.
+            // VIPER-PATCH(chrome-dom-api-pseudos): computed only on request.
             PseudoElement::Unmatched => PseudoElementCascadeType::Lazy,
             PseudoElement::ServoAnonymousBox
             | PseudoElement::ServoAnonymousTable
@@ -452,9 +454,9 @@ pub enum NonTSPseudoClass {
     // element's directionality, and any other pseudo-class Chrome 154's DOM
     // selector APIs accept and Servo does not, holding its serialization
     // (`:horizontal`, `:host-context(div)`); Chrome matches nearly all of
-    // those on no element of a static page, and the embedder decides. Servo's
-    // own parser never produces either, so the cascade never meets them;
-    // upstream Servo refuses those names.
+    // those on no element of a static page, and the embedder decides. Since
+    // `chrome-selector-names` servo's parser builds both, in stylesheets
+    // too; upstream Servo refuses those names.
     // https://drafts.csswg.org/selectors-4/#the-dir-pseudo
     Dir(Box<str>),
     Unmatched(Box<str>),
@@ -693,6 +695,16 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         &self,
         name: CowRcStr<'i>,
     ) -> Result<NonTSPseudoClass, ParseError> {
+        // VIPER-PATCH(chrome-selector-names): Chrome's names first, and
+        // outside user-agent sheets none of the names Chrome refuses.
+        if !self.in_user_agent_stylesheet()
+            && chrome_names::refused_outside_user_agent_sheets(&name, false)
+        {
+            return Err(ParseError::custom(SelectorParseErrorKind::UnexpectedIdent));
+        }
+        if let Some(chrome) = chrome_names::pseudo_class(&name) {
+            return Ok(chrome);
+        }
         let pseudo_class = match_ignore_ascii_case! { &name,
             "active" => NonTSPseudoClass::Active,
             "any-link" => NonTSPseudoClass::AnyLink,
@@ -747,7 +759,17 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         parser: &mut CssParser<'i>,
         after_part: bool,
     ) -> Result<NonTSPseudoClass, ParseError> {
+        // VIPER-PATCH(chrome-selector-names): Chrome's names first.
+        if let Some(chrome) = chrome_names::functional_pseudo_class(self, &name, parser) {
+            return chrome;
+        }
         let pseudo_class = match_ignore_ascii_case! { &name,
+            // VIPER-PATCH(chrome-selector-names): Chrome 154 takes only an
+            // identifier, so `:lang("en")` is refused outside user-agent
+            // sheets. https://drafts.csswg.org/selectors-4/#the-lang-pseudo
+            "lang" if !after_part && !self.in_user_agent_stylesheet() => {
+                NonTSPseudoClass::Lang(parser.expect_ident()?.as_ref().into())
+            },
             "lang" if !after_part => {
                 NonTSPseudoClass::Lang(parser.expect_ident_or_string()?.as_ref().into())
             },
@@ -763,6 +785,15 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
 
     fn parse_pseudo_element(&self, name: CowRcStr<'i>) -> Result<PseudoElement, ParseError> {
         use self::PseudoElement::*;
+        // VIPER-PATCH(chrome-selector-names): as for pseudo-classes.
+        if !self.in_user_agent_stylesheet()
+            && chrome_names::refused_outside_user_agent_sheets(&name, true)
+        {
+            return Err(ParseError::custom(SelectorParseErrorKind::UnexpectedIdent));
+        }
+        if let Some(chrome) = chrome_names::pseudo_element(&name) {
+            return Ok(chrome);
+        }
         let pseudo_element = match_ignore_ascii_case! { &name,
             "before" => Before,
             "after" => After,
@@ -834,6 +865,25 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         };
 
         Ok(pseudo_element)
+    }
+
+    // VIPER-PATCH(chrome-selector-names): `::cue(b)`, `::highlight(x)`,
+    // `::scroll-button(up)` and the view-transition parts; servo has none.
+    fn parse_functional_pseudo_element(
+        &self,
+        name: CowRcStr<'i>,
+        arguments: &mut CssParser<'i>,
+    ) -> Result<PseudoElement, ParseError> {
+        chrome_names::functional_pseudo_element(self, &name, arguments).unwrap_or_else(|| {
+            Err(ParseError::custom(
+                SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
+            ))
+        })
+    }
+
+    // VIPER-PATCH(chrome-selector-names): Chrome's legacy `:-webkit-any()`.
+    fn parse_compound_is_alias(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("-webkit-any")
     }
 
     fn default_namespace(&self) -> Option<Namespace> {
@@ -1165,18 +1215,13 @@ mod chrome_dom_api_pseudos_tests {
         assert_eq!(PseudoElement::Unmatched.index(), PSEUDO_COUNT - 1);
     }
 
+    // VIPER-PATCH(chrome-selector-names): servo's parser builds the
+    // variants since that patch (its tests are in `chrome_names.rs`); the
+    // pseudo-element's serialization stays a name no sheet can use.
     #[test]
-    fn chrome_dom_api_pseudos_stay_out_of_servo_parsing() {
-        for selectors in [
-            ":dir(ltr)",
-            ":horizontal",
-            "::cue",
-            "::-webkit-scrollbar",
-            "::-internal-unmatched",
-        ] {
-            assert!(!parses(selectors), "{selectors}");
-        }
-        assert!(parses(":lang(en)"));
+    fn chrome_dom_api_pseudos_internal_name_stays_unparsed() {
+        assert!(!parses("::-internal-unmatched"));
+        assert!(parses(":dir(ltr)") && parses("::-webkit-scrollbar"));
     }
 }
 
