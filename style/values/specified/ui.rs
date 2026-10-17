@@ -200,9 +200,13 @@ pub enum CursorKind {
     Move,
     NoDrop,
     NotAllowed,
-    #[parse(aliases = "-moz-grab")]
+    // VIPER-PATCH(chrome-value-parsing): servo builds take Chrome 154's
+    // `-webkit-` aliases of these four cursors instead of `-moz-` ones.
+    #[cfg_attr(feature = "gecko", parse(aliases = "-moz-grab"))]
+    #[cfg_attr(feature = "servo", parse(aliases = "-webkit-grab"))]
     Grab,
-    #[parse(aliases = "-moz-grabbing")]
+    #[cfg_attr(feature = "gecko", parse(aliases = "-moz-grabbing"))]
+    #[cfg_attr(feature = "servo", parse(aliases = "-webkit-grabbing"))]
     Grabbing,
     EResize,
     NResize,
@@ -219,9 +223,11 @@ pub enum CursorKind {
     ColResize,
     RowResize,
     AllScroll,
-    #[parse(aliases = "-moz-zoom-in")]
+    #[cfg_attr(feature = "gecko", parse(aliases = "-moz-zoom-in"))]
+    #[cfg_attr(feature = "servo", parse(aliases = "-webkit-zoom-in"))]
     ZoomIn,
-    #[parse(aliases = "-moz-zoom-out")]
+    #[cfg_attr(feature = "gecko", parse(aliases = "-moz-zoom-out"))]
+    #[cfg_attr(feature = "servo", parse(aliases = "-webkit-zoom-out"))]
     ZoomOut,
     Auto,
 }

@@ -82,8 +82,12 @@ fn parse_counters(
     loop {
         let (name, is_reversed) = match input.next() {
             Ok(Token::Ident(ident)) => (CustomIdent::from_ident(ident, &["none"])?, false),
+            // VIPER-PATCH(chrome-value-parsing): Chrome 154 refuses
+            // `reversed()`; servo builds do the same.
             Ok(Token::Function(name))
-                if counter_type == CounterType::Reset && name.eq_ignore_ascii_case("reversed") =>
+                if counter_type == CounterType::Reset
+                    && !cfg!(feature = "servo")
+                    && name.eq_ignore_ascii_case("reversed") =>
             {
                 input
                     .parse_nested_block(|input| Ok((CustomIdent::parse(input, &["none"])?, true)))?

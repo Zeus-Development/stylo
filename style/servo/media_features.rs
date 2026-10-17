@@ -159,8 +159,26 @@ fn eval_aspect_ratio(context: &Context) -> Ratio {
     Ratio::new(size.width.0 as f32, size.height.0 as f32)
 }
 
+// VIPER-PATCH(chrome-value-parsing): the `scripting` media feature, which
+// Chrome 154 evaluates and upstream's servo list lacks (Gecko's evaluator
+// asks its document). It always answers `enabled`, because Viper runs
+// scripts; Viper's S3-SCRIPTING-OFF will add a device flag for documents
+// whose scripts are off.
+/// https://drafts.csswg.org/mediaqueries-5/#scripting
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
+#[repr(u8)]
+enum Scripting {
+    None,
+    InitialOnly,
+    Enabled,
+}
+
+fn eval_scripting(_: &Context, query_value: Option<Scripting>) -> bool {
+    query_value.map_or(true, |v| v == Scripting::Enabled)
+}
+
 /// A list with all the media features that Servo supports.
-pub static MEDIA_FEATURES: [QueryFeatureDescription; 15] = [
+pub static MEDIA_FEATURES: [QueryFeatureDescription; 16] = [
     feature!(
         atom!("width"),
         AllowsRanges::Yes,
@@ -249,6 +267,13 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 15] = [
         atom!("prefers-color-scheme"),
         AllowsRanges::No,
         keyword_evaluator!(eval_prefers_color_scheme, PrefersColorScheme),
+        FeatureFlags::empty(),
+    ),
+    // VIPER-PATCH(chrome-value-parsing): `scripting` (above).
+    feature!(
+        atom!("scripting"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_scripting, Scripting),
         FeatureFlags::empty(),
     ),
 ];

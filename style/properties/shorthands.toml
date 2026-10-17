@@ -548,7 +548,8 @@ spec = "https://drafts.csswg.org/css-text-decor-3/#text-emphasis-property"
 derive_serialize = true
 
 [text-wrap]
-engine = "gecko"
+# VIPER-PATCH(chrome-value-parsing): parsed in servo builds, as in Chrome 154
+# (upstream: Gecko only).
 sub_properties = ["text-wrap-mode", "text-wrap-style"]
 spec = "https://www.w3.org/TR/css-text-4/#text-wrap"
 

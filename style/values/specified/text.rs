@@ -280,17 +280,12 @@ impl ToCss for TextOverflow {
     ToShmem,
     ToTyped,
 )]
-#[cfg_attr(
-    feature = "gecko",
-    css(bitflags(
-        single = "none,spelling-error,grammar-error",
-        mixed = "underline,overline,line-through,blink",
-    ))
-)]
-#[cfg_attr(
-    not(feature = "gecko"),
-    css(bitflags(single = "none", mixed = "underline,overline,line-through,blink",))
-)]
+// VIPER-PATCH(chrome-value-parsing): servo builds parse `spelling-error`
+// and `grammar-error` too, as Chrome 154 does (upstream: Gecko only).
+#[css(bitflags(
+    single = "none,spelling-error,grammar-error",
+    mixed = "underline,overline,line-through,blink",
+))]
 #[repr(C)]
 /// Specified keyword values for the text-decoration-line property.
 pub struct TextDecorationLine(u8);
@@ -429,6 +424,11 @@ impl TextTransform {
     }
 
     fn validate_mixed_flags(&self) -> bool {
+        // VIPER-PATCH(chrome-value-parsing): Chrome 154 refuses `full-width`
+        // and `full-size-kana`, alone or mixed; servo builds do the same.
+        if cfg!(feature = "servo") && self.intersects(Self::FULL_WIDTH | Self::FULL_SIZE_KANA) {
+            return false;
+        }
         let case = self.intersection(Self::CASE_TRANSFORMS);
         // Case bits are exclusive with each other.
         case.is_empty() || case.bits().is_power_of_two()
@@ -498,17 +498,25 @@ pub enum TextAlignLast {
 #[allow(missing_docs)]
 #[repr(u8)]
 pub enum TextAlignKeyword {
+    // VIPER-PATCH(chrome-value-parsing): servo builds parse and serialize
+    // the legacy keywords as Chrome 154 does: `-webkit-auto` is `start`, and
+    // the three legacy alignments are spelt `-webkit-` only (Chrome refuses
+    // `-moz-center`, `-moz-left` and `-moz-right`); Gecko keeps both.
+    #[cfg_attr(feature = "servo", parse(aliases = "-webkit-auto"))]
     Start,
     Left,
     Right,
     Center,
     Justify,
     End,
-    #[parse(aliases = "-webkit-center")]
+    #[cfg_attr(feature = "gecko", parse(aliases = "-webkit-center"))]
+    #[cfg_attr(feature = "servo", css(keyword = "-webkit-center"))]
     MozCenter,
-    #[parse(aliases = "-webkit-left")]
+    #[cfg_attr(feature = "gecko", parse(aliases = "-webkit-left"))]
+    #[cfg_attr(feature = "servo", css(keyword = "-webkit-left"))]
     MozLeft,
-    #[parse(aliases = "-webkit-right")]
+    #[cfg_attr(feature = "gecko", parse(aliases = "-webkit-right"))]
+    #[cfg_attr(feature = "servo", css(keyword = "-webkit-right"))]
     MozRight,
 }
 
@@ -532,6 +540,9 @@ pub enum TextAlign {
     Keyword(TextAlignKeyword),
     /// `match-parent` value of text-align property. It has a different handling
     /// unlike other keywords.
+    // VIPER-PATCH(chrome-value-parsing): Chrome 154 refuses `match-parent`
+    // and parses `-webkit-match-parent`; servo builds do the same.
+    #[cfg_attr(feature = "servo", css(keyword = "-webkit-match-parent"))]
     MatchParent,
     /// This is how we implement the following HTML behavior from
     /// https://html.spec.whatwg.org/#tables-2:
@@ -996,10 +1007,9 @@ impl Parse for TextIndent {
                 }
             }
 
-            // Servo doesn't support the keywords, so just break and let the caller deal with it.
-            if cfg!(feature = "servo") {
-                break;
-            }
+            // VIPER-PATCH(chrome-value-parsing): servo builds parse `hanging`
+            // and `each-line` too, as Chrome 154 does; upstream stops here in
+            // servo builds, so the declaration was dropped.
 
             // Check for the keywords (boolean flags).
             try_match_ident_ignore_ascii_case! { input,
@@ -1557,5 +1567,95 @@ impl TextBoxTrim {
     #[inline]
     pub fn none() -> Self {
         TextBoxTrim::NONE
+    }
+}
+
+// VIPER-PATCH(chrome-value-parsing): the patch's fork tests.
+#[cfg(all(test, feature = "servo"))]
+pub(crate) mod viper_parse_tests {
+    use crate::context::QuirksMode;
+    use crate::media_queries::MediaList;
+    use crate::parser::ParserContext;
+    use crate::queries::condition::QueryCondition;
+    use crate::stylesheets::supports_rule::Declaration;
+    use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+    use cssparser::Parser;
+    use style_traits::ParsingMode;
+
+    fn context(url: &UrlExtraData, rule: CssRuleType) -> ParserContext<'_> {
+        ParserContext::new(
+            Origin::Author,
+            url,
+            Some(rule),
+            ParsingMode::DEFAULT,
+            QuirksMode::NoQuirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        )
+    }
+
+    /// `CSS.supports(property, value)` as servo answers it.
+    pub(crate) fn supports(property: &str, value: &str) -> bool {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        Declaration(format!("{property}:{value}")).eval(&context(&url, CssRuleType::Style))
+    }
+
+    #[test]
+    fn chrome_value_parsing_accepts_what_chrome_accepts() {
+        for (property, value) in [
+            ("text-align", "-webkit-match-parent"),
+            ("text-align", "-webkit-auto"),
+            ("text-align", "-webkit-left"),
+            ("text-transform", "capitalize"),
+            ("text-decoration-line", "grammar-error"),
+            ("text-indent", "each-line 1px hanging"),
+            ("text-wrap", "balance"),
+            ("text-wrap", "nowrap pretty"),
+            ("text-wrap-style", "stable"),
+            ("counter-reset", "list-item"),
+            ("counter-increment", "a 2 b"),
+            ("counter-set", "list-item 3"),
+            ("cursor", "-webkit-zoom-out"),
+            ("unicode-bidi", "-webkit-plaintext"),
+            ("font-size", "-webkit-xxx-large"),
+        ] {
+            assert!(supports(property, value), "{property}: {value}");
+        }
+        for (property, value) in [
+            ("text-align", "match-parent"),
+            ("text-align", "-moz-left"),
+            ("text-transform", "full-size-kana"),
+            ("text-transform", "lowercase full-width"),
+            ("text-wrap-style", "avoid-orphans"),
+            ("counter-reset", "reversed(list-item) 3"),
+            ("cursor", "-moz-zoom-in"),
+            ("list-style-type", "symbols(\"a\" \"b\")"),
+        ] {
+            assert!(!supports(property, value), "{property}: {value}");
+        }
+    }
+
+    #[test]
+    fn chrome_value_parsing_knows_the_scripting_media_feature() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let feature = |query: &str| {
+            let mut context = context(&url, CssRuleType::Media);
+            let list = MediaList::parse(&mut context, &mut Parser::new(query));
+            matches!(
+                list.media_queries[0].condition,
+                Some(QueryCondition::Feature(_))
+            )
+        };
+        for query in [
+            "(scripting)",
+            "(scripting: none)",
+            "(scripting: initial-only)",
+            "(scripting: enabled)",
+        ] {
+            assert!(feature(query), "{query}");
+        }
+        assert!(!feature("(scripting: off)"));
     }
 }

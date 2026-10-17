@@ -148,7 +148,11 @@ impl CounterStyle {
                 }
                 Ok(Self::Name(counter_style_name_from_ident(ident)?))
             },
-            Token::Function(name) if name.eq_ignore_ascii_case("symbols") => {
+            // VIPER-PATCH(chrome-value-parsing): Chrome 154 refuses
+            // `symbols()`; servo builds do the same.
+            Token::Function(name)
+                if !cfg!(feature = "servo") && name.eq_ignore_ascii_case("symbols") =>
+            {
                 input.parse_nested_block(|input| {
                     let symbols_type = input
                         .try_parse(SymbolsType::parse)

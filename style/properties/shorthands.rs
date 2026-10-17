@@ -848,7 +848,7 @@ pub mod column_rule {
     }
 }
 
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(chrome-value-parsing): in servo builds too (shorthands.toml).
 pub mod text_wrap {
     pub use crate::properties::generated::shorthands::text_wrap::*;
 

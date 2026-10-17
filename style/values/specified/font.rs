@@ -513,6 +513,8 @@ pub enum FontSizeKeyword {
     #[css(keyword = "xx-large")]
     XXLarge,
     #[css(keyword = "xxx-large")]
+    // VIPER-PATCH(chrome-value-parsing): Chrome 154's alias of `xxx-large`.
+    #[cfg_attr(feature = "servo", parse(aliases = "-webkit-xxx-large"))]
     XXXLarge,
     /// Indicate whether to apply font-size: math is specified so that extra
     /// scaling due to math-depth changes is applied during the cascade.

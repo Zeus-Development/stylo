@@ -147,6 +147,7 @@ safe-area-inset-left
 safe-area-inset-right
 scan
 screen
+scripting
 scroll-position
 scrollbar-inline-size
 search

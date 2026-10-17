@@ -712,7 +712,7 @@ affects = "layout"
 type = "CounterIncrement"
 initial = "Default::default()"
 struct = "counters"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(chrome-value-parsing): see counter-reset.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-lists/#propdef-counter-increment"
 servo_restyle_damage = "rebuild_box"
@@ -722,7 +722,9 @@ affects = "layout"
 type = "CounterReset"
 initial = "Default::default()"
 struct = "counters"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(chrome-value-parsing): parsed in servo builds, as in Chrome 154
+# (upstream: behind layout.unimplemented); likewise counter-increment and
+# counter-set (upstream: Gecko only). Viper does not lay counters out yet.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-lists-3/#propdef-counter-reset"
 servo_restyle_damage = "rebuild_box"
@@ -732,7 +734,7 @@ affects = "layout"
 type = "CounterSet"
 initial = "Default::default()"
 struct = "counters"
-engine = "gecko"
+# VIPER-PATCH(chrome-value-parsing): see counter-reset.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-lists-3/#propdef-counter-set"
 servo_restyle_damage = "rebuild_box"
@@ -4007,11 +4009,12 @@ keyword = { values = ["wrap", "nowrap"] }
 
 [text-wrap-style]
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(chrome-value-parsing): parsed in servo builds, with Chrome 154's
+# `pretty` (upstream: Gecko only); Viper's line breaking ignores it so far.
 spec = "https://drafts.csswg.org/css-text-4/#text-wrap-style"
 animation_type = "discrete"
 affects = "layout"
-keyword = { values = ["auto", "stable", "balance"] }
+keyword = { values = ["auto", "stable", "balance"], extra_servo_values = ["pretty"] }
 
 [list-style-position]
 struct = "list"
@@ -4120,7 +4123,8 @@ spec = "https://drafts.csswg.org/css-writing-modes/#propdef-unicode-bidi"
 animation_type = "none"
 affects = "layout"
 servo_restyle_damage = "rebuild_box"
-keyword = { values = ["normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext"] }
+# VIPER-PATCH(chrome-value-parsing): Chrome 154's -webkit- aliases.
+keyword = { values = ["normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext"], servo_aliases = ["-webkit-isolate=isolate", "-webkit-isolate-override=isolate-override", "-webkit-plaintext=plaintext"] }
 
 [text-decoration-style]
 struct = "text"
