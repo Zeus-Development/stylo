@@ -20,6 +20,8 @@
 //! through to servo's own names.
 //! <https://drafts.csswg.org/selectors-4/>
 
+// VIPER-PATCH(chrome-after-pseudo-element): each name's kind.
+use super::chrome_after::{functional_kind, plain_kind};
 use super::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
 use crate::selector_parser::SelectorParser;
 use cssparser::{Parser as CssParser, ToCss, Token};
@@ -202,7 +204,9 @@ pub(super) fn pseudo_element(name: &str) -> Option<PseudoElement> {
     let webkit = name
         .get(.."-webkit-".len())
         .is_some_and(|start| start.eq_ignore_ascii_case("-webkit-"));
-    (webkit || listed(&CHROME_UNMATCHED_PSEUDO_ELEMENTS, name)).then_some(PseudoElement::Unmatched)
+    // VIPER-PATCH(chrome-after-pseudo-element): with its kind.
+    (webkit || listed(&CHROME_UNMATCHED_PSEUDO_ELEMENTS, name))
+        .then(|| PseudoElement::Unmatched(plain_kind(name)))
 }
 
 /// The functional pseudo-element `name(arguments)`, if Chrome accepts the
@@ -227,7 +231,9 @@ pub(super) fn functional_pseudo_element<'i>(
     } else {
         return None;
     };
-    Some(parsed.map(|()| PseudoElement::Unmatched))
+    // VIPER-PATCH(chrome-after-pseudo-element): with its kind.
+    let kind = functional_kind(name, listed(&VIEW_TRANSITION_PARTS, name));
+    Some(parsed.map(|()| PseudoElement::Unmatched(kind)))
 }
 
 /// A `<compound-selector>`, or with `list` a `<compound-selector-list>`: no

@@ -17,6 +17,9 @@ use crate::properties::{ComputedValues, PropertyFlags};
 use crate::selector_parser::AttrValue as SelectorAttrValue;
 // VIPER-PATCH(chrome-selector-names): Chrome's names.
 use super::chrome_names;
+// VIPER-PATCH(chrome-after-pseudo-element): what follows a pseudo-element.
+use super::chrome_after;
+pub use super::chrome_after::UnmatchedKind;
 use crate::selector_parser::{PseudoElementCascadeType, SelectorParser};
 use crate::values::{AtomIdent, AtomString};
 use crate::{Atom, CaseSensitivityExt, LocalName, Namespace, Prefix};
@@ -28,7 +31,7 @@ use rustc_hash::FxHashMap;
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use selectors::parser::SelectorParseErrorKind;
 use std::fmt;
-use std::mem;
+// VIPER-PATCH(chrome-after-pseudo-element): no transmute, no `std::mem`.
 use std::ops::{Deref, DerefMut};
 use style_traits::{ParseError, StyleParseErrorKind};
 
@@ -97,12 +100,14 @@ pub enum PseudoElement {
     // parser builds it too, so stylesheets keep its rules; it cascades
     // lazily. Upstream has no such variant: Servo refuses those names.
     // Keep it last. https://drafts.csswg.org/css-pseudo-4/
-    Unmatched,
+    // VIPER-PATCH(chrome-after-pseudo-element): its kind decides what may
+    // follow it in its compound; every kind has the one index.
+    Unmatched(UnmatchedKind),
 }
 
 /// The count of all pseudo-elements.
 // VIPER-PATCH(chrome-dom-api-pseudos): `Unmatched` is the last variant.
-pub const PSEUDO_COUNT: usize = PseudoElement::Unmatched as usize + 1;
+pub const PSEUDO_COUNT: usize = PseudoElement::Unmatched(UnmatchedKind::Other).index() + 1;
 
 impl ToCss for PseudoElement {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
@@ -136,7 +141,8 @@ impl ToCss for PseudoElement {
             ServoTableGrid => "::-servo-table-grid",
             ServoTableWrapper => "::-servo-table-wrapper",
             // VIPER-PATCH(chrome-dom-api-pseudos): a name no stylesheet uses.
-            Unmatched => "::-internal-unmatched",
+            // VIPER-PATCH(chrome-after-pseudo-element): every kind.
+            Unmatched(_) => "::-internal-unmatched",
         })
     }
 }
@@ -149,7 +155,8 @@ impl ::selectors::parser::PseudoElement for PseudoElement {
     // VIPER-PATCH(chrome-dom-api-pseudos): Chrome accepts a user-action
     // pseudo-class after these names, as in `::-webkit-scrollbar:hover`.
     fn accepts_state_pseudo_classes(&self) -> bool {
-        matches!(self, Self::Unmatched)
+        // VIPER-PATCH(chrome-after-pseudo-element): every kind.
+        matches!(self, Self::Unmatched(_))
     }
 }
 
@@ -162,13 +169,41 @@ impl PseudoElement {
     #[inline]
     pub fn eager_index(&self) -> usize {
         debug_assert!(self.is_eager());
-        self.clone() as usize
+        self.index()
     }
 
     /// An index for this pseudo-element to be indexed in an enumerated array.
+    // VIPER-PATCH(chrome-after-pseudo-element): `as usize` needs an enum
+    // without fields; the indices are the variants' order, as before.
     #[inline]
-    pub fn index(&self) -> usize {
-        self.clone() as usize
+    pub const fn index(&self) -> usize {
+        use self::PseudoElement::*;
+        match *self {
+            After => 0,
+            Before => 1,
+            Selection => 2,
+            FirstLetter => 3,
+            FirstLine => 4,
+            Backdrop => 5,
+            DetailsContent => 6,
+            Marker => 7,
+            ColorSwatch => 8,
+            FileSelectorButton => 9,
+            Placeholder => 10,
+            SliderFill => 11,
+            SliderThumb => 12,
+            SliderTrack => 13,
+            MozProgressBar => 14,
+            ServoTextControlInnerContainer => 15,
+            ServoTextControlInnerEditor => 16,
+            ServoAnonymousBox => 17,
+            ServoAnonymousTable => 18,
+            ServoAnonymousTableCell => 19,
+            ServoAnonymousTableRow => 20,
+            ServoTableGrid => 21,
+            ServoTableWrapper => 22,
+            Unmatched(_) => 23,
+        }
     }
 
     /// An array of `None`, one per pseudo-element.
@@ -179,9 +214,16 @@ impl PseudoElement {
     /// Creates a pseudo-element from an eager index.
     #[inline]
     pub fn from_eager_index(i: usize) -> Self {
-        const _: () = assert!(EAGER_PSEUDO_COUNT <= (u8::MAX as usize));
-        assert!(i < EAGER_PSEUDO_COUNT);
-        let result: PseudoElement = unsafe { mem::transmute(i as u8) };
+        // VIPER-PATCH(chrome-after-pseudo-element): a transmute needs an
+        // enum without fields.
+        let result = match i {
+            0 => PseudoElement::After,
+            1 => PseudoElement::Before,
+            2 => PseudoElement::Selection,
+            3 => PseudoElement::FirstLetter,
+            4 => PseudoElement::FirstLine,
+            _ => panic!("not an eager pseudo-element index: {i}"),
+        };
         debug_assert!(result.is_eager());
         result
     }
@@ -302,7 +344,8 @@ impl PseudoElement {
             | PseudoElement::ServoTextControlInnerContainer
             | PseudoElement::ServoTextControlInnerEditor => PseudoElementCascadeType::Lazy,
             // VIPER-PATCH(chrome-dom-api-pseudos): computed only on request.
-            PseudoElement::Unmatched => PseudoElementCascadeType::Lazy,
+            // VIPER-PATCH(chrome-after-pseudo-element): every kind.
+            PseudoElement::Unmatched(_) => PseudoElementCascadeType::Lazy,
             PseudoElement::ServoAnonymousBox
             | PseudoElement::ServoAnonymousTable
             | PseudoElement::ServoAnonymousTableCell
@@ -886,6 +929,15 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         name.eq_ignore_ascii_case("-webkit-any")
     }
 
+    // VIPER-PATCH(chrome-after-pseudo-element): Chrome's table.
+    fn valid_after_pseudo_element(
+        &self,
+        pseudo_element: &PseudoElement,
+        simple: &selectors::parser::Component<SelectorImpl>,
+    ) -> bool {
+        chrome_after::valid_after(pseudo_element, simple)
+    }
+
     fn default_namespace(&self) -> Option<Namespace> {
         self.namespaces.default.as_ref().map(|ns| ns.clone())
     }
@@ -1188,7 +1240,8 @@ mod chrome_attr_s_flag_tests {
 // VIPER-PATCH(chrome-dom-api-pseudos): the DOM-API variants' tests.
 #[cfg(test)]
 mod chrome_dom_api_pseudos_tests {
-    use super::{NonTSPseudoClass, PseudoElement, SelectorParser, PSEUDO_COUNT};
+    // VIPER-PATCH(chrome-after-pseudo-element): the kinds.
+    use super::{NonTSPseudoClass, PseudoElement, SelectorParser, UnmatchedKind, PSEUDO_COUNT};
     use crate::stylesheets::UrlExtraData;
     use cssparser::ToCss;
     use selectors::parser::PseudoElement as _;
@@ -1205,14 +1258,58 @@ mod chrome_dom_api_pseudos_tests {
         let unmatched = NonTSPseudoClass::Unmatched(":host-context(div)".into());
         assert_eq!(unmatched.to_css_string(), ":host-context(div)");
         assert!(dir.state_flag().is_empty() && unmatched.state_flag().is_empty());
-        assert_eq!(
-            PseudoElement::Unmatched.to_css_string(),
-            "::-internal-unmatched"
-        );
-        assert!(PseudoElement::Unmatched.is_lazy());
-        assert!(PseudoElement::Unmatched.accepts_state_pseudo_classes());
+        // VIPER-PATCH(chrome-after-pseudo-element): one for every kind.
+        for kind in [
+            UnmatchedKind::ScrollbarPart,
+            UnmatchedKind::Cue,
+            UnmatchedKind::Other,
+        ] {
+            let unmatched = PseudoElement::Unmatched(kind);
+            assert_eq!(unmatched.to_css_string(), "::-internal-unmatched");
+            assert!(unmatched.is_lazy());
+            assert!(unmatched.accepts_state_pseudo_classes());
+            assert_eq!(unmatched.index(), PSEUDO_COUNT - 1);
+        }
         assert!(!PseudoElement::Before.accepts_state_pseudo_classes());
-        assert_eq!(PseudoElement::Unmatched.index(), PSEUDO_COUNT - 1);
+    }
+
+    // VIPER-PATCH(chrome-after-pseudo-element): the indices without
+    // `as usize` keep the eager ones first and every one distinct.
+    #[test]
+    fn chrome_after_pseudo_element_indices_stay_distinct() {
+        use super::EAGER_PSEUDO_COUNT;
+        for i in 0..EAGER_PSEUDO_COUNT {
+            assert_eq!(PseudoElement::from_eager_index(i).eager_index(), i);
+        }
+        use PseudoElement::*;
+        let all = [
+            After,
+            Before,
+            Selection,
+            FirstLetter,
+            FirstLine,
+            Backdrop,
+            DetailsContent,
+            Marker,
+            ColorSwatch,
+            FileSelectorButton,
+            Placeholder,
+            SliderFill,
+            SliderThumb,
+            SliderTrack,
+            MozProgressBar,
+            ServoTextControlInnerContainer,
+            ServoTextControlInnerEditor,
+            ServoAnonymousBox,
+            ServoAnonymousTable,
+            ServoAnonymousTableCell,
+            ServoAnonymousTableRow,
+            ServoTableGrid,
+            ServoTableWrapper,
+            Unmatched(UnmatchedKind::Column),
+        ];
+        let indices: Vec<usize> = all.iter().map(PseudoElement::index).collect();
+        assert_eq!(indices, (0..PSEUDO_COUNT).collect::<Vec<_>>());
     }
 
     // VIPER-PATCH(chrome-selector-names): servo's parser builds the

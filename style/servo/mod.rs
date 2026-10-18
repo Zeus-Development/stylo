@@ -9,6 +9,8 @@
 pub mod animation;
 #[allow(missing_docs)] // TODO.
 pub mod attr;
+// VIPER-PATCH(chrome-after-pseudo-element): what follows a pseudo-element.
+mod chrome_after;
 // VIPER-PATCH(chrome-selector-names): Chrome's selector names.
 mod chrome_names;
 mod encoding_support;

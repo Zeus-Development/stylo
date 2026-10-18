@@ -156,6 +156,15 @@ bitflags! {
         /// Whether we've parsed a pseudo-element which is in a pseudo-element tree (i.e. it is a
         /// descendant pseudo of a pseudo-element root).
         const IN_PSEUDO_ELEMENT_TREE = 1 << 9;
+
+        // VIPER-PATCH(chrome-after-pseudo-element): Viper's ADR 0017. Set
+        // after a pseudo-element that is not element-backed (and not after
+        // `::slotted()`): the pseudo-classes that follow it parse without
+        // the checks of the other flags, and the compound then asks
+        // `Parser::valid_after_pseudo_element` about each one.
+        /// Whether what follows the compound's pseudo-element is checked
+        /// once parsed.
+        const CHECK_AFTER_PSEUDO_ELEMENT = 1 << 10;
     }
 }
 
@@ -172,12 +181,16 @@ impl SelectorParsingState {
 
     #[inline]
     fn allows_non_functional_pseudo_classes(self) -> bool {
-        !self.intersects(Self::AFTER_SLOTTED | Self::AFTER_NON_STATEFUL_PSEUDO_ELEMENT)
+        // VIPER-PATCH(chrome-after-pseudo-element): checked once parsed.
+        self.intersects(Self::CHECK_AFTER_PSEUDO_ELEMENT)
+            || !self.intersects(Self::AFTER_SLOTTED | Self::AFTER_NON_STATEFUL_PSEUDO_ELEMENT)
     }
 
     #[inline]
     fn allows_tree_structural_pseudo_classes(self) -> bool {
-        !self.intersects(Self::AFTER_PSEUDO) || self.intersects(Self::IN_PSEUDO_ELEMENT_TREE)
+        // VIPER-PATCH(chrome-after-pseudo-element): checked once parsed.
+        !self.intersects(Self::AFTER_PSEUDO)
+            || self.intersects(Self::IN_PSEUDO_ELEMENT_TREE | Self::CHECK_AFTER_PSEUDO_ELEMENT)
     }
 
     #[inline]
@@ -187,7 +200,9 @@ impl SelectorParsingState {
 
     #[inline]
     fn allows_only_child_pseudo_class_only(self) -> bool {
+        // VIPER-PATCH(chrome-after-pseudo-element): checked once parsed.
         self.intersects(Self::IN_PSEUDO_ELEMENT_TREE)
+            && !self.intersects(Self::CHECK_AFTER_PSEUDO_ELEMENT)
     }
 }
 
@@ -346,6 +361,42 @@ pub trait Parser<'i> {
         true
     }
 
+    // VIPER-PATCH(chrome-after-pseudo-element): Chrome match. Chrome decides
+    // per pseudo-element which pseudo-classes may follow it in its compound
+    // (`::-webkit-scrollbar:horizontal`, `::selection:window-inactive`,
+    // `::view-transition-old(*):only-child`), where upstream accepts only a
+    // user-action pseudo-class after a pseudo-element that accepts state
+    // pseudo-classes. The hook is on the parser because the pseudo-element
+    // trait has no `SelectorImpl` to name the pseudo-classes. Chromium's
+    // `IsSimpleSelectorValidAfterPseudoElement`:
+    // https://chromium.googlesource.com/chromium/src/+/refs/tags/154.0.8037.57/third_party/blink/renderer/core/css/parser/css_selector_parser.cc
+    /// Whether the simple selector `simple` may follow `pseudo_element`,
+    /// which is not element-backed, in its compound. `:is()`, `:where()`
+    /// and `:not()` never come here: the parser asks about what they
+    /// contain instead, forgivingly for the first two. The default is
+    /// upstream's rule: a user-action pseudo-class after a pseudo-element
+    /// that accepts state pseudo-classes and is not in a pseudo-element
+    /// tree; in such a tree, `:only-child` after one that accepts state
+    /// pseudo-classes, and the functional tree-structural pseudo-classes.
+    fn valid_after_pseudo_element(
+        &self,
+        pseudo_element: &<Self::Impl as SelectorImpl>::PseudoElement,
+        simple: &Component<Self::Impl>,
+    ) -> bool {
+        let stateful = pseudo_element.accepts_state_pseudo_classes();
+        let in_tree = pseudo_element.is_in_pseudo_element_tree();
+        match simple {
+            Component::NonTSPseudoClass(class) => {
+                stateful && !in_tree && class.is_user_action_state()
+            },
+            Component::Nth(nth) if !nth.is_function => {
+                stateful && in_tree && *nth == NthSelectorData::only(false)
+            },
+            Component::Nth(..) | Component::NthOf(..) | Component::Host(Some(..)) => in_tree,
+            _ => false,
+        }
+    }
+
     /// This function can return an "Err" pseudo-element in order to support CSS2.1
     /// pseudo-elements.
     fn parse_non_ts_pseudo_class(
@@ -355,6 +406,19 @@ pub trait Parser<'i> {
         Err(ParseError::custom(
             SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
         ))
+    }
+
+    // VIPER-PATCH(chrome-after-pseudo-element): lets a parser accept names
+    // after a pseudo-element that it refuses elsewhere (Viper refuses form
+    // state such as `:disabled`, which Chrome takes after a scrollbar part).
+    /// Parses the plain pseudo-class `name` after a pseudo-element that is
+    /// not element-backed, or inside an `:is()`, `:where()` or `:not()`
+    /// there; by default as anywhere else.
+    fn parse_non_ts_pseudo_class_after_pseudo_element(
+        &self,
+        name: CowRcStr<'i>,
+    ) -> Result<<Self::Impl as SelectorImpl>::NonTSPseudoClass, ParseError<Self::Error>> {
+        self.parse_non_ts_pseudo_class(name)
     }
 
     fn parse_non_ts_functional_pseudo_class(
@@ -3371,6 +3435,9 @@ where
     if parse_type_selector(parser, input, *state, builder)? {
         empty = false;
     }
+    // VIPER-PATCH(chrome-after-pseudo-element): the pseudo-element that
+    // decides what may follow it, as Chrome's `restricting_pseudo_element_`.
+    let mut restricting: Option<Impl::PseudoElement> = None;
 
     loop {
         let result = match parse_one_simple_selector(parser, input, *state)? {
@@ -3423,6 +3490,11 @@ where
 
         match result {
             SimpleSelectorParseResult::SimpleSelector(s) => {
+                // VIPER-PATCH(chrome-after-pseudo-element): checked here.
+                let s = match restricting {
+                    Some(ref pseudo) => check_after_pseudo_element(parser, pseudo, s)?,
+                    None => s,
+                };
                 builder.push_simple_selector(s);
             },
             SimpleSelectorParseResult::PartPseudo(part_names) => {
@@ -3450,12 +3522,90 @@ where
                 if p.is_in_pseudo_element_tree() {
                     state.insert(SelectorParsingState::IN_PSEUDO_ELEMENT_TREE);
                 }
+                // VIPER-PATCH(chrome-after-pseudo-element): the parser
+                // decides what follows this one (`::slotted()` keeps its
+                // own rule; element-backed ones that of `::part()`).
+                if !p.parses_as_element_backed()
+                    && !state.intersects(SelectorParsingState::AFTER_SLOTTED)
+                {
+                    state.insert(SelectorParsingState::CHECK_AFTER_PSEUDO_ELEMENT);
+                    restricting = Some(p.clone());
+                }
                 builder.push_combinator(Combinator::PseudoElement);
                 builder.push_simple_selector(Component::PseudoElement(p));
             },
         }
     }
     Ok(empty)
+}
+
+// VIPER-PATCH(chrome-after-pseudo-element): Chrome's
+// `IsSimpleSelectorValidAfterPseudoElement`. `:is()`, `:where()` and
+// `:not()` are always valid after a pseudo-element, and what they contain is
+// checked against it: an invalid item of `:is()` or `:where()` is forgiven,
+// as written, and one of `:not()` makes the whole selector invalid.
+/// `simple`, which follows `pseudo_element` in its compound, if valid there.
+fn check_after_pseudo_element<'i, P, Impl>(
+    parser: &P,
+    pseudo_element: &Impl::PseudoElement,
+    simple: Component<Impl>,
+) -> Result<Component<Impl>, ParseError<P::Error>>
+where
+    P: Parser<'i, Impl = Impl>,
+    Impl: SelectorImpl,
+{
+    let forgive = |list: SelectorList<Impl>| {
+        let valid = |s: &Selector<Impl>| {
+            s.iter_raw_match_order()
+                .all(|c| valid_after(parser, pseudo_element, c))
+        };
+        if list.slice().iter().all(valid) {
+            return Ok(list);
+        }
+        if !parser.allow_forgiving_selectors() {
+            return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
+        }
+        let forgiven = |s: &Selector<Impl>| {
+            if valid(s) {
+                s.clone()
+            } else {
+                Selector::new_invalid(&s.to_css_string())
+            }
+        };
+        Ok(SelectorList::from_iter(list.slice().iter().map(forgiven)))
+    };
+    let simple = match simple {
+        Component::Is(list) => Component::Is(forgive(list)?),
+        Component::Where(list) => Component::Where(forgive(list)?),
+        simple => simple,
+    };
+    if !valid_after(parser, pseudo_element, &simple) {
+        return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
+    }
+    Ok(simple)
+}
+
+// VIPER-PATCH(chrome-after-pseudo-element): a nested `:is()` or `:where()`
+// is valid with its items as they are, as such a selector matches no element.
+/// Whether `simple` is valid after `pseudo_element`.
+fn valid_after<'i, P, Impl>(
+    parser: &P,
+    pseudo_element: &Impl::PseudoElement,
+    simple: &Component<Impl>,
+) -> bool
+where
+    P: Parser<'i, Impl = Impl>,
+    Impl: SelectorImpl,
+{
+    match simple {
+        Component::Is(..) | Component::Where(..) | Component::Invalid(..) => true,
+        Component::Negation(list) => list.slice().iter().all(|selector| {
+            selector
+                .iter_raw_match_order()
+                .all(|c| valid_after(parser, pseudo_element, c))
+        }),
+        _ => parser.valid_after_pseudo_element(pseudo_element, simple),
+    }
 }
 
 fn parse_is_where<'i, P, Impl>(
@@ -3554,12 +3704,21 @@ where
 
     // VIPER-PATCH(selectors-compound-is-alias): the compound-list alias.
     if parser.parse_compound_is_alias(&name) {
+        // VIPER-PATCH(chrome-after-pseudo-element): Chrome refuses
+        // `:-webkit-any()` after a pseudo-element.
+        if state.intersects(SelectorParsingState::CHECK_AFTER_PSEUDO_ELEMENT) {
+            return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
+        }
         return parse_compound_is_alias(parser, input, state);
     }
 
-    if state.intersects(
-        SelectorParsingState::AFTER_NON_ELEMENT_BACKED_PSEUDO | SelectorParsingState::AFTER_SLOTTED,
-    ) {
+    // VIPER-PATCH(chrome-after-pseudo-element): checked once parsed.
+    if !state.intersects(SelectorParsingState::CHECK_AFTER_PSEUDO_ELEMENT)
+        && state.intersects(
+            SelectorParsingState::AFTER_NON_ELEMENT_BACKED_PSEUDO
+                | SelectorParsingState::AFTER_SLOTTED,
+        )
+    {
         return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
     }
 
@@ -3836,8 +3995,16 @@ where
         }
     }
 
-    let pseudo_class = P::parse_non_ts_pseudo_class(parser, name)?;
+    // VIPER-PATCH(chrome-after-pseudo-element): the name after a
+    // pseudo-element, and the check once parsed.
+    let after_pseudo_element = state.intersects(SelectorParsingState::CHECK_AFTER_PSEUDO_ELEMENT);
+    let pseudo_class = if after_pseudo_element {
+        P::parse_non_ts_pseudo_class_after_pseudo_element(parser, name)?
+    } else {
+        P::parse_non_ts_pseudo_class(parser, name)?
+    };
     if state.intersects(SelectorParsingState::AFTER_NON_ELEMENT_BACKED_PSEUDO)
+        && !after_pseudo_element
         && !pseudo_class.is_user_action_state()
     {
         return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
@@ -3950,6 +4117,9 @@ pub mod tests {
         ns_prefixes: HashMap<DummyAtom, DummyAtom>,
         // VIPER-PATCH(selectors-attr-flag-hook): refuse the `s` flag.
         refuse_case_sensitive_flag: bool,
+        // VIPER-PATCH(chrome-after-pseudo-element): `:active` only after a
+        // pseudo-element.
+        active_only_after_pseudo_element: bool,
     }
 
     impl DummyParser {
@@ -4074,12 +4244,24 @@ pub mod tests {
         ) -> Result<PseudoClass, SelectorParseError> {
             match_ignore_ascii_case! { &name,
                 "hover" => return Ok(PseudoClass::Hover),
-                "active" => return Ok(PseudoClass::Active),
+                // VIPER-PATCH(chrome-after-pseudo-element): the switch.
+                "active" if !self.active_only_after_pseudo_element => return Ok(PseudoClass::Active),
                 _ => {}
             }
             Err(ParseError::custom(
                 SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
             ))
+        }
+
+        // VIPER-PATCH(chrome-after-pseudo-element): the switch's other half.
+        fn parse_non_ts_pseudo_class_after_pseudo_element(
+            &self,
+            name: CowRcStr<'i>,
+        ) -> Result<PseudoClass, SelectorParseError> {
+            if self.active_only_after_pseudo_element && name.eq_ignore_ascii_case("active") {
+                return Ok(PseudoClass::Active);
+            }
+            self.parse_non_ts_pseudo_class(name)
         }
 
         fn parse_non_ts_functional_pseudo_class(
@@ -5073,5 +5255,62 @@ pub mod tests {
         }
         // `:is()` forgives, and takes complex selectors.
         assert!(parse(":is(div p, :unknown)").is_ok());
+    }
+
+    // VIPER-PATCH(chrome-after-pseudo-element): the default hook keeps
+    // upstream's rule, now checked once parsed; `:is()`, `:where()` and
+    // `:not()` check what they contain.
+    #[test]
+    fn after_pseudo_element_default_keeps_upstream_rule() {
+        for input in [
+            "::before:hover:active",
+            "::before:not(:hover)",
+            "::before:is(:hover, .x)",
+            "::before:where(:lang(foo))",
+            "::before:not(:is(.x))",
+        ] {
+            assert!(parse(input).is_ok(), "{input}");
+        }
+        for input in [
+            "::before:first-child",
+            "::before:nth-child(1)",
+            "::before:lang(foo)",
+            "::before:not(.x)",
+            "::before:not(:lang(foo))",
+            "::before:not(:hover, :first-child)",
+            "::before:-webkit-any(:hover)",
+        ] {
+            assert!(parse(input).is_err(), "{input}");
+        }
+        // A forgiven item serializes as written and matches nothing.
+        let list = parse_expected(
+            "::before:is(:hover, :lang(foo))",
+            Some("::before:is(:hover, :lang(foo))"),
+        )
+        .unwrap();
+        let mut components = list.slice()[0].iter_raw_match_order();
+        let Some(Component::Is(inner)) = components.find(|c| matches!(c, Component::Is(..))) else {
+            panic!("expected :is()");
+        };
+        assert!(matches!(
+            inner.slice()[1].iter().next(),
+            Some(Component::Invalid(..))
+        ));
+    }
+
+    // VIPER-PATCH(chrome-after-pseudo-element): a name the parser accepts
+    // only after a pseudo-element, there and inside its `:is()`.
+    #[test]
+    fn after_pseudo_element_parses_its_own_names() {
+        let parser = DummyParser {
+            active_only_after_pseudo_element: true,
+            ..Default::default()
+        };
+        assert!(parse_ns(":active", &parser).is_err());
+        assert!(parse_ns("::before, :active", &parser).is_err());
+        assert!(parse_ns("::before:active", &parser).is_ok());
+        assert!(parse_ns("::before:not(:active)", &parser).is_ok());
+        assert!(parse_ns(":is(:active, :hover)", &parser).is_ok());
+        assert!(parse_ns(":not(:active)", &parser).is_err());
     }
 }
