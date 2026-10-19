@@ -2032,6 +2032,31 @@ fn map_line_height_leaf(context: &Context, leaf: &Leaf) -> Leaf {
     ))
 }
 
+/// VIPER-PATCH(line-height-whole-percent): the whole number of percent in a
+/// percentage's `fraction` (`1.305` for `130.5%`), truncated toward zero.
+///
+/// The parser stores a percentage as its number divided by 100 in `f32`, so
+/// `130%` is `1.3_f32`, and `1.3_f32 * 100.0` is not exactly 130. The
+/// shortest decimal that reads back as the same `f32` (`"1.3"`) recovers the
+/// number as written; its product with 100, rounded to `f32`, is then
+/// truncated.
+#[cfg(feature = "servo")]
+fn whole_percent(fraction: f32) -> f32 {
+    let shortest: f64 = fraction.to_string().parse().unwrap_or(f64::from(fraction));
+    ((shortest * 100.0) as f32).trunc()
+}
+
+/// VIPER-PATCH(line-height-whole-percent): the line height of the
+/// percentage `fraction` of the font size: the font size times the whole
+/// percent, divided by 100 once (in `f64`, then rounded to `f32`), so that
+/// `130%` of 20px is exactly 26px (`1.3_f32 * 20.0` is not).
+#[cfg(feature = "servo")]
+fn whole_percent_line_height(context: &Context, fraction: f32) -> CSSPixelLength {
+    let size = resolve_line_height_length(context, NoCalcLength::from_em(1.0));
+    let product = size.px() * whole_percent(fraction);
+    CSSPixelLength::new((f64::from(product) / 100.0) as f32)
+}
+
 impl ToComputedValue for LineHeight {
     type ComputedValue = computed::LineHeight;
 
@@ -2068,6 +2093,18 @@ impl ToComputedValue for LineHeight {
                     LengthPercentage::Length(ref length) => {
                         resolve_line_height_length(context, *length)
                     },
+                    // VIPER-PATCH(line-height-whole-percent): Chrome match.
+                    // Chrome 154 computes a percentage line-height from the
+                    // percentage truncated toward zero to a whole percent
+                    // (`130.5%` of 20px is 26px, `0.5%` is 0px; Viper's
+                    // computed-value golden `line-height-percent-line-height`),
+                    // where upstream computes the exact percentage. Viper's
+                    // proofs: `line_height_whole_percent` and that golden.
+                    #[cfg(feature = "servo")]
+                    LengthPercentage::Percentage(ref p) => {
+                        whole_percent_line_height(context, p.get())
+                    },
+                    #[cfg(not(feature = "servo"))]
                     LengthPercentage::Percentage(ref p) => {
                         resolve_line_height_length(context, NoCalcLength::from_em(p.get()))
                     },
@@ -2112,5 +2149,29 @@ bitflags! {
         const NEEDS_IC = 1 << 2;
         /// Does the caller need math scales to be retrieved?
         const NEEDS_MATH_SCALES = 1 << 3;
+    }
+}
+
+// VIPER-PATCH(line-height-whole-percent): the patch's fork test.
+#[cfg(all(test, feature = "servo"))]
+mod line_height_whole_percent_tests {
+    use super::whole_percent;
+
+    #[test]
+    fn line_height_whole_percent_truncates_the_number_as_written() {
+        // Fractions as cssparser stores them: the number over 100 in `f64`,
+        // rounded to `f32`.
+        let percent = |written: f64| whole_percent((written / 100.0) as f32);
+        assert_eq!(percent(130.5), 130.0);
+        assert_eq!(percent(99.9), 99.0);
+        assert_eq!(percent(133.33), 133.0);
+        assert_eq!(percent(0.5), 0.0);
+        // Whole percents stay whole although their `f32` fraction times 100
+        // is not (`0.29_f32 * 100.0` is 28.999998, `1.3_f32 * 100.0` is
+        // 130.00000x).
+        for whole in [29.0_f64, 57.0, 110.0, 120.0, 130.0, 150.0, 1000.0] {
+            assert_eq!(f64::from(percent(whole)), whole, "{whole}%");
+        }
+        assert_eq!(percent(0.0), 0.0);
     }
 }
