@@ -574,6 +574,49 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
     }
 
+    /// VIPER-PATCH(chrome-frames-and-textarea): Chrome match. Chrome 154
+    /// computes `display: block`, `position: static` and `float: none` for
+    /// every HTML `frame` and `frameset` element, whatever the author asks
+    /// (`display: none` and `contents` included: both always have a box),
+    /// and a `textarea`'s `overflow-x` and `overflow-y` of `visible` compute
+    /// to `auto`. Viper's computed-value goldens `frameset-display-*` and
+    /// `overflow-controls-*`; Viper's proofs: `chrome_frames_and_textarea`.
+    /// Upstream has neither rule. Pseudo-elements are left alone.
+    #[cfg(feature = "servo")]
+    fn adjust_for_frames_and_textarea<E>(&mut self, element: Option<E>)
+    where
+        E: TElement,
+    {
+        use crate::values::computed::Overflow;
+
+        let Some(element) = element.filter(|e| e.is_html_element()) else {
+            return;
+        };
+        if self.style.pseudo.is_some() {
+            return;
+        }
+        let name = element.local_name();
+        if name == &*element_name!("frame") || name == &*element_name!("frameset") {
+            let box_style = self.style.mutate_box();
+            box_style.set_display(Display::Block);
+            box_style.set_position(Position::Static);
+            box_style.set_float(Float::None);
+        } else if name == &*element_name!("textarea") {
+            let scrolls = |overflow| match overflow {
+                Overflow::Visible => Overflow::Auto,
+                other => other,
+            };
+            let box_style = self.style.get_box();
+            let x = box_style.clone_overflow_x();
+            let y = box_style.clone_overflow_y();
+            if (scrolls(x), scrolls(y)) != (x, y) {
+                let box_style = self.style.mutate_box();
+                box_style.set_overflow_x(scrolls(x));
+                box_style.set_overflow_y(scrolls(y));
+            }
+        }
+    }
+
     /// <textarea>'s editor root needs to inherit the overflow value from its
     /// parent, but we need to make sure it's still scrollable.
     #[cfg(feature = "gecko")]
@@ -1090,6 +1133,9 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         self.adjust_for_visited(element);
         // VIPER-PATCH(servo-display-contents-unboxing): in servo builds too.
         self.adjust_for_prohibited_display_contents(element);
+        // VIPER-PATCH(chrome-frames-and-textarea): servo builds only.
+        #[cfg(feature = "servo")]
+        self.adjust_for_frames_and_textarea(element);
         #[cfg(feature = "gecko")]
         {
             self.adjust_for_fieldset_content();
