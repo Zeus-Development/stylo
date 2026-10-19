@@ -41,13 +41,34 @@ pub struct StyleAdjuster<'a, 'b: 'a> {
     style: &'a mut StyleBuilder<'b>,
 }
 
+// VIPER-PATCH(servo-display-contents-unboxing): the element names of the
+// two functions below. Servo's atom set has none of them, so servo builds
+// take them from the local names, as servo's elements name themselves.
 #[cfg(feature = "gecko")]
+type ElementName = crate::Atom;
+#[cfg(feature = "servo")]
+type ElementName = crate::LocalName;
+#[cfg(feature = "gecko")]
+macro_rules! element_name {
+    ($s:tt) => {
+        atom!($s)
+    };
+}
+#[cfg(feature = "servo")]
+macro_rules! element_name {
+    ($s:tt) => {
+        local_name!($s)
+    };
+}
+
+// VIPER-PATCH(servo-display-contents-unboxing): built in servo builds too,
+// for `is_effective_display_none_for_display_contents` below.
 fn is_topmost_svg_svg_element<E>(e: E) -> bool
 where
     E: TElement,
 {
     debug_assert!(e.is_svg_element());
-    if e.local_name() != &*atom!("svg") {
+    if e.local_name() != &*element_name!("svg") {
         return false;
     }
 
@@ -60,34 +81,39 @@ where
         return true;
     }
 
-    parent.local_name() == &*atom!("foreignObject")
+    parent.local_name() == &*element_name!("foreignObject")
 }
 
 // https://drafts.csswg.org/css-display/#unbox
-#[cfg(feature = "gecko")]
+//
+// VIPER-PATCH(servo-display-contents-unboxing): built in servo builds too.
+// Chrome 154 computes `display: contents` to `none` on Appendix B's HTML
+// elements, on an `svg` element whose parent is not an SVG element (or is a
+// `foreignObject`), on SVG elements other than the six below and on MathML
+// elements, exactly as this function decides; upstream applies it in Gecko
+// builds only. Viper's proofs: `servo_display_contents_unboxing` and the
+// computed-value goldens `display-contents-unboxing-display`.
 fn is_effective_display_none_for_display_contents<E>(element: E) -> bool
 where
     E: TElement,
 {
-    use crate::Atom;
-
-    const SPECIAL_HTML_ELEMENTS: [Atom; 16] = [
-        atom!("br"),
-        atom!("wbr"),
-        atom!("meter"),
-        atom!("progress"),
-        atom!("canvas"),
-        atom!("embed"),
-        atom!("object"),
-        atom!("audio"),
-        atom!("iframe"),
-        atom!("img"),
-        atom!("video"),
-        atom!("frame"),
-        atom!("frameset"),
-        atom!("input"),
-        atom!("textarea"),
-        atom!("select"),
+    const SPECIAL_HTML_ELEMENTS: [ElementName; 16] = [
+        element_name!("br"),
+        element_name!("wbr"),
+        element_name!("meter"),
+        element_name!("progress"),
+        element_name!("canvas"),
+        element_name!("embed"),
+        element_name!("object"),
+        element_name!("audio"),
+        element_name!("iframe"),
+        element_name!("img"),
+        element_name!("video"),
+        element_name!("frame"),
+        element_name!("frameset"),
+        element_name!("input"),
+        element_name!("textarea"),
+        element_name!("select"),
     ];
 
     // https://drafts.csswg.org/css-display/#unbox-svg
@@ -95,13 +121,13 @@ where
     // There's a note about "Unknown elements", but there's not a good way to
     // know what that means, or to get that information from here, and no other
     // UA implements this either.
-    const SPECIAL_SVG_ELEMENTS: [Atom; 6] = [
-        atom!("svg"),
-        atom!("a"),
-        atom!("g"),
-        atom!("use"),
-        atom!("tspan"),
-        atom!("textPath"),
+    const SPECIAL_SVG_ELEMENTS: [ElementName; 6] = [
+        element_name!("svg"),
+        element_name!("a"),
+        element_name!("g"),
+        element_name!("use"),
+        element_name!("tspan"),
+        element_name!("textPath"),
     ];
 
     // https://drafts.csswg.org/css-display/#unbox-html
@@ -514,7 +540,11 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
     /// https://drafts.csswg.org/css-display/#unbox-html
     ///
     /// And forbidding display: contents in pseudo-elements, at least for now.
-    #[cfg(feature = "gecko")]
+    ///
+    /// VIPER-PATCH(servo-display-contents-unboxing): servo builds run the
+    /// element rule only. A pseudo-element keeps `display: contents` there,
+    /// as servo builds did before (no Viper golden shows Chrome turning it
+    /// into `inline`), and its originating element's name decides nothing.
     fn adjust_for_prohibited_display_contents<E>(&mut self, element: Option<E>)
     where
         E: TElement,
@@ -524,8 +554,13 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
 
         // FIXME(emilio): ::before and ::after should support display: contents, see bug 1418138.
+        #[cfg(feature = "gecko")]
         if self.style.pseudo.is_some_and(|p| !p.is_element_backed()) {
             self.style.mutate_box().set_display(Display::Inline);
+            return;
+        }
+        #[cfg(feature = "servo")]
+        if self.style.pseudo.is_some() {
             return;
         }
 
@@ -1053,9 +1088,10 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         // );
 
         self.adjust_for_visited(element);
+        // VIPER-PATCH(servo-display-contents-unboxing): in servo builds too.
+        self.adjust_for_prohibited_display_contents(element);
         #[cfg(feature = "gecko")]
         {
-            self.adjust_for_prohibited_display_contents(element);
             self.adjust_for_fieldset_content();
             self.adjust_for_text_control_editing_root();
         }
