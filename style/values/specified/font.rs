@@ -2057,6 +2057,14 @@ fn whole_percent_line_height(context: &Context, fraction: f32) -> CSSPixelLength
     CSSPixelLength::new((f64::from(product) / 100.0) as f32)
 }
 
+/// VIPER-PATCH(line-height-calc-layout-unit): `length` truncated toward
+/// zero to a whole number of 1/64 px, Chrome's layout unit (multiplying by
+/// 64 is exact in `f32`).
+#[cfg(feature = "servo")]
+fn layout_unit(length: CSSPixelLength) -> CSSPixelLength {
+    CSSPixelLength::new((length.px() * 64.0).trunc() / 64.0)
+}
+
 impl ToComputedValue for LineHeight {
     type ComputedValue = computed::LineHeight;
 
@@ -2108,6 +2116,52 @@ impl ToComputedValue for LineHeight {
                     LengthPercentage::Percentage(ref p) => {
                         resolve_line_height_length(context, NoCalcLength::from_em(p.get()))
                     },
+                    // VIPER-PATCH(line-height-calc-layout-unit): Chrome
+                    // match. Chrome 154 computes a line-height `calc()` that
+                    // reduces to lengths as that length and one that reduces
+                    // to a percentage as that percentage (`calc(13.05px +
+                    // 0px)` is 13.05px, `calc(50% + 50%)` of 10.99px is
+                    // 10.99px), and resolves one that mixes the two in its
+                    // layout unit, 1/64 px: the percentage is of the font
+                    // size truncated to 1/64 px, and the result is
+                    // truncated to 1/64 px (`calc(130.5% + 0px)` of 10px is
+                    // 13.046875px, `calc(1000% + 0px)` of 10.99px is
+                    // 109.84375px). Viper's computed-value goldens
+                    // `line-height-percent-line-height` and
+                    // `line-height-calc-line-height`; upstream keeps the
+                    // exact value. Viper's proof:
+                    // `line_height_calc_layout_unit`.
+                    #[cfg(feature = "servo")]
+                    LengthPercentage::Calc(ref calc) => {
+                        let value = calc.to_computed_value_zoomed(
+                            context,
+                            FontBaseSize::CurrentStyle,
+                            LineHeightBase::InheritedStyle,
+                        );
+                        // As written: `calc(130.5% + 0px)` mixes the two
+                        // although its computed value is a percentage.
+                        let (mut percentages, mut lengths) = (false, false);
+                        let _ = calc.0.node.map_leaves(|leaf| {
+                            match leaf {
+                                Leaf::Percentage(..) => percentages = true,
+                                Leaf::Length(..) => lengths = true,
+                                _ => {},
+                            }
+                            leaf.clone()
+                        });
+                        match (value.to_length(), value.to_percentage()) {
+                            (Some(length), _) if !percentages => length,
+                            (_, Some(percentage)) if !lengths => {
+                                whole_percent_line_height(context, percentage.0)
+                            },
+                            _ => {
+                                let size =
+                                    FontBaseSize::CurrentStyle.resolve(context).computed_size();
+                                layout_unit(value.resolve(layout_unit(size)))
+                            },
+                        }
+                    },
+                    #[cfg(not(feature = "servo"))]
                     LengthPercentage::Calc(ref calc) => calc
                         .to_computed_value_zoomed(
                             context,
@@ -2173,5 +2227,22 @@ mod line_height_whole_percent_tests {
             assert_eq!(f64::from(percent(whole)), whole, "{whole}%");
         }
         assert_eq!(percent(0.0), 0.0);
+    }
+}
+
+// VIPER-PATCH(line-height-calc-layout-unit): the patch's fork test.
+#[cfg(all(test, feature = "servo"))]
+mod line_height_calc_layout_unit_tests {
+    use super::layout_unit;
+    use crate::values::computed::CSSPixelLength;
+
+    #[test]
+    fn line_height_calc_layout_unit_truncates_to_64ths() {
+        let unit = |px: f32| layout_unit(CSSPixelLength::new(px)).px();
+        assert_eq!(unit(13.05), 835.0 / 64.0);
+        assert_eq!(unit(16.965), 1085.0 / 64.0);
+        assert_eq!(unit(10.99), 703.0 / 64.0);
+        assert_eq!(unit(20.0), 20.0);
+        assert_eq!(unit(0.01), 0.0);
     }
 }
