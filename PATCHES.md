@@ -115,6 +115,10 @@ apart from the packaging files.
 | `chrome-layout-properties` | `stylo`: `properties/longhands.toml`, `properties/helpers/animated_properties.mako.rs`, `values/specified/transform.rs`, `values/specified/box.rs` (its test) | Chrome match: servo builds parse `contain`, `backdrop-filter` and `offset-path` (upstream: behind `layout.unimplemented`), `content-visibility` and `transform-box` (upstream: Gecko only; with `content-visibility`'s animation impls, and all five boxes), as Chrome 154 does; their names in `will-change` follow. Viper's layout corpus loses no value with them | `viper-style::api fork_patches::chrome_layout_properties_parse_and_compute`, and viper-layout's `contained_floats_stay_inside_their_box` | Chrome-specific; not offered | Viper V10b-6 | 16 / 24 |
 | `chrome-selector-names` | `stylo`: `servo/chrome_names.rs` (new), `servo/mod.rs`, `servo/selector_parser.rs` | Chrome match: servo's `SelectorParser` accepts the pseudo-class and pseudo-element names Chrome 154 accepts, with their argument grammars, in every origin, mapped to `chrome-dom-api-pseudos`' variants (`:dir()`, `:horizontal`, the `-internal-` names, `:host-context()`, `::cue`, `::highlight()`, every `::-webkit-*` name and the others of Viper's probe) or to aliases (`:-webkit-any-link`, `:-webkit-autofill`, `:-webkit-full-screen`), and `:-webkit-any()` through `selectors-compound-is-alias`; outside user-agent sheets it refuses what Chrome refuses and upstream parses: `-moz-*` and `-servo-*` names, `:lang()` with a string, `::color-swatch` and the `::slider-*` parts. Chrome's stylesheets and DOM selector APIs use one parser, so the tables moved here from Viper's DOM-API parser, one owner for both (Viper's computed goldens `sheet-names-*`: Chrome 154 keeps every rule naming one of these, `-internal-` names included); upstream refuses the names | `viper-style::api fork_patches::chrome_selector_names_in_stylesheets`, the computed-value golden suite (`sheet-names.html`) and the selector golden suite (`names-*`) | Chrome-specific; not offered | Viper V10b-4c1 | 370 / 115 |
 | `chrome-after-pseudo-element` | `selectors`: `parser.rs`; `stylo`: `servo/chrome_after.rs` (new), `servo/chrome_names.rs`, `servo/mod.rs`, `servo/selector_parser.rs` | Chrome match: Chrome 154 decides per pseudo-element which pseudo-classes may follow it in its compound (`IsPseudoClassValidAfterPseudoElement`: the scrollbar pseudo-classes after the scrollbar parts, `:window-inactive` after `::selection`, the user actions after a `-webkit-` name and `::file-selector-button`, `:only-child` after the view-transition parts, ...), and `:is()`, `:where()` and `:not()` there contain only what may follow it; upstream accepts only a user-action pseudo-class after a pseudo-element that accepts state pseudo-classes. Two `Parser` hooks, `valid_after_pseudo_element` (its default is upstream's rule) and `parse_non_ts_pseudo_class_after_pseudo_element`, and servo's implementation of the first from Chrome's table, with `PseudoElement::Unmatched(UnmatchedKind)` naming which of Chrome's pseudo-elements a name is (Viper's selector goldens `names-after-*`, its computed goldens `sheet-after-pseudo-*`) | `viper-style::cascade fork_patches::chrome_pseudo_classes_after_pseudo_elements`, the selector golden suite (`names-after-*`) and the computed-value golden suite (`sheet-after-pseudo.html`) | Chrome-specific; not offered | Viper V10b-4c2 | 426 / 201 |
+| `servo-display-contents-unboxing` | `stylo`: `style_adjuster.rs` | Chrome match: servo builds apply CSS Display 3 Appendix B, by which `display: contents` computes to `none` on br, wbr, meter, progress, canvas, embed, object, audio, iframe, img, video, frame, frameset, input, textarea and select, on an `svg` whose parent is not an SVG element (or is a `foreignObject`), on SVG elements other than `svg`, `a`, `g`, `use`, `tspan` and `textPath`, and on MathML elements, as Chrome 154 reports (Viper's computed-value golden `display-contents-unboxing-display`); upstream applies the rule in Gecko builds only. The element names come from the local names, which servo's atom set lacks; pseudo-elements keep `contents` | `viper-style::cascade fork_patches::servo_display_contents_unboxing` | Candidate; draft to the owner first | Viper V10b-8 | 67 / 0 |
+| `chrome-frames-and-textarea` | `stylo`: `style_adjuster.rs` | Chrome match: servo builds compute `display: block`, `position: static` and `float: none` for every HTML `frame` and `frameset` whatever the author asks, and a `textarea`'s `visible` overflow as `auto` on each axis, as Chrome 154 reports (Viper's computed-value goldens `frameset-display-*`, `overflow-controls-*`); upstream has neither rule | `viper-style::cascade fork_patches::chrome_frames_and_textarea` | Chrome-specific; not offered | Viper V10b-8 | 46 / 0 |
+| `line-height-whole-percent` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds compute a percentage `line-height` as the font size times the percentage truncated toward zero to a whole percent, divided by 100 once (`130.5%` of 20px is 26px, `0.5%` is 0px; Viper's computed-value golden `line-height-percent-line-height`); upstream computes the exact percentage | `viper-style::cascade fork_patches::line_height_whole_percent` | Chrome-specific; not offered | Viper V10b-8 | 38 / 23 |
+| `line-height-calc-layout-unit` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds resolve a line-height `calc()` that mixes a percentage and a length in 1/64 px, the percentage of the font size truncated to 1/64 px and the result truncated to 1/64 px (`calc(130.5% + 0px)` of 10px is 13.046875px); a `calc()` of lengths only stays exact and one of percentages only is that percentage, as Chrome 154 reports (Viper's computed-value goldens `line-height-calc-line-height`, `line-height-percent-line-height`); upstream keeps the exact value | `viper-style::cascade fork_patches::line_height_calc_layout_unit` | Chrome-specific; not offered | Viper V10b-8 | 55 / 16 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -943,6 +947,119 @@ Problem, change, every spot, the Miri commands and the before/after results:
   suite (`names-after-*`, 53 cases) and the computed-value golden suite
   (`sheet-after-pseudo.html`, 51 cases).
 - **Commands.** `cargo test -p selectors`, `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
+
+## Patch `servo-display-contents-unboxing`
+
+- **Problem.** CSS Display 3 Appendix B makes `display: contents` compute
+  to `display: none` on the elements whose rendering is not their
+  children's boxes: br, wbr, meter, progress, canvas, embed, object, audio,
+  iframe, img, video, frame, frameset, input, textarea and select; on an
+  `svg` element whose parent is not an SVG element; on SVG elements other
+  than a nested `svg`, `a`, `g`, `use`, `tspan` and `textPath`; and on
+  MathML elements. Chrome 154 reports `none` there (Viper's computed-value
+  golden `display-contents-unboxing-display`: every HTML element of the
+  list, the top-level `svg`, a `rect`, `math` and `mi`; `button`,
+  `details`, `fieldset`, `legend`, a nested `svg` and a `g` keep
+  `contents`). Stylo has the rule, `is_effective_display_none_for_display_contents`
+  and the element half of `adjust_for_prohibited_display_contents`, in
+  Gecko builds only, so servo builds reported `contents`.
+- **Change.** Both functions and `is_topmost_svg_svg_element` are built in
+  servo builds too, and `adjust` calls the adjustment in both. Servo's
+  atom set has none of the element names, so a small `element_name!`
+  macro takes them from `atom!` in Gecko builds and from the local names
+  (`local_name!`) in servo builds. The pseudo-element branch, which turns
+  `display: contents` on `::before` and `::after` into `inline`, stays
+  Gecko-only: servo builds leave a pseudo-element's `contents` alone, as
+  before, and no Viper golden shows Chrome changing it. Frames and
+  framesets then compute `block` (`chrome-frames-and-textarea`).
+- **Spots.** `style/style_adjuster.rs`: the element-name type and macro,
+  `is_topmost_svg_svg_element`, `is_effective_display_none_for_display_contents`,
+  `adjust_for_prohibited_display_contents` and its call in `adjust`.
+- **Fork tests.** None: the adjustment needs an element and a style
+  context, which the fork's tests do not build. All 27 `stylo` library
+  tests pass.
+- **Viper proofs.** `servo_display_contents_unboxing` (the cascade test
+  binary) and the computed-value fixture `display-contents-unboxing.html`;
+  `viper-layout` reads the computed `display` for these elements since.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Candidate (it is the specification's rule); draft to the
+  owner first.
+
+## Patch `chrome-frames-and-textarea`
+
+- **Problem.** Chrome 154 computes `display: block`, `position: static`
+  and `float: none` for every HTML `frame` and `frameset` element, whatever
+  the author asks (`display: none` and `contents` included; both elements
+  always have a box), and computes a `textarea`'s `overflow-x` and
+  `overflow-y` of `visible` as `auto` (Viper's computed-value goldens
+  `frameset-display-display`, `-position`, `-float` and
+  `overflow-controls-overflow-x`, `-y`). Upstream has neither rule.
+- **Change.** In servo builds, a new adjustment right after the Appendix B
+  one: for an HTML `frame` or `frameset` (not a pseudo-element) it sets the
+  three values; for an HTML `textarea` it turns each `visible` axis into
+  `auto`, before `adjust_for_overflow` reconciles the two axes.
+- **Spots.** `style/style_adjuster.rs`: `adjust_for_frames_and_textarea`
+  and its call in `adjust`.
+- **Fork tests.** None, for the reason above. All 27 `stylo` library
+  tests pass.
+- **Viper proofs.** `chrome_frames_and_textarea` (the cascade test binary),
+  the computed-value fixtures `frameset-display.html` and
+  `overflow-controls.html`, and `viper-layout`'s frameset boxes
+  (`framesets_lay_out_their_frames_as_chrome`).
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
+
+## Patch `line-height-whole-percent`
+
+- **Problem.** Chrome 154 computes a percentage `line-height` from the
+  percentage truncated toward zero to a whole percent: `130.5%` of 20px is
+  26px, `99.9%` of 13px is 12.87px, `0.5%` is 0px (Viper's computed-value
+  golden `line-height-percent-line-height`, four font sizes). Stylo
+  computes the exact percentage (26.1px, 12.987px, 0.05px).
+- **Change.** In servo builds the percentage arm of
+  `LineHeight::to_computed_value` multiplies the font size by the whole
+  percent and divides by 100 once, in `f64`, so a whole `130%` of 20px is
+  exactly 26px (`1.3_f32 * 20.0` is not). The parser keeps the percentage
+  as its number over 100 in `f32`, so `whole_percent` first recovers the
+  number as written from the fraction's shortest decimal (`1.3_f32 *
+  100.0` is not exactly 130), then truncates it.
+- **Spots.** `style/values/specified/font.rs`: `whole_percent`,
+  `whole_percent_line_height`, the percentage arm, the test module.
+- **Fork tests.** `line_height_whole_percent_truncates_the_number_as_written`;
+  all 27 `stylo` library tests pass.
+- **Viper proofs.** `line_height_whole_percent` (the cascade test binary,
+  worked by hand) and the computed-value fixture `line-height-percent.html`.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Chrome-specific, so not offered.
+
+## Patch `line-height-calc-layout-unit`
+
+- **Problem.** Chrome 154 resolves a line-height `calc()` that mixes a
+  percentage and a length in its layout unit, 1/64 px: the percentage is of
+  the font size truncated to 1/64 px, and the result is truncated to
+  1/64 px (`calc(130.5% + 0px)` of 10px is 13.046875px, reported as
+  13.0469px; `calc(1000% + 0px)` of 10.99px is 109.84375px, not 109.890625px).
+  A `calc()` of lengths only is that length (`calc(13.05px + 0px)` is
+  13.05px) and one of percentages only is that percentage
+  (`calc(50% + 50%)` of 10.99px is 10.99px) (Viper's computed-value
+  goldens `line-height-calc-line-height` and
+  `line-height-percent-line-height`). Stylo computes every `calc()`
+  exactly.
+- **Change.** In servo builds the `calc()` arm reads the specified
+  expression's leaves (its computed form drops a `+ 0px`, which Chrome
+  keeps): lengths only give the computed length, percentages only go
+  through `line-height-whole-percent`'s rule, and a mix is resolved against
+  the font size truncated to 1/64 px and truncated to 1/64 px
+  (`layout_unit`).
+- **Spots.** `style/values/specified/font.rs`: `layout_unit`, the `calc()`
+  arm, the test module.
+- **Fork tests.** `line_height_calc_layout_unit_truncates_to_64ths`; all 27
+  `stylo` library tests pass.
+- **Viper proofs.** `line_height_calc_layout_unit` (the cascade test
+  binary, worked by hand) and the computed-value fixture
+  `line-height-calc.html`.
+- **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Chrome-specific, so not offered.
 
 ## Rebase procedure (fork side)
