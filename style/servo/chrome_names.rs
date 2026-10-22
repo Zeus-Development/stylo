@@ -332,6 +332,8 @@ mod tests {
             namespaces: &namespaces,
             url_data: &url,
             for_supports_rule: false,
+            // VIPER-PATCH(stylesheet-parse-options): upstream's behaviour.
+            parse_options: Default::default(),
         };
         let mut input = Parser::new(selectors);
         let list = SelectorList::parse(&parser, &mut input, ParseRelative::No);

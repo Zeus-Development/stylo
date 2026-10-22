@@ -133,6 +133,8 @@ fn parse_scope(
                 namespaces: &context.namespaces,
                 url_data: context.url_data,
                 for_supports_rule: false,
+                // VIPER-PATCH(stylesheet-parse-options): the sheet's options.
+                parse_options: context.parse_options,
             };
             let parse_relative = if for_end {
                 ParseRelative::ForScope

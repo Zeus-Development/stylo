@@ -21,6 +21,8 @@ mod namespace_rule;
 mod nested_declarations_rule;
 pub mod origin;
 mod page_rule;
+// VIPER-PATCH(stylesheet-parse-options): the parse options.
+mod parse_options;
 pub mod position_try_rule;
 mod property_rule;
 mod rule_list;
@@ -72,6 +74,8 @@ pub use self::namespace_rule::NamespaceRule;
 pub use self::nested_declarations_rule::NestedDeclarationsRule;
 pub use self::origin::{Origin, OriginSet, OriginSetIterator, PerOrigin, PerOriginIter};
 pub use self::page_rule::{PagePseudoClassFlags, PageRule, PageSelector, PageSelectors};
+// VIPER-PATCH(stylesheet-parse-options): the parse options.
+pub use self::parse_options::ParseOptions;
 pub use self::position_try_rule::PositionTryRule;
 pub use self::property_rule::PropertyRule;
 pub use self::rule_list::CssRules;

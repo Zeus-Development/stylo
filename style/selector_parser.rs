@@ -8,6 +8,8 @@
 
 use crate::derives::*;
 use crate::stylesheets::{Namespaces, Origin, UrlExtraData};
+// VIPER-PATCH(stylesheet-parse-options): the parse options.
+use crate::stylesheets::ParseOptions;
 use crate::values::serialize_atom_identifier;
 use crate::Atom;
 use cssparser::{match_ignore_ascii_case, Parser as CssParser};
@@ -50,6 +52,9 @@ pub struct SelectorParser<'a> {
     pub url_data: &'a UrlExtraData,
     /// Whether we're parsing selectors for `@supports`
     pub for_supports_rule: bool,
+    /// VIPER-PATCH(stylesheet-parse-options): the parse options of the
+    /// sheet or the call, from its `ParserContext` where there is one.
+    pub parse_options: ParseOptions,
 }
 
 impl<'a> SelectorParser<'a> {
@@ -67,6 +72,8 @@ impl<'a> SelectorParser<'a> {
             namespaces: &namespaces,
             url_data,
             for_supports_rule: false,
+            // VIPER-PATCH(stylesheet-parse-options): upstream's behaviour.
+            parse_options: ParseOptions::default(),
         };
         SelectorList::parse(&parser, &mut CssParser::new(input), ParseRelative::No)
     }

@@ -30,6 +30,8 @@ use crate::selector_parser::SelectorImpl;
 use crate::shared_lock::Locked;
 use crate::stylesheets::container_rule::ContainerSizeQuery;
 use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+// VIPER-PATCH(stylesheet-parse-options): the parse options.
+use crate::stylesheets::ParseOptions;
 use crate::stylist::Stylist;
 use crate::typed_om::TypedValueList;
 use crate::values::computed::Context;
@@ -1422,7 +1424,30 @@ pub fn parse_style_attribute(
     quirks_mode: QuirksMode,
     rule_type: CssRuleType,
 ) -> PropertyDeclarationBlock {
-    let context = ParserContext::new(
+    // VIPER-PATCH(stylesheet-parse-options): upstream's behaviour.
+    parse_style_attribute_with_options(
+        input,
+        url_data,
+        error_reporter,
+        quirks_mode,
+        rule_type,
+        ParseOptions::default(),
+    )
+}
+
+/// VIPER-PATCH(stylesheet-parse-options): `parse_style_attribute`, parsing
+/// with the embedder's `parse_options` (`parse_style_attribute` passes the
+/// default).
+#[inline]
+pub fn parse_style_attribute_with_options(
+    input: &str,
+    url_data: &UrlExtraData,
+    error_reporter: Option<&dyn ParseErrorReporter>,
+    quirks_mode: QuirksMode,
+    rule_type: CssRuleType,
+    parse_options: ParseOptions,
+) -> PropertyDeclarationBlock {
+    let mut context = ParserContext::new(
         Origin::Author,
         url_data,
         Some(rule_type),
@@ -1433,6 +1458,7 @@ pub fn parse_style_attribute(
         None,
         /* attr_taint */ Default::default(),
     );
+    context.parse_options = parse_options;
 
     parse_property_declaration_list(&context, &mut Parser::new(input), &[])
 }

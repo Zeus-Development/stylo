@@ -1124,6 +1124,8 @@ impl<'a, 'i> QualifiedRuleParser<'i> for NestedRuleParser<'a, 'i> {
             namespaces: &self.context.namespaces,
             url_data: self.context.url_data,
             for_supports_rule: false,
+            // VIPER-PATCH(stylesheet-parse-options): the sheet's options.
+            parse_options: self.context.parse_options,
         };
         SelectorList::parse(&selector_parser, input, self.parse_relative())
     }

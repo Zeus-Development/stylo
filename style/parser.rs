@@ -8,6 +8,8 @@ use crate::context::QuirksMode;
 use crate::custom_properties::{AttrTaint, AttrTaintedRange};
 use crate::error_reporting::{ContextualParseError, ParseErrorReporter};
 use crate::stylesheets::{CssRuleType, CssRuleTypes, Namespaces, Origin, UrlExtraData};
+// VIPER-PATCH(stylesheet-parse-options): the parse options.
+use crate::stylesheets::ParseOptions;
 use crate::use_counters::UseCounters;
 use cssparser::{Parser, SourceLocation, UnicodeRange};
 use selectors::parser::ParseRelative;
@@ -89,6 +91,9 @@ pub struct ParserContext<'a> {
     pub nesting_context: NestingContext,
     /// The relevant regions in the input that have been tainted by attr() if relevant.
     pub attr_tainted_regions: AttrTaint,
+    /// VIPER-PATCH(stylesheet-parse-options): the embedder's options for
+    /// this parse; `new` sets the default, upstream's behaviour.
+    pub parse_options: ParseOptions,
 }
 
 impl<'a> ParserContext<'a> {
@@ -115,6 +120,8 @@ impl<'a> ParserContext<'a> {
             use_counters,
             nesting_context: NestingContext::new_from_rule(rule_type),
             attr_tainted_regions,
+            // VIPER-PATCH(stylesheet-parse-options): upstream's behaviour.
+            parse_options: ParseOptions::default(),
         }
     }
 

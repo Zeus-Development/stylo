@@ -353,6 +353,8 @@ impl RawSelector {
                     stylesheet_origin: context.stylesheet_origin,
                     url_data: context.url_data,
                     for_supports_rule: true,
+                    // VIPER-PATCH(stylesheet-parse-options): the sheet's options.
+                    parse_options: context.parse_options,
                 };
 
                 Selector::<SelectorImpl>::parse(&parser, input)

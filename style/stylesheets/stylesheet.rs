@@ -17,6 +17,8 @@ use crate::stylesheets::rules_iterator::{NestedRuleIterationCondition, RulesIter
 use crate::stylesheets::{
     CssRule, CssRules, CustomMediaEvaluator, CustomMediaMap, Origin, UrlExtraData,
 };
+// VIPER-PATCH(stylesheet-parse-options): the parse options.
+use crate::stylesheets::ParseOptions;
 use crate::use_counters::UseCounters;
 use crate::{Namespace, Prefix};
 use cssparser::{Parser, StyleSheetParser};
@@ -81,6 +83,35 @@ impl StylesheetContents {
         allow_import_rules: AllowImportRules,
         sanitization_data: Option<&mut SanitizationData>,
     ) -> Arc<Self> {
+        // VIPER-PATCH(stylesheet-parse-options): upstream's behaviour.
+        Self::from_str_with_options(
+            css,
+            url_data,
+            origin,
+            shared_lock,
+            stylesheet_loader,
+            error_reporter,
+            quirks_mode,
+            allow_import_rules,
+            sanitization_data,
+            ParseOptions::default(),
+        )
+    }
+
+    /// VIPER-PATCH(stylesheet-parse-options): `from_str`, parsing with the
+    /// embedder's `parse_options` (`from_str` passes the default).
+    pub fn from_str_with_options(
+        css: &str,
+        url_data: UrlExtraData,
+        origin: Origin,
+        shared_lock: &SharedRwLock,
+        stylesheet_loader: Option<&dyn StylesheetLoader>,
+        error_reporter: Option<&dyn ParseErrorReporter>,
+        quirks_mode: QuirksMode,
+        allow_import_rules: AllowImportRules,
+        sanitization_data: Option<&mut SanitizationData>,
+        parse_options: ParseOptions,
+    ) -> Arc<Self> {
         let use_counters = UseCounters::default();
         let (namespaces, rules, source_map_url, source_url) = Stylesheet::parse_rules(
             css,
@@ -93,6 +124,8 @@ impl StylesheetContents {
             Some(&use_counters),
             allow_import_rules,
             sanitization_data,
+            // VIPER-PATCH(stylesheet-parse-options): the embedder's options.
+            parse_options,
         );
 
         Arc::new(Self {
@@ -464,10 +497,12 @@ impl Stylesheet {
         use_counters: Option<&UseCounters>,
         allow_import_rules: AllowImportRules,
         mut sanitization_data: Option<&mut SanitizationData>,
+        // VIPER-PATCH(stylesheet-parse-options): the embedder's options.
+        parse_options: ParseOptions,
     ) -> (Namespaces, Vec<CssRule>, Option<String>, Option<String>) {
         let mut input = Parser::new(css);
 
-        let context = ParserContext::new(
+        let mut context = ParserContext::new(
             origin,
             url_data,
             None,
@@ -478,6 +513,8 @@ impl Stylesheet {
             use_counters,
             /* attr_taint */ Default::default(),
         );
+        // VIPER-PATCH(stylesheet-parse-options): the embedder's options.
+        context.parse_options = parse_options;
 
         let mut rule_parser = TopLevelRuleParser {
             shared_lock,
@@ -541,8 +578,37 @@ impl Stylesheet {
         quirks_mode: QuirksMode,
         allow_import_rules: AllowImportRules,
     ) -> Self {
+        // VIPER-PATCH(stylesheet-parse-options): upstream's behaviour.
+        Self::from_str_with_options(
+            css,
+            url_data,
+            origin,
+            media,
+            shared_lock,
+            stylesheet_loader,
+            error_reporter,
+            quirks_mode,
+            allow_import_rules,
+            ParseOptions::default(),
+        )
+    }
+
+    /// VIPER-PATCH(stylesheet-parse-options): `from_str`, parsing with the
+    /// embedder's `parse_options` (`from_str` passes the default).
+    pub fn from_str_with_options(
+        css: &str,
+        url_data: UrlExtraData,
+        origin: Origin,
+        media: Arc<Locked<MediaList>>,
+        shared_lock: SharedRwLock,
+        stylesheet_loader: Option<&dyn StylesheetLoader>,
+        error_reporter: Option<&dyn ParseErrorReporter>,
+        quirks_mode: QuirksMode,
+        allow_import_rules: AllowImportRules,
+        parse_options: ParseOptions,
+    ) -> Self {
         // FIXME: Consider adding use counters to Servo?
-        let contents = StylesheetContents::from_str(
+        let contents = StylesheetContents::from_str_with_options(
             css,
             url_data,
             origin,
@@ -552,6 +618,8 @@ impl Stylesheet {
             quirks_mode,
             allow_import_rules,
             /* sanitized_output = */ None,
+            // VIPER-PATCH(stylesheet-parse-options): the embedder's options.
+            parse_options,
         );
 
         Stylesheet {
