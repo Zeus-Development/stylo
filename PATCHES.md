@@ -66,7 +66,7 @@ only other files are generated at packaging time and have no counterpart in
 git: the normalized `Cargo.toml`, `Cargo.lock` and `.cargo_vcs_info.json`.
 `servo_arc` (`servo-arc-*`), `selectors` (`selectors-attr-flag-hook`),
 since Viper's V10a part 3a `stylo` (`element-data-checked`,
-`dom-apis-local-name`, and since part 3b `chrome-attr-s-flag`) and, since
+`dom-apis-local-name`, and from part 3b to STY-FORK-1 `chrome-attr-s-flag`) and, since
 part 3b, `stylo_static_prefs` (`chrome-prefs`) are patched on this branch,
 and since part 4 `stylo_traits` (`owned-slice-into-raw`); Viper's V10b
 part 1 adds `style-struct-arc-borrow`, `stylesheet-contents-arc`,
@@ -79,7 +79,9 @@ part 1 adds `style-struct-arc-borrow`, `stylesheet-contents-arc`,
 patch's marker sits beside the `atom!("scripting")` that uses the new atom)
 and `chrome-layout-properties` to `stylo`; Viper's V10b-4c1 adds
 `chrome-selector-names` to `stylo`; Viper's V10b-4c2 adds
-`chrome-after-pseudo-element` to `selectors` and `stylo`.
+`chrome-after-pseudo-element` to `selectors` and `stylo`; Viper's
+STY-FORK-1 adds `stylesheet-parse-options` to `stylo` and retires
+`chrome-attr-s-flag` (section "Retired patches").
 The other five directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -95,7 +97,6 @@ apart from the packaging files.
 | `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | Viper PR #43 (V10a part 1) | 13 / 137 |
 | `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper PR #47 (V10a part 2) | 25 / 57 |
 | `element-data-checked` | `stylo`: `data.rs` | Soundness: `ElementDataWrapper::borrow` and `borrow_mut` are safe functions that hand out `&ElementData` and `&mut ElementData` from an `UnsafeCell`, and upstream checks the borrow flag only under `debug_assertions`, so a release build lets safe code alias `&mut`; the flag is now checked in every build, and `try_borrow`/`try_borrow_mut` report a conflict | `viper-style::api fork_patches::element_data_checked_try_borrow_mut_refuses_a_second_borrow` | Candidate; draft to the owner first | Viper V10a part 3a | 47 / 23 |
-| `chrome-attr-s-flag` | `stylo`: `servo/selector_parser.rs` | Chrome match: Stylo's servo `SelectorParser` returns `false` from the `selectors-attr-flag-hook` hook, so a stylesheet rule whose selector uses the `s` attribute flag is dropped and a forgiving list drops just that selector, as in Chrome 154 (which refuses the flag in stylesheets as in its DOM APIs); upstream parses the flag | `viper-style::cascade fork_patches::chrome_attr_s_flag_in_stylesheets` (the cascade test binary) | Chrome-specific; not offered | Viper V10a part 3b | 13 / 19 |
 | `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them); since Viper V13b part 2f1 also `layout.writing-mode.enabled` and `layout.css.grid-template-subgrid-value.enabled` true (Chrome 154 computes `writing-mode` and the `subgrid` value of `grid-template-columns` and `-rows`; upstream's servo defaults drop both declarations); since Viper V10b-6 also `layout.container-queries.enabled` true (Chrome 154 parses `container-type` and `container-name`; servo builds still parse no `@container` rule) | `viper-style::api fork_patches::chrome_prefs_defaults`, and `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute` | Chrome-specific; not offered | Viper V10a part 3b; extended by Viper V13b part 2f1 and V10b-6 | 33 / 6 |
 | `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
 | `chrome-font-size-precision` | `stylo`: `values/specified/font.rs` | Chrome match: computed font sizes stay exact in servo builds (Chrome 154: `1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px); upstream quantizes them to 10 bits of precision, as Gecko does (18.7188px, 13.3281px), which also shifts the em lengths and line heights derived from them (Viper's computed-value goldens `ua-structure-font-size`, `cascade-inherit-font-size`); Gecko builds still quantize | `viper-style::cascade fork_patches::chrome_font_size_precision`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 11 / 0 |
@@ -119,6 +120,7 @@ apart from the packaging files.
 | `chrome-frames-and-textarea` | `stylo`: `style_adjuster.rs` | Chrome match: servo builds compute `display: block`, `position: static` and `float: none` for every HTML `frame` and `frameset` whatever the author asks, and a `textarea`'s `visible` overflow as `auto` on each axis, as Chrome 154 reports (Viper's computed-value goldens `frameset-display-*`, `overflow-controls-*`); upstream has neither rule | `viper-style::cascade fork_patches::chrome_frames_and_textarea` | Chrome-specific; not offered | Viper V10b-8 | 46 / 0 |
 | `line-height-whole-percent` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds compute a percentage `line-height` as the font size times the percentage truncated toward zero to a whole percent, divided by 100 once (`130.5%` of 20px is 26px, `0.5%` is 0px; Viper's computed-value golden `line-height-percent-line-height`); upstream computes the exact percentage | `viper-style::cascade fork_patches::line_height_whole_percent` | Chrome-specific; not offered | Viper V10b-8 | 38 / 23 |
 | `line-height-calc-layout-unit` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds resolve a line-height `calc()` that mixes a percentage and a length in 1/64 px, the percentage of the font size truncated to 1/64 px and the result truncated to 1/64 px (`calc(130.5% + 0px)` of 10px is 13.046875px); a `calc()` of lengths only stays exact and one of percentages only is that percentage, as Chrome 154 reports (Viper's computed-value goldens `line-height-calc-line-height`, `line-height-percent-line-height`); upstream keeps the exact value | `viper-style::cascade fork_patches::line_height_calc_layout_unit` | Chrome-specific; not offered | Viper V10b-8 | 55 / 16 |
+| `stylesheet-parse-options` | `stylo`: `stylesheets/parse_options.rs` (new), `stylesheets/mod.rs`, `parser.rs`, `selector_parser.rs`, `servo/selector_parser.rs`, `stylesheets/stylesheet.rs`, `properties/declaration_block.rs`, `stylesheets/rule_parser.rs`, `stylesheets/supports_rule.rs`, `stylesheets/scope_rule.rs`; the struct literals of the tests in `servo/chrome_names.rs` and `servo/chrome_after.rs` | Embedder control: `ParseOptions`, a non-exhaustive set of options whose default is upstream's behaviour, is carried by `ParserContext` and by `SelectorParser` (from the context wherever one exists), and set through new `_with_options` forms of `StylesheetContents::from_str`, `Stylesheet::from_str` and `parse_style_attribute`. Its first field, `attribute_s_flag` (default `true`, Selectors 4 section 6.3), is what servo's `SelectorParser` answers to `selectors-attr-flag-hook`'s hook, so an embedder decides per sheet whether the `s` attribute flag parses; upstream always accepts it and has no per-parse options | `viper-style::cascade fork_patches::stylesheet_parse_options_decide_the_s_flag` | Candidate; draft to the owner first | Viper STY-FORK-1 | 167 / 97 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -259,23 +261,6 @@ Problem, change, every spot, the Miri commands and the before/after results:
   through `dom_apis`.
 - **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
   first.
-
-## Patch `chrome-attr-s-flag`
-
-- **Problem.** Chrome 154 refuses the Selectors 4 `s` attribute flag
-  (explicitly case-sensitive values) in stylesheets, as in its DOM selector
-  APIs: a rule whose selector list uses it is dropped, and inside a
-  forgiving `:is()` or `:where()` only that selector is. Stylo's servo
-  `SelectorParser` accepted the flag.
-- **Change.** `SelectorParser` implements the hook of
-  `selectors-attr-flag-hook`, `parse_case_sensitive_attribute_flag`, as
-  `false`. Viper's DOM selector parser already did.
-- **Spots.** `style/servo/selector_parser.rs`: the hook and the test module.
-- **Fork tests.** `chrome_attr_s_flag_refused_in_author_selectors`; all 11
-  `stylo` library tests pass.
-- **Commands.** `cargo test -p stylo --lib`.
-- **Upstream.** Chrome-specific (the specification defines the flag), so
-  not offered.
 
 ## Patch `chrome-prefs`
 
@@ -1061,6 +1046,68 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `line-height-calc.html`.
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Chrome-specific, so not offered.
+
+## Patch `stylesheet-parse-options`
+
+- **Problem.** What Stylo's parsers accept is fixed by the build and by
+  global preferences: an embedder cannot parse one document's style sheets
+  at one CSS level and another's at another, nor decide a choice per parse.
+  Viper needs that for the `s` attribute flag ([Selectors 4 section
+  6.3](https://drafts.csswg.org/selectors-4/#attribute-case)): its Basic
+  dialect accepts the flag, its legacy dialect refuses it, and both style
+  documents in one process. The earlier patch `chrome-attr-s-flag` made
+  servo's `SelectorParser` refuse the flag for every sheet.
+- **Change.** A new type `style::stylesheets::ParseOptions`
+  (`#[non_exhaustive]`; `Default` is upstream's behaviour; built as
+  `ParseOptions::default()` with fields set after) is a public field of
+  `ParserContext`, which `ParserContext::new` sets to the default, and of
+  `SelectorParser`. Every `SelectorParser` built from a context (style
+  rules and nested rules, `@supports selector()`, `@scope`) copies the
+  context's options; the context-free `parse_author_origin_no_namespace`
+  uses the default. `StylesheetContents::from_str_with_options`,
+  `Stylesheet::from_str_with_options` and
+  `parse_style_attribute_with_options` take the options; the forms without
+  `_with_options` pass the default, so their behaviour is unchanged. The
+  first field, `attribute_s_flag` (default `true`), is servo's answer to
+  `selectors-attr-flag-hook`'s `parse_case_sensitive_attribute_flag`: when
+  `false`, a selector using the flag is invalid, so a style rule whose
+  selector list holds it is dropped and a forgiving list drops just that
+  selector. Declaration blocks hold no selector, so the field changes
+  nothing in a style attribute; its `_with_options` form is there for
+  later fields. Not covered: the CSSOM's rule insertion and the other
+  entry points parse with the default.
+- **Spots.** `style/stylesheets/parse_options.rs` (new: the type and the
+  test module), `style/stylesheets/mod.rs` (module and export),
+  `style/parser.rs` (the field and its default), `style/selector_parser.rs`
+  (the field; `parse_author_origin_no_namespace`),
+  `style/servo/selector_parser.rs` (the hook, which replaces
+  `chrome-attr-s-flag`'s, and that patch's test module removed),
+  `style/stylesheets/stylesheet.rs` (the two `from_str_with_options` and
+  `parse_rules`), `style/properties/declaration_block.rs`
+  (`parse_style_attribute_with_options`), `style/stylesheets/rule_parser.rs`,
+  `supports_rule.rs` and `scope_rule.rs` (the options copied), and the
+  test-only struct literals in `style/servo/chrome_names.rs` and
+  `chrome_after.rs` (the default).
+- **Fork tests.** `stylesheet_parse_options_default_accepts_the_s_flag`,
+  `stylesheet_parse_options_refuse_the_s_flag` and
+  `stylesheet_parse_options_style_attribute`; all 29 `stylo` library
+  tests and the 20 `selectors` tests pass.
+- **Viper proof.** `stylesheet_parse_options_decide_the_s_flag` (the
+  cascade test binary): the legacy dialect refuses the flag in a
+  stylesheet, the Basic dialect accepts it.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Generic (no default changes), so a candidate; a draft goes
+  to the Viper owner first, and nothing is sent without the owner's
+  go-ahead.
+
+## Retired patches
+
+Patches that left this branch. Their code is gone from the branch head;
+the commits that carried them stay, as every pinned commit does.
+
+| Id | Retired by (Viper task) | Why | Last pinned commit carrying it | Replaced by |
+| --- | --- | --- | --- | --- |
+| `chrome-attr-s-flag` | STY-FORK-1 | It made servo's `SelectorParser` refuse the `s` attribute flag in every sheet; whether a sheet accepts the flag is now the embedder's choice, per parse | `c4343e2a` | `stylesheet-parse-options` (`attribute_s_flag: false` gives its answer) |
 
 ## Rebase procedure (fork side)
 
