@@ -48,6 +48,13 @@ pub struct ParseOptions {
     /// matched before aliases are applied. Default: none.
     #[ignore_malloc_size_of = "static data"]
     pub refused_values: &'static [(&'static str, &'static str)],
+    /// VIPER-PATCH(value-grammar-options): values refused only where a
+    /// supports condition is evaluated (`@supports` and `CSS.supports`, CSS
+    /// Conditional 3 section 6.1: values without a usable level of support),
+    /// matched as `refused_values` are; declarations still parse them.
+    /// Default: none.
+    #[ignore_malloc_size_of = "static data"]
+    pub unsupported_values: &'static [(&'static str, &'static str)],
 }
 
 impl Default for ParseOptions {
@@ -56,6 +63,7 @@ impl Default for ParseOptions {
             attribute_s_flag: true,
             value_aliases: &[],
             refused_values: &[],
+            unsupported_values: &[],
         }
     }
 }
@@ -84,7 +92,7 @@ impl ParseOptions {
         }
         let start = input.state();
         let mut edits = Vec::new();
-        let refused = self.scan(property, input, &mut edits);
+        let refused = self.scan(self.refused_values, property, input, &mut edits);
         if refused {
             return ValueRewrite::Refused;
         }
@@ -105,11 +113,25 @@ impl ParseOptions {
         ValueRewrite::Rewritten(rewritten)
     }
 
+    /// VIPER-PATCH(value-grammar-options): whether the value in `input`, a
+    /// supports condition's declaration of `property`, holds one of
+    /// `unsupported_values`; `input` is left at its start.
+    pub(crate) fn unsupported(&self, property: &str, input: &mut Parser) -> bool {
+        if !self.unsupported_values.iter().any(|u| u.0.eq_ignore_ascii_case(property)) {
+            return false;
+        }
+        let start = input.state();
+        let found = self.scan(self.unsupported_values, property, input, &mut Vec::new());
+        input.reset(&start);
+        found
+    }
+
     /// Walks every token of `input` and its nested blocks, recording the
     /// aliased identifiers' byte ranges; returns whether a refused name
     /// occurs.
     fn scan(
         &self,
+        refusals: &[(&str, &str)],
         property: &str,
         input: &mut Parser,
         edits: &mut Vec<(usize, usize, &'static str)>,
@@ -129,7 +151,7 @@ impl ParseOptions {
                 let is = |listed: &str, value: &str| {
                     listed.eq_ignore_ascii_case(property) && value.eq_ignore_ascii_case(name)
                 };
-                refused |= self.refused_values.iter().any(|r| is(r.0, r.1));
+                refused |= refusals.iter().any(|r| is(r.0, r.1));
                 let alias = self.value_aliases.iter().find(|a| is(a.0, a.1));
                 if let (Token::Ident(_), Some(alias)) = (&token, alias) {
                     edits.push((before, input.position().byte_index(), alias.2));
@@ -143,7 +165,7 @@ impl ParseOptions {
                     | Token::CurlyBracketBlock
             ) {
                 let nested = input.parse_nested_block(|input| {
-                    Ok::<_, cssparser::ParseError<()>>(self.scan(property, input, edits))
+                    Ok::<_, cssparser::ParseError<()>>(self.scan(refusals, property, input, edits))
                 });
                 refused |= nested.unwrap_or(false);
             }
@@ -389,6 +411,19 @@ pub(crate) mod value_grammar_tests {
         assert_eq!(
             declared(options, "text-transform: full-width; text-align: center"),
             "text-align: center;"
+        );
+    }
+
+    #[test]
+    fn value_grammar_options_refuse_unsupported_values_in_supports_only() {
+        let mut options = ParseOptions::default();
+        options.unsupported_values = &[("text-indent", "hanging")];
+        assert!(!supports(options, "text-indent", "1px Hanging"));
+        assert!(supports(options, "text-indent", "1px each-line"));
+        assert!(supports(options, "text-transform", "uppercase"));
+        assert_eq!(
+            declared(options, "text-indent: 1px hanging"),
+            "text-indent: 1px hanging;"
         );
     }
 }

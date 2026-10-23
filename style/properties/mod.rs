@@ -45,6 +45,7 @@ use std::{
     fmt::{self, Write},
     mem,
 };
+// VIPER-PATCH(value-grammar-options): `StyleParseErrorKind` for `parse_into`.
 use style_traits::{
     CssString, CssWriter, KeywordsCollectFn, ParseError, ParsingMode, SpecifiedValueInfo,
     StyleParseErrorKind, ToCss,

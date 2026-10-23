@@ -411,6 +411,11 @@ impl Declaration {
 
                 let mut declarations = SourcePropertyDeclaration::default();
                 input.parse_until_before(Delimiter::Bang, |input| {
+                    // VIPER-PATCH(value-grammar-options): values without a
+                    // usable level of support (`ParseOptions`).
+                    if context.parse_options.unsupported(&prop, input) {
+                        return Err(CssParseError::custom(()));
+                    }
                     PropertyDeclaration::parse_into(&mut declarations, id, context, input)
                         .map_err(|_| CssParseError::custom(()))
                 })?;
