@@ -30,6 +30,8 @@ use crate::gecko_bindings::structs::{CSSPropertyId, NonCustomCSSPropertyId, RefP
 use crate::logical_geometry::WritingMode;
 use crate::parser::ParserContext;
 use crate::stylesheets::CssRuleType;
+// VIPER-PATCH(value-grammar-options): read by `parse_into`.
+use crate::stylesheets::ValueRewrite;
 use crate::stylesheets::Origin;
 use crate::stylist::Stylist;
 use crate::typed_om::{ToTyped, TypedValue};
@@ -44,7 +46,8 @@ use std::{
     mem,
 };
 use style_traits::{
-    CssString, CssWriter, KeywordsCollectFn, ParseError, ParsingMode, SpecifiedValueInfo, ToCss,
+    CssString, CssWriter, KeywordsCollectFn, ParseError, ParsingMode, SpecifiedValueInfo,
+    StyleParseErrorKind, ToCss,
 };
 use thin_vec::ThinVec;
 
@@ -916,6 +919,31 @@ impl PropertyDeclaration {
         debug_assert!(id.allowed_in(context), "{:?}", id);
         input.skip_whitespace();
 
+        // VIPER-PATCH(value-grammar-options): the embedder's value aliases
+        // and refusals (`ParseOptions`), applied to the declared value first.
+        if let PropertyId::NonCustom(non_custom) = id {
+            match context.parse_options.rewrite_value(non_custom.name(), input) {
+                ValueRewrite::Unchanged => {},
+                ValueRewrite::Refused => {
+                    return Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError))
+                },
+                ValueRewrite::Rewritten(text) => {
+                    let mut parser = Parser::new(&text);
+                    return Self::parse_value_into(declarations, id, context, &mut parser);
+                },
+            }
+        }
+        Self::parse_value_into(declarations, id, context, input)
+    }
+
+    // VIPER-PATCH(value-grammar-options): upstream's `parse_into`, after
+    // the options.
+    fn parse_value_into(
+        declarations: &mut SourcePropertyDeclaration,
+        id: PropertyId,
+        context: &ParserContext,
+        input: &mut Parser,
+    ) -> Result<(), ParseError> {
         let start = input.state();
         let non_custom_id = match id {
             PropertyId::Custom(property_name) => {

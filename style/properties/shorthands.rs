@@ -848,7 +848,7 @@ pub mod column_rule {
     }
 }
 
-// VIPER-PATCH(chrome-value-parsing): in servo builds too (shorthands.toml).
+// VIPER-PATCH(value-grammar-options): in servo builds too (shorthands.toml).
 pub mod text_wrap {
     pub use crate::properties::generated::shorthands::text_wrap::*;
 

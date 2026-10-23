@@ -22,7 +22,8 @@ mod nested_declarations_rule;
 pub mod origin;
 mod page_rule;
 // VIPER-PATCH(stylesheet-parse-options): the parse options.
-mod parse_options;
+// VIPER-PATCH(value-grammar-options): crate-visible for the fork tests.
+pub(crate) mod parse_options;
 pub mod position_try_rule;
 mod property_rule;
 mod rule_list;
@@ -76,6 +77,8 @@ pub use self::origin::{Origin, OriginSet, OriginSetIterator, PerOrigin, PerOrigi
 pub use self::page_rule::{PagePseudoClassFlags, PageRule, PageSelector, PageSelectors};
 // VIPER-PATCH(stylesheet-parse-options): the parse options.
 pub use self::parse_options::ParseOptions;
+// VIPER-PATCH(value-grammar-options): the declaration parser reads it.
+pub(crate) use self::parse_options::ValueRewrite;
 pub use self::position_try_rule::PositionTryRule;
 pub use self::property_rule::PropertyRule;
 pub use self::rule_list::CssRules;

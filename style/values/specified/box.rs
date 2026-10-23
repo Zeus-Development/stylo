@@ -2285,7 +2285,9 @@ mod chrome_display_ruby_tests {
 mod chrome_layout_properties_tests {
     #[test]
     fn chrome_layout_properties_parse_in_servo_builds() {
-        use crate::values::specified::text::viper_parse_tests::supports;
+        // VIPER-PATCH(chrome-layout-properties): the helper of
+        // value-grammar-options' tests.
+        use crate::stylesheets::parse_options::value_grammar_tests::supports_by_default as supports;
         for (property, value) in [
             ("contain", "strict"),
             ("contain", "inline-size layout style paint"),

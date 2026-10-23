@@ -715,7 +715,7 @@ affects = "layout"
 type = "CounterIncrement"
 initial = "Default::default()"
 struct = "counters"
-# VIPER-PATCH(chrome-value-parsing): see counter-reset.
+# VIPER-PATCH(value-grammar-options): see counter-reset.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-lists/#propdef-counter-increment"
 servo_restyle_damage = "rebuild_box"
@@ -725,9 +725,9 @@ affects = "layout"
 type = "CounterReset"
 initial = "Default::default()"
 struct = "counters"
-# VIPER-PATCH(chrome-value-parsing): parsed in servo builds, as in Chrome 154
-# (upstream: behind layout.unimplemented); likewise counter-increment and
-# counter-set (upstream: Gecko only). Viper does not lay counters out yet.
+# VIPER-PATCH(value-grammar-options): parsed in servo builds, the property of
+# CSS Lists 3 section 4.1 (upstream: behind layout.unimplemented); likewise
+# counter-increment and counter-set (section 4.2; upstream: Gecko only).
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-lists-3/#propdef-counter-reset"
 servo_restyle_damage = "rebuild_box"
@@ -737,7 +737,7 @@ affects = "layout"
 type = "CounterSet"
 initial = "Default::default()"
 struct = "counters"
-# VIPER-PATCH(chrome-value-parsing): see counter-reset.
+# VIPER-PATCH(value-grammar-options): see counter-reset.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-lists-3/#propdef-counter-set"
 servo_restyle_damage = "rebuild_box"
@@ -4012,8 +4012,8 @@ keyword = { values = ["wrap", "nowrap"] }
 
 [text-wrap-style]
 struct = "inherited_text"
-# VIPER-PATCH(chrome-value-parsing): parsed in servo builds, with Chrome 154's
-# `pretty` (upstream: Gecko only); Viper's line breaking ignores it so far.
+# VIPER-PATCH(value-grammar-options): parsed in servo builds, with `pretty`,
+# the grammar of CSS Text 4 section 5.4 (upstream: Gecko only, without it).
 spec = "https://drafts.csswg.org/css-text-4/#text-wrap-style"
 animation_type = "discrete"
 affects = "layout"
@@ -4126,8 +4126,7 @@ spec = "https://drafts.csswg.org/css-writing-modes/#propdef-unicode-bidi"
 animation_type = "none"
 affects = "layout"
 servo_restyle_damage = "rebuild_box"
-# VIPER-PATCH(chrome-value-parsing): Chrome 154's -webkit- aliases.
-keyword = { values = ["normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext"], servo_aliases = ["-webkit-isolate=isolate", "-webkit-isolate-override=isolate-override", "-webkit-plaintext=plaintext"] }
+keyword = { values = ["normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext"] }
 
 [text-decoration-style]
 struct = "text"

@@ -9,6 +9,7 @@
 //! CSS levels. `ParseOptions::default()` is upstream's behaviour.
 
 use crate::derives::*;
+use cssparser::{Parser, Token};
 
 /// Options for parsing a style sheet or a declaration block, carried by
 /// [`ParserContext`](crate::parser::ParserContext) and read by the
@@ -29,12 +30,123 @@ pub struct ParseOptions {
     ///
     /// [Selectors 4 section 6.3]: https://drafts.csswg.org/selectors-4/#attribute-case
     pub attribute_s_flag: bool,
+    /// VIPER-PATCH(value-grammar-options): spellings outside the grammars
+    /// that parse as a keyword the grammar accepts, in every origin:
+    /// `(property, spelling, keyword)`. Before a declaration of `property`
+    /// (its declared name, shorthand or longhand, compared ASCII
+    /// case-insensitively; no expansion to sub-properties) is parsed, every
+    /// whole identifier token of its value, at any nesting depth, that
+    /// equals `spelling` ASCII case-insensitively is replaced by `keyword`.
+    /// Default: none.
+    #[ignore_malloc_size_of = "static data"]
+    pub value_aliases: &'static [(&'static str, &'static str, &'static str)],
+    /// VIPER-PATCH(value-grammar-options): values the grammars accept that
+    /// are refused, in every origin: `(property, keyword or function)`. A
+    /// declaration of `property` (as for `value_aliases`) whose value holds
+    /// an identifier or a function name equal to the second item, ASCII
+    /// case-insensitively, at any nesting depth, is invalid. Refusals are
+    /// matched before aliases are applied. Default: none.
+    #[ignore_malloc_size_of = "static data"]
+    pub refused_values: &'static [(&'static str, &'static str)],
 }
 
 impl Default for ParseOptions {
     fn default() -> Self {
         Self {
             attribute_s_flag: true,
+            value_aliases: &[],
+            refused_values: &[],
+        }
+    }
+}
+
+/// VIPER-PATCH(value-grammar-options): what the options make of one
+/// declared value.
+pub(crate) enum ValueRewrite {
+    /// Neither list applies: the value parses as written.
+    Unchanged,
+    /// The value holds a refused keyword or function name.
+    Refused,
+    /// The value's text with the aliases replaced.
+    Rewritten(String),
+}
+
+impl ParseOptions {
+    /// VIPER-PATCH(value-grammar-options): reads the value of a declaration
+    /// of `property` from `input`, which is left at its start unless the
+    /// value is refused or rewritten.
+    pub(crate) fn rewrite_value(&self, property: &str, input: &mut Parser) -> ValueRewrite {
+        let applies = |name: &str| name.eq_ignore_ascii_case(property);
+        if !self.value_aliases.iter().any(|a| applies(a.0))
+            && !self.refused_values.iter().any(|r| applies(r.0))
+        {
+            return ValueRewrite::Unchanged;
+        }
+        let start = input.state();
+        let mut edits = Vec::new();
+        let refused = self.scan(property, input, &mut edits);
+        if refused {
+            return ValueRewrite::Refused;
+        }
+        if edits.is_empty() {
+            input.reset(&start);
+            return ValueRewrite::Unchanged;
+        }
+        let text = input.slice_from(start.position());
+        let base = start.position().byte_index();
+        let mut rewritten = String::with_capacity(text.len());
+        let mut copied = 0;
+        for (from, to, keyword) in edits {
+            rewritten.push_str(&text[copied..from - base]);
+            rewritten.push_str(keyword);
+            copied = to - base;
+        }
+        rewritten.push_str(&text[copied..]);
+        ValueRewrite::Rewritten(rewritten)
+    }
+
+    /// Walks every token of `input` and its nested blocks, recording the
+    /// aliased identifiers' byte ranges; returns whether a refused name
+    /// occurs.
+    fn scan(
+        &self,
+        property: &str,
+        input: &mut Parser,
+        edits: &mut Vec<(usize, usize, &'static str)>,
+    ) -> bool {
+        let mut refused = false;
+        loop {
+            let before = input.position().byte_index();
+            let token = match input.next() {
+                Ok(token) => token.clone(),
+                Err(_) => return refused,
+            };
+            let name = match token {
+                Token::Ident(ref name) | Token::Function(ref name) => Some(name),
+                _ => None,
+            };
+            if let Some(name) = name {
+                let is = |listed: &str, value: &str| {
+                    listed.eq_ignore_ascii_case(property) && value.eq_ignore_ascii_case(name)
+                };
+                refused |= self.refused_values.iter().any(|r| is(r.0, r.1));
+                let alias = self.value_aliases.iter().find(|a| is(a.0, a.1));
+                if let (Token::Ident(_), Some(alias)) = (&token, alias) {
+                    edits.push((before, input.position().byte_index(), alias.2));
+                }
+            }
+            if matches!(
+                token,
+                Token::Function(_)
+                    | Token::ParenthesisBlock
+                    | Token::SquareBracketBlock
+                    | Token::CurlyBracketBlock
+            ) {
+                let nested = input.parse_nested_block(|input| {
+                    Ok::<_, cssparser::ParseError<()>>(self.scan(property, input, edits))
+                });
+                refused |= nested.unwrap_or(false);
+            }
         }
     }
 }
@@ -131,5 +243,152 @@ mod tests {
         };
         assert_eq!(parse(ParseOptions::default()), 5);
         assert_eq!(parse(without_s_flag()), 5);
+    }
+}
+
+// VIPER-PATCH(value-grammar-options): the grammars and the value options.
+#[cfg(all(test, feature = "servo"))]
+pub(crate) mod value_grammar_tests {
+    use super::ParseOptions;
+    use crate::context::QuirksMode;
+    use crate::parser::ParserContext;
+    use crate::properties::parse_style_attribute_with_options;
+    use crate::stylesheets::supports_rule::Declaration;
+    use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+    use style_traits::ParsingMode;
+
+    fn url() -> UrlExtraData {
+        UrlExtraData::from(::url::Url::parse("about:blank").unwrap())
+    }
+
+    /// `CSS.supports(property, value)` under `options`.
+    fn supports(options: ParseOptions, property: &str, value: &str) -> bool {
+        let url = url();
+        let mut context = ParserContext::new(
+            Origin::Author,
+            &url,
+            Some(CssRuleType::Style),
+            ParsingMode::DEFAULT,
+            QuirksMode::NoQuirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        );
+        context.parse_options = options;
+        Declaration(format!("{property}:{value}")).eval(&context)
+    }
+
+    /// `CSS.supports(property, value)` under the default options (also
+    /// the test of `chrome-layout-properties`).
+    pub(crate) fn supports_by_default(property: &str, value: &str) -> bool {
+        supports(ParseOptions::default(), property, value)
+    }
+
+    /// A `style` attribute parsed under `options`, serialized.
+    fn declared(options: ParseOptions, css: &str) -> String {
+        let block = parse_style_attribute_with_options(
+            css,
+            &url(),
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+            options,
+        );
+        let mut text = String::new();
+        block.to_css(&mut text).unwrap();
+        text
+    }
+
+    #[test]
+    fn value_grammar_options_default_parses_the_grammars() {
+        let options = ParseOptions::default();
+        assert!(options.value_aliases.is_empty() && options.refused_values.is_empty());
+        for (property, value) in [
+            ("text-align", "match-parent"),
+            ("text-align", "-moz-center"),
+            ("text-transform", "uppercase full-width full-size-kana"),
+            ("text-decoration-line", "grammar-error"),
+            ("text-indent", "1px hanging each-line"),
+            ("text-wrap", "nowrap pretty"),
+            ("text-wrap-style", "pretty"),
+            ("counter-reset", "reversed(list-item) 3"),
+            ("counter-increment", "a 2 b"),
+            ("counter-set", "list-item 3"),
+            ("list-style-type", "symbols(cyclic \"*\")"),
+            ("cursor", "-moz-grab"),
+        ] {
+            assert!(supports(options, property, value), "{property}: {value}");
+        }
+        for (property, value) in [
+            ("text-align", "-webkit-auto"),
+            ("text-align", "-webkit-match-parent"),
+            ("cursor", "-webkit-grab"),
+            ("unicode-bidi", "-webkit-isolate"),
+            ("font-size", "-webkit-xxx-large"),
+            ("text-wrap-style", "avoid-orphans"),
+        ] {
+            assert!(!supports(options, property, value), "{property}: {value}");
+        }
+    }
+
+    #[test]
+    fn value_grammar_options_alias_whole_identifiers() {
+        let mut options = ParseOptions::default();
+        options.value_aliases = &[
+            ("text-align", "-webkit-auto", "start"),
+            ("cursor", "-webkit-grab", "grab"),
+            ("Unicode-Bidi", "-webkit-isolate", "isolate"),
+        ];
+        assert!(supports(options, "text-align", "-WEBKIT-AUTO"));
+        assert!(supports(options, "cursor", "url(x.png) 1 2, -webkit-grab"));
+        assert!(supports(options, "unicode-bidi", "-webkit-isolate"));
+        // Only whole identifiers of the listed property.
+        assert!(!supports(options, "text-align-last", "-webkit-auto"));
+        assert!(!supports(options, "text-align", "\"-webkit-auto\""));
+        assert!(!supports(options, "text-align", "-webkit-autox"));
+        assert_eq!(
+            declared(options, "text-align: -webkit-auto; cursor: -webkit-grab"),
+            "text-align: start; cursor: grab;"
+        );
+    }
+
+    #[test]
+    fn value_grammar_options_refuse_names_at_any_depth() {
+        let mut options = ParseOptions::default();
+        options.refused_values = &[
+            ("text-transform", "full-width"),
+            ("counter-reset", "reversed"),
+            ("list-style", "symbols"),
+            ("content", "SYMBOLS"),
+            ("text-align", "-moz-center"),
+        ];
+        for (property, value) in [
+            ("text-transform", "full-width"),
+            ("text-transform", "uppercase Full-Width"),
+            ("counter-reset", "a 1 reversed(b)"),
+            ("list-style", "inside symbols(cyclic \"*\")"),
+            ("content", "counter(a, symbols(cyclic \"*\"))"),
+            ("text-align", "-moz-center"),
+        ] {
+            assert!(!supports(options, property, value), "{property}: {value}");
+        }
+        for (property, value) in [
+            ("text-transform", "uppercase full-size-kana"),
+            ("list-style-type", "symbols(cyclic \"*\")"),
+            ("text-align", "-moz-center-or-inherit"),
+            ("text-align", "-webkit-center"),
+        ] {
+            let expected = property != "text-align" || value == "-webkit-center";
+            assert_eq!(
+                supports(options, property, value),
+                expected,
+                "{property}: {value}"
+            );
+        }
+        assert_eq!(
+            declared(options, "text-transform: full-width; text-align: center"),
+            "text-align: center;"
+        );
     }
 }
