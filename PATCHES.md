@@ -123,7 +123,7 @@ apart from the packaging files.
 | `line-height-whole-percent` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds compute a percentage `line-height` as the font size times the percentage truncated toward zero to a whole percent, divided by 100 once (`130.5%` of 20px is 26px, `0.5%` is 0px; Viper's computed-value golden `line-height-percent-line-height`); upstream computes the exact percentage | `viper-style::cascade fork_patches::line_height_whole_percent` | Chrome-specific; not offered | Viper V10b-8 | 38 / 23 |
 | `line-height-calc-layout-unit` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds resolve a line-height `calc()` that mixes a percentage and a length in 1/64 px, the percentage of the font size truncated to 1/64 px and the result truncated to 1/64 px (`calc(130.5% + 0px)` of 10px is 13.046875px); a `calc()` of lengths only stays exact and one of percentages only is that percentage, as Chrome 154 reports (Viper's computed-value goldens `line-height-calc-line-height`, `line-height-percent-line-height`); upstream keeps the exact value | `viper-style::cascade fork_patches::line_height_calc_layout_unit` | Chrome-specific; not offered | Viper V10b-8 | 55 / 16 |
 | `stylesheet-parse-options` | `stylo`: `stylesheets/parse_options.rs` (new), `stylesheets/mod.rs`, `parser.rs`, `selector_parser.rs`, `servo/selector_parser.rs`, `stylesheets/stylesheet.rs`, `properties/declaration_block.rs`, `stylesheets/rule_parser.rs`, `stylesheets/supports_rule.rs`, `stylesheets/scope_rule.rs`; the struct literals of the tests in `servo/chrome_names.rs` and `servo/chrome_after.rs` | Embedder control: `ParseOptions`, a non-exhaustive set of options whose default is upstream's behaviour, is carried by `ParserContext` and by `SelectorParser` (from the context wherever one exists), and set through new `_with_options` forms of `StylesheetContents::from_str`, `Stylesheet::from_str` and `parse_style_attribute`. Its first field, `attribute_s_flag` (default `true`, Selectors 4 section 6.3), is what servo's `SelectorParser` answers to `selectors-attr-flag-hook`'s hook, so an embedder decides per sheet whether the `s` attribute flag parses; upstream always accepts it and has no per-parse options | `viper-style::cascade fork_patches::stylesheet_parse_options_decide_the_s_flag` | Candidate; draft to the owner first | Viper STY-FORK-1 | 167 / 97 |
-| `value-grammar-options` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `properties/mod.rs`, `values/specified/text.rs`, `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`; the test import of `values/specified/box.rs` | Embedder control and standard grammars: `ParseOptions` gains `value_aliases` (`(property, spelling, keyword)`: every whole identifier of a declared value equal to a listed spelling is replaced by its keyword before the grammar parses) and `refused_values` (`(property, keyword or function)`: a declared value holding a listed identifier or function name at any depth is invalid), both ASCII case-insensitive, in every origin, empty by default, applied in `PropertyDeclaration::parse_into` (style rules, `style` attributes, `@supports` and `CSS.supports`). Servo builds also parse the standard grammars upstream builds for Gecko or behind `layout.unimplemented`: `text-decoration-line`'s `spelling-error` and `grammar-error` (CSS Text Decoration 4 section 2.1), `text-indent`'s `hanging` and `each-line` (CSS Text 3 and 4 section 9.1), `text-wrap-style` with `pretty` and the `text-wrap` shorthand (CSS Text 4 sections 5.4 and 5.5), and `counter-reset`, `counter-increment` and `counter-set` (CSS Lists 3 section 4) | `viper-style::api value_grammar::value_grammar_options_take_a_test_list` (and `value_grammar_basic_answers`, Viper's Basic lists) | Options: candidate, draft to the owner first; grammars: candidate | Viper STY-FORK-2 | 165 / 140 |
+| `value-grammar-options` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/supports_rule.rs`, `stylesheets/mod.rs`, `properties/mod.rs`, `values/specified/text.rs`, `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`; the test import of `values/specified/box.rs` | Embedder control and standard grammars: `ParseOptions` gains `value_aliases` (`(property, spelling, keyword)`: every whole identifier of a declared value equal to a listed spelling is replaced by its keyword before the grammar parses) and `refused_values` (`(property, keyword or function)`: a declared value holding a listed identifier or function name at any depth is invalid), both ASCII case-insensitive, in every origin, empty by default, applied in `PropertyDeclaration::parse_into` (style rules, `style` attributes, `@supports` and `CSS.supports`), and `unsupported_values` (the same shape), which only a supports condition reads (`@supports` and `CSS.supports`). Servo builds also parse the standard grammars upstream builds for Gecko or behind `layout.unimplemented`: `text-decoration-line`'s `spelling-error` and `grammar-error` (CSS Text Decoration 4 section 2.1), `text-indent`'s `hanging` and `each-line` (CSS Text 3 and 4 section 9.1), `text-wrap-style` with `pretty` and the `text-wrap` shorthand (CSS Text 4 sections 5.4 and 5.5), and `counter-reset`, `counter-increment` and `counter-set` (CSS Lists 3 section 4) | `viper-style::api value_grammar::value_grammar_options_take_a_test_list` (and `value_grammar_basic_answers`, Viper's Basic lists) | Options: candidate, draft to the owner first; grammars: candidate | Viper STY-FORK-2 | 191 / 153 |
 | `servo-scripting-media-feature` | `stylo`: `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5 section 9.1's `scripting` feature (`none`, `initial-only` or `enabled`), which upstream's servo list lacks; it evaluates to `enabled`, because the embedder runs scripts | `viper-style::api value_grammar::servo_scripting_media_feature_is_enabled` | Candidate; draft to the owner first | Viper STY-FORK-2 (from `chrome-value-parsing`, V10b-6) | 22 / 44 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -1053,15 +1053,18 @@ Problem, change, every spot, the Miri commands and the before/after results:
 
 - **Problem.** Servo builds parse some standard grammars only for Gecko or
   behind `layout.unimplemented`, and an embedder had no way to give one
-  document a product's extra spellings or refusals and another the
-  standards' answers: the earlier `chrome-value-parsing` hard-coded Chrome
-  154's in servo builds through the derives.
+  document extra spellings or refusals and another the standards'
+  answers.
 - **Change.** `ParseOptions` (from `stylesheet-parse-options`) gains two
   lists, empty by default, so the default is the grammars:
   `value_aliases: &'static [(&'static str, &'static str, &'static str)]`,
   `(property, spelling, keyword)`, and
   `refused_values: &'static [(&'static str, &'static str)]`,
-  `(property, keyword or function)`. `PropertyDeclaration::parse_into`
+  `(property, keyword or function)`, and a third,
+  `unsupported_values` (the same shape), which only a supports condition
+  reads (`Declaration::eval`, so `@supports` and `CSS.supports`: CSS
+  Conditional 3 section 6.1's values without a usable level of support).
+  `PropertyDeclaration::parse_into`
   first asks `ParseOptions::rewrite_value` about the declared property's
   name (shorthand or longhand as declared, no expansion to sub-properties):
   when a list names it, the value's tokens are walked at every nesting
@@ -1081,7 +1084,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   gone: those files equal upstream's again. Not covered: a value holding
   `var()` is substituted later with the default options.
 - **Spots.** `style/stylesheets/parse_options.rs` (the fields,
-  `rewrite_value` and the test module), `style/stylesheets/mod.rs` (the
+  `rewrite_value`, `unsupported` and the test module),
+  `style/stylesheets/supports_rule.rs` (`Declaration::eval`),
+  `style/stylesheets/mod.rs` (the
   crate export), `style/properties/mod.rs` (`parse_into`, and upstream's
   body as `parse_value_into`), `style/values/specified/text.rs`
   (`TextDecorationLine`, `TextIndent::parse`),
@@ -1091,8 +1096,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `chrome-layout-properties`' test in `style/values/specified/box.rs`,
   whose helper this module's tests now hold.
 - **Fork tests.** `value_grammar_options_default_parses_the_grammars`,
-  `value_grammar_options_alias_whole_identifiers` and
-  `value_grammar_options_refuse_names_at_any_depth`.
+  `value_grammar_options_alias_whole_identifiers`,
+  `value_grammar_options_refuse_names_at_any_depth` and
+  `value_grammar_options_refuse_unsupported_values_in_supports_only`.
 - **Viper proofs.** `value_grammar_basic_answers` (Viper's Basic lists) and
   `value_grammar_options_take_a_test_list` (a test list through the
   options), in the gate's patch proofs.
