@@ -159,11 +159,11 @@ fn eval_aspect_ratio(context: &Context) -> Ratio {
     Ratio::new(size.width.0 as f32, size.height.0 as f32)
 }
 
-// VIPER-PATCH(chrome-value-parsing): the `scripting` media feature, which
-// Chrome 154 evaluates and upstream's servo list lacks (Gecko's evaluator
-// asks its document). It always answers `enabled`, because Viper runs
-// scripts; Viper's S3-SCRIPTING-OFF will add a device flag for documents
-// whose scripts are off.
+// VIPER-PATCH(servo-scripting-media-feature): the `scripting` media feature
+// of Media Queries 5 section 9.1, which upstream's servo list lacks (Gecko's
+// evaluator asks its document). It always answers `enabled`, because the
+// embedder runs scripts; a device flag for documents whose scripts are off
+// can follow (Viper's S3-SCRIPTING-OFF).
 /// https://drafts.csswg.org/mediaqueries-5/#scripting
 #[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
 #[repr(u8)]
@@ -269,7 +269,7 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 16] = [
         keyword_evaluator!(eval_prefers_color_scheme, PrefersColorScheme),
         FeatureFlags::empty(),
     ),
-    // VIPER-PATCH(chrome-value-parsing): `scripting` (above).
+    // VIPER-PATCH(servo-scripting-media-feature): `scripting` (above).
     feature!(
         atom!("scripting"),
         AllowsRanges::No,
@@ -277,3 +277,47 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 16] = [
         FeatureFlags::empty(),
     ),
 ];
+
+// VIPER-PATCH(servo-scripting-media-feature): the feature parses.
+#[cfg(test)]
+mod scripting_tests {
+    use crate::context::QuirksMode;
+    use crate::media_queries::MediaList;
+    use crate::parser::ParserContext;
+    use crate::queries::condition::QueryCondition;
+    use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+    use cssparser::Parser;
+    use style_traits::ParsingMode;
+
+    #[test]
+    fn servo_scripting_media_feature_parses() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let feature = |query: &str| {
+            let mut context = ParserContext::new(
+                Origin::Author,
+                &url,
+                Some(CssRuleType::Media),
+                ParsingMode::DEFAULT,
+                QuirksMode::NoQuirks,
+                Default::default(),
+                None,
+                None,
+                Default::default(),
+            );
+            let list = MediaList::parse(&mut context, &mut Parser::new(query));
+            matches!(
+                list.media_queries[0].condition,
+                Some(QueryCondition::Feature(_))
+            )
+        };
+        for query in [
+            "(scripting)",
+            "(scripting: none)",
+            "(scripting: initial-only)",
+            "(scripting: enabled)",
+        ] {
+            assert!(feature(query), "{query}");
+        }
+        assert!(!feature("(scripting: off)"));
+    }
+}
