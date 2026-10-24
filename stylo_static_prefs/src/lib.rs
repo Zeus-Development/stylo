@@ -20,7 +20,8 @@ fn test_basic_preferences() {
     // VIPER-PATCH(chrome-prefs): Chrome parses `writing-mode` and `subgrid`.
     assert!(pref!("layout.writing-mode.enabled"));
     assert!(pref!("layout.css.grid-template-subgrid-value.enabled"));
+    // VIPER-PATCH(servo-container-queries): container queries, with
+    // `style()` queries, parse.
     assert!(pref!("layout.container-queries.enabled"));
-    // VIPER-PATCH(servo-container-queries): `style()` queries parse.
     assert!(pref!("layout.css.style-queries.enabled"));
 }

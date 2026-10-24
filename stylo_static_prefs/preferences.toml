@@ -2,11 +2,11 @@
 "dom.viewTransitions.cross-document.enabled" = false
 "gfx.font_rendering.opentype_svg.enabled" = false
 "layout.columns.enabled" = false
-# VIPER-PATCH(chrome-prefs): Chrome match. Chrome 154 parses `container-type`
-# and `container-name`; upstream's servo default leaves both out. Servo builds
-# still parse no `@container` rule and no container unit, so no container
-# lookup runs (PATCHES.md, "Known unpatched sites"). Proof: Viper's
-# `fork_patches::chrome_prefs_defaults`.
+# VIPER-PATCH(servo-container-queries): `container-type`, `container-name`
+# and the `container` shorthand parse (CSS Conditional 5 section 5), with the
+# `@container` rules and container units that servo builds now parse;
+# upstream's servo default leaves them out. Proof: Viper's
+# `containers::servo_container_queries_evaluate`.
 "layout.container-queries.enabled" = true
 "layout.css.alpha-color-function.enabled" = true
 "layout.css.anchor-positioning.enabled" = false
@@ -55,7 +55,7 @@
 # VIPER-PATCH(servo-container-queries): `style()` container queries parse
 # (CSS Conditional 5 section 6.2), as `@container` rules now do in servo
 # builds; upstream's default leaves them off. Proof: Viper's
-# `fork_patches::servo_container_queries_evaluate`.
+# `containers::servo_container_queries_evaluate`.
 "layout.css.style-queries.enabled" = true
 "layout.css.stylo-local-work-queue.in-main-thread" = 32
 "layout.css.stylo-local-work-queue.in-worker" = 0
