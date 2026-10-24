@@ -85,7 +85,8 @@ STY-FORK-1 adds `stylesheet-parse-options` to `stylo` and retires
 retires `chrome-value-parsing` for `value-grammar-options` (`stylo`) and
 `servo-scripting-media-feature` (`stylo` and `stylo_atoms`, whose marker
 now sits beside the `atom!("scripting")`); Viper's STY-FORK-3a adds
-`selector-names-hook` to `stylo`.
+`selector-names-hook` to `stylo`, and Viper's STY-FORK-3a2 passes its name
+methods the enclosing selector parser.
 The other five directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -130,7 +131,7 @@ apart from the packaging files.
 | `servo-container-queries` | `stylo`: `stylesheets/rule_parser.rs`, `values/specified/length.rs`, `stylesheets/container_rule.rs` (its tests), `properties/computed_value_flags.rs`, `properties/shorthands.toml`, `properties/shorthands.rs`; `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Standard: servo builds parse CSS Conditional 5's `@container` rules (section 5.4), container relative lengths (section 7), `style()` queries (section 6.2) and the `container` shorthand (section 5.3), which upstream leaves out of servo builds (behind its other build feature) or turns off, and a new computed-value flag `DEPENDS_ON_CONTAINER_QUERY` marks every style whose matching evaluated a container condition | `viper-style::api containers::servo_container_queries_evaluate` | Candidate; draft to the owner first | Viper V10b-10a | 40 / 106 |
 | `container-size-px` | `stylo`: `dom.rs`, `stylesheets/container_rule.rs`, `values/specified/length.rs`, `queries/values.rs`, `gecko/wrapper.rs` | Precision: `TElement::query_container_size` answers in CSS px instead of app units (1/60 px), so an embedder's sizes in finer units (1/64 px) compare and compute exactly in size queries and container relative lengths | `viper-style::api containers::container_size_px_compares_exactly` | Candidate; draft to the owner first | Viper V10b-10a | 52 / 27 |
 | `line-height-number-f64` | `stylo`: `values/specified/font.rs`, `values/computed/font.rs`, `device/servo.rs`, `properties/longhands.toml`, `properties/shorthands.rs` | Precision: a unitless `line-height` keeps its number as written: in servo builds the computed number is `f64`, read from the number token's text or from a math function of numbers evaluated in `f64`, so the used line height (CSS Inline 3 section 5.1) is the exact number times the font size (`calc(20 / 12)` of 12px is 20px, where the `f32` number makes it a little less); the specified number keeps the parsed one for serialization, and the declaration is boxed for the extra `f64` | `viper-style::cascade fork_patches::line_height_number_f64` | Candidate; draft to the owner first | Viper V10b-8b | 252 / 51 |
-| `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `servo/chrome_names.rs`, `servo/chrome_after.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; without a hook the parser keeps this branch's default name tables (recorded in their own rows), and with one it answers upstream's names and rule where the hook does not. `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy`, and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a | 270 / 249 |
+| `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `servo/chrome_names.rs`, `servo/chrome_after.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; its name methods receive the enclosing `SelectorParser`, so the selectors an embedder parses in a functional name's arguments keep the sheet's declared namespaces, origin, supports-condition mode and options as the enclosing selector does; without a hook the parser keeps this branch's default name tables (recorded in their own rows), and with one it answers upstream's names and rule where the hook does not. `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy`, and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a; extended by Viper STY-FORK-3a2 | 281 / 335 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1278,12 +1279,17 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `SelectorNames` (`stylesheets/parse_options.rs`, exported from
   `stylesheets`), default `None`. When it is set, servo's `SelectorParser`
   first refuses, outside user-agent sheets, every name the hook's
-  `refuses` names, then asks `pseudo_class` or `pseudo_element` (with the
-  arguments of a functional name), then parses servo's own names;
+  `refuses` names, then asks `pseudo_class` or `pseudo_element` (with
+  itself, the enclosing parser, and the arguments of a functional name),
+  then parses servo's own names;
   `valid_after_pseudo_element` takes the hook's `valid_after`, and without
   an answer upstream's rule (a user-action pseudo-class after a
   pseudo-element that accepts state pseudo-classes);
-  `parse_compound_is_alias` takes the hook's `compound_is_alias`. Without a
+  `parse_compound_is_alias` takes the hook's `compound_is_alias`. An
+  embedder parses the selectors nested in arguments, such as a compound
+  selector, with the parser it is given, so they keep its declared
+  namespaces, origin, supports-condition mode and options (the hook
+  included), as the default tables' nested selectors do. Without a
   hook nothing changes: the default tables answer, and `:lang()` with a
   string stays refused outside user-agent sheets only then.
   `PseudoElement::Unmatched` holds its name instead of the default
@@ -1300,8 +1306,11 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `selector_names_hook_refuses_outside_user_agent_sheets`,
   `selector_names_hook_decides_what_follows_a_pseudo_element`,
   `selector_names_hook_in_stylesheets` (`:lang()` takes a string again
-  under a hook; distinct zero-sized hooks compare unequal), with two test
-  implementations.
+  under a hook; distinct zero-sized hooks compare unequal),
+  `selector_names_hook_nests_with_the_enclosing_parser` (the test hook's
+  `:host-context()` keeps a declared `svg` namespace in `svg|a` and refuses
+  an unknown name in `:is()` in a supports condition, as the default tables
+  do), with two test implementations.
 - **Viper proof.** `selector_names_hook_in_stylesheets_and_queries`:
   Viper's Basic names in its sheets and its DOM selector APIs alike.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
