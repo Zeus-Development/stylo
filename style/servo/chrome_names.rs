@@ -19,9 +19,11 @@
 //! function returns `None` for a name it does not own, so the caller falls
 //! through to servo's own names.
 //! <https://drafts.csswg.org/selectors-4/>
+//!
+//! VIPER-PATCH(selector-names-hook): these tables are servo's parser's
+//! default, read only when the parse options hold no `SelectorNames`; a
+//! pseudo-element holds its name, from which `chrome_after` reads its kind.
 
-// VIPER-PATCH(chrome-after-pseudo-element): each name's kind.
-use super::chrome_after::{functional_kind, plain_kind};
 use super::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
 use crate::selector_parser::SelectorParser;
 use cssparser::{Parser as CssParser, ToCss, Token};
@@ -204,9 +206,9 @@ pub(super) fn pseudo_element(name: &str) -> Option<PseudoElement> {
     let webkit = name
         .get(.."-webkit-".len())
         .is_some_and(|start| start.eq_ignore_ascii_case("-webkit-"));
-    // VIPER-PATCH(chrome-after-pseudo-element): with its kind.
+    // VIPER-PATCH(selector-names-hook): with its name.
     (webkit || listed(&CHROME_UNMATCHED_PSEUDO_ELEMENTS, name))
-        .then(|| PseudoElement::Unmatched(plain_kind(name)))
+        .then(|| PseudoElement::Unmatched(name.to_ascii_lowercase().into()))
 }
 
 /// The functional pseudo-element `name(arguments)`, if Chrome accepts the
@@ -231,9 +233,9 @@ pub(super) fn functional_pseudo_element<'i>(
     } else {
         return None;
     };
-    // VIPER-PATCH(chrome-after-pseudo-element): with its kind.
-    let kind = functional_kind(name, listed(&VIEW_TRANSITION_PARTS, name));
-    Some(parsed.map(|()| PseudoElement::Unmatched(kind)))
+    // VIPER-PATCH(selector-names-hook): with its name.
+    let name = format!("{}()", name.to_ascii_lowercase());
+    Some(parsed.map(|()| PseudoElement::Unmatched(name.into())))
 }
 
 /// A `<compound-selector>`, or with `list` a `<compound-selector-list>`: no

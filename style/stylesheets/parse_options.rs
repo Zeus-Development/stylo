@@ -9,7 +9,11 @@
 //! CSS levels. `ParseOptions::default()` is upstream's behaviour.
 
 use crate::derives::*;
+// VIPER-PATCH(selector-names-hook): the types the hook answers with.
+use crate::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
 use cssparser::{Parser, Token};
+use selectors::parser::Component;
+use style_traits::ParseError;
 
 /// Options for parsing a style sheet or a declaration block, carried by
 /// [`ParserContext`](crate::parser::ParserContext) and read by the
@@ -18,7 +22,9 @@ use cssparser::{Parser, Token};
 /// The default is upstream's behaviour. New fields may be added, each
 /// defaulting to upstream's behaviour, so construct a value with
 /// `ParseOptions::default()` and set the fields to change.
-#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
+// VIPER-PATCH(selector-names-hook): `Debug` and `PartialEq` by hand, as
+// the hook is a trait object.
+#[derive(Clone, Copy, MallocSizeOf)]
 #[non_exhaustive]
 pub struct ParseOptions {
     /// Whether an attribute selector accepts the `s` flag, which compares
@@ -55,6 +61,12 @@ pub struct ParseOptions {
     /// Default: none.
     #[ignore_malloc_size_of = "static data"]
     pub unsupported_values: &'static [(&'static str, &'static str)],
+    /// VIPER-PATCH(selector-names-hook): the embedder's answers about the
+    /// pseudo-class and pseudo-element names beyond servo's own, the names
+    /// it refuses and what may follow a pseudo-element ([`SelectorNames`]).
+    /// Default `None`: servo's parser keeps its built-in answers.
+    #[ignore_malloc_size_of = "static data"]
+    pub selector_names: Option<&'static dyn SelectorNames>,
 }
 
 impl Default for ParseOptions {
@@ -64,7 +76,95 @@ impl Default for ParseOptions {
             value_aliases: &[],
             refused_values: &[],
             unsupported_values: &[],
+            selector_names: None,
         }
+    }
+}
+
+// VIPER-PATCH(selector-names-hook): two options are equal when their hooks
+// are the same object.
+impl PartialEq for ParseOptions {
+    fn eq(&self, other: &Self) -> bool {
+        let same_hook = match (self.selector_names, other.selector_names) {
+            (Some(a), Some(b)) => std::ptr::addr_eq(a, b),
+            (a, b) => a.is_none() && b.is_none(),
+        };
+        self.attribute_s_flag == other.attribute_s_flag
+            && self.value_aliases == other.value_aliases
+            && self.refused_values == other.refused_values
+            && self.unsupported_values == other.unsupported_values
+            && same_hook
+    }
+}
+
+impl Eq for ParseOptions {}
+
+impl std::fmt::Debug for ParseOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("ParseOptions")
+            .field("attribute_s_flag", &self.attribute_s_flag)
+            .field("value_aliases", &self.value_aliases)
+            .field("refused_values", &self.refused_values)
+            .field("unsupported_values", &self.unsupported_values)
+            .field("selector_names", &self.selector_names.is_some())
+            .finish()
+    }
+}
+
+/// VIPER-PATCH(selector-names-hook): an embedder's selector names. Servo's
+/// `SelectorParser` asks it, when [`ParseOptions::selector_names`] holds
+/// it, before its own names: which pseudo-classes and pseudo-elements exist
+/// beyond servo's (Selectors 4 section 3.9 makes a selector with any other
+/// name invalid), which names servo parses that author and user sheets
+/// refuse, and what may follow a pseudo-element in its compound (Selectors
+/// 4 section 3.6.3, and each pseudo-element's own specification). Names
+/// compare ASCII case-insensitively (Selectors 4 sections 3.5 and 3.6.1).
+///
+/// A name the embedder admits and has no state for parses as one of the
+/// generic variants [`NonTSPseudoClass::Unmatched`] (holding its
+/// serialization), [`NonTSPseudoClass::Dir`] or
+/// [`PseudoElement::Unmatched`] (holding its name), which match nothing
+/// unless the embedder matches them.
+/// <https://drafts.csswg.org/selectors-4/#pseudo-element-states>
+pub trait SelectorNames: Sync {
+    /// The pseudo-class `name`, with `args` the arguments of a functional
+    /// one: `Some` when the embedder owns `name` (an `Err` when the
+    /// arguments are invalid), `None` to leave it to servo's names.
+    fn pseudo_class<'i>(
+        &self,
+        name: &str,
+        args: Option<&mut Parser<'i>>,
+    ) -> Option<Result<NonTSPseudoClass, ParseError>>;
+
+    /// The same for the pseudo-element `name`.
+    fn pseudo_element<'i>(
+        &self,
+        name: &str,
+        args: Option<&mut Parser<'i>>,
+    ) -> Option<Result<PseudoElement, ParseError>>;
+
+    /// Whether a sheet other than a user-agent sheet refuses the
+    /// pseudo-class or pseudo-element `name`, plain or functional, which
+    /// servo parses.
+    fn refuses(&self, name: &str) -> bool;
+
+    /// Whether the simple selector `simple` (a pseudo-class, or a
+    /// tree-structural one such as `:only-child`) may follow `element`,
+    /// which is not element-backed, in its compound; `:is()`, `:where()`
+    /// and `:not()` are asked about what they hold instead. `None`:
+    /// upstream's rule, a user-action pseudo-class after a pseudo-element
+    /// that accepts state pseudo-classes.
+    fn valid_after(
+        &self,
+        element: &PseudoElement,
+        simple: &Component<SelectorImpl>,
+    ) -> Option<bool>;
+
+    /// Whether the functional pseudo-class `name()` is an alias of `:is()`
+    /// over compound selectors, none forgiven (`selectors-compound-is-alias`).
+    /// Default: none is.
+    fn compound_is_alias(&self, _name: &str) -> bool {
+        false
     }
 }
 
@@ -425,5 +525,214 @@ pub(crate) mod value_grammar_tests {
             declared(options, "text-indent: 1px hanging"),
             "text-indent: 1px hanging;"
         );
+    }
+}
+
+// VIPER-PATCH(selector-names-hook): the hook decides through a test
+// implementation, in sheets and in servo's parser.
+#[cfg(all(test, feature = "servo"))]
+mod selector_names_tests {
+    use super::{ParseOptions, SelectorNames};
+    use crate::context::QuirksMode;
+    use crate::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl, SelectorParser};
+    use crate::shared_lock::SharedRwLock;
+    use crate::stylesheets::UrlExtraData;
+    use crate::stylesheets::{AllowImportRules, Namespaces, Origin, StylesheetContents};
+    use cssparser::{Parser, ToCss};
+    use selectors::parser::{Component, NthSelectorData, ParseRelative, SelectorList};
+    use style_traits::ParseError;
+
+    /// Names no specification has: `:made-up`, `:made-up-fn(<ident>)`,
+    /// `::made-up`, `::made-up-fn(<ident>)` and the alias `:made-up-any()`;
+    /// refuses `:focus` and `::slider-thumb`; `:focus` may follow
+    /// `::made-up` and `:only-child` `::made-up-fn()`.
+    struct TestNames;
+
+    fn ident<'i>(args: &mut Parser<'i>) -> Result<String, ParseError> {
+        Ok(args.expect_ident()?.to_string())
+    }
+
+    impl SelectorNames for TestNames {
+        fn pseudo_class<'i>(
+            &self,
+            name: &str,
+            args: Option<&mut Parser<'i>>,
+        ) -> Option<Result<NonTSPseudoClass, ParseError>> {
+            let class = |css: String| NonTSPseudoClass::Unmatched(css.into());
+            match (name.to_ascii_lowercase().as_str(), args) {
+                ("made-up", None) => Some(Ok(class(":made-up".into()))),
+                ("made-up-fn", Some(args)) => {
+                    Some(ident(args).map(|a| class(format!(":made-up-fn({a})"))))
+                },
+                ("dir", Some(args)) => Some(ident(args).map(|a| NonTSPseudoClass::Dir(a.into()))),
+                _ => None,
+            }
+        }
+
+        fn pseudo_element<'i>(
+            &self,
+            name: &str,
+            args: Option<&mut Parser<'i>>,
+        ) -> Option<Result<PseudoElement, ParseError>> {
+            match (name.to_ascii_lowercase().as_str(), args) {
+                ("made-up", None) => Some(Ok(PseudoElement::Unmatched("made-up".into()))),
+                ("made-up-fn", Some(args)) => {
+                    Some(ident(args).map(|_| PseudoElement::Unmatched("made-up-fn()".into())))
+                },
+                _ => None,
+            }
+        }
+
+        fn refuses(&self, name: &str) -> bool {
+            name.eq_ignore_ascii_case("focus") || name.eq_ignore_ascii_case("slider-thumb")
+        }
+
+        fn valid_after(
+            &self,
+            element: &PseudoElement,
+            simple: &Component<SelectorImpl>,
+        ) -> Option<bool> {
+            let PseudoElement::Unmatched(name) = element else {
+                return None;
+            };
+            match (&**name, simple) {
+                ("made-up", Component::NonTSPseudoClass(NonTSPseudoClass::Focus)) => Some(true),
+                ("made-up-fn()", Component::Nth(nth)) => Some(*nth == NthSelectorData::only(false)),
+                _ => None,
+            }
+        }
+
+        fn compound_is_alias(&self, name: &str) -> bool {
+            name.eq_ignore_ascii_case("made-up-any")
+        }
+    }
+
+    static TEST_NAMES: TestNames = TestNames;
+
+    fn with_names() -> ParseOptions {
+        ParseOptions {
+            selector_names: Some(&TEST_NAMES),
+            ..Default::default()
+        }
+    }
+
+    /// The serialization of `selectors` in a sheet of `origin` under
+    /// `options`.
+    fn parse(origin: Origin, options: ParseOptions, selectors: &str) -> Option<String> {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let namespaces = Namespaces::default();
+        let parser = SelectorParser {
+            stylesheet_origin: origin,
+            namespaces: &namespaces,
+            url_data: &url,
+            for_supports_rule: false,
+            parse_options: options,
+        };
+        let mut input = Parser::new(selectors);
+        let list = SelectorList::parse(&parser, &mut input, ParseRelative::No);
+        list.ok().map(|list| list.to_css_string())
+    }
+
+    fn author(selectors: &str) -> bool {
+        parse(Origin::Author, with_names(), selectors).is_some()
+    }
+
+    #[test]
+    fn selector_names_hook_decides_the_names() {
+        assert!(ParseOptions::default().selector_names.is_none());
+        for (selectors, serialized) in [
+            (":MADE-UP", ":made-up"),
+            (":made-up-fn(A)", ":made-up-fn(A)"),
+            (":dir(rtl)", ":dir(rtl)"),
+            ("::made-up", "::-internal-unmatched"),
+            ("::made-up-fn(a)", "::-internal-unmatched"),
+            (":made-up-any(p, div.x)", ":is(p, div.x)"),
+            ("p:hover", "p:hover"),
+        ] {
+            let parsed = parse(Origin::Author, with_names(), selectors);
+            assert_eq!(parsed.as_deref(), Some(serialized), "{selectors}");
+        }
+        // Without the hook's answer, servo's names alone: the default
+        // tables' names are refused.
+        for selectors in [
+            ":made-up-fn(\"a\")",
+            ":made-up-fn",
+            "::made-up-fn",
+            ":horizontal",
+            "::-webkit-scrollbar",
+            ":-webkit-any(p)",
+            ":host-context(p)",
+        ] {
+            assert!(!author(selectors), "{selectors}");
+        }
+        // Without a hook, the default tables keep their answers.
+        let default = |s| parse(Origin::Author, ParseOptions::default(), s).is_some();
+        assert!(default(":horizontal") && default(":-webkit-any(p)"));
+        assert!(!default(":made-up") && !default("::made-up"));
+    }
+
+    #[test]
+    fn selector_names_hook_refuses_outside_user_agent_sheets() {
+        for selectors in [":focus", ":FOCUS", "::slider-thumb", ":is(:focus, p)"] {
+            let user_agent = parse(Origin::UserAgent, with_names(), selectors);
+            assert!(user_agent.is_some(), "{selectors}");
+        }
+        // A plain list drops the whole selector list; a forgiving one
+        // keeps the refused item as written, matching nothing.
+        assert!(!author(":focus") && !author("::slider-thumb") && !author(":focus, p"));
+        assert!(author(":is(:focus, p)"));
+        assert!(author(":focus-visible") && author("::slider-track"));
+    }
+
+    #[test]
+    fn selector_names_hook_decides_what_follows_a_pseudo_element() {
+        for selectors in [
+            "::made-up:focus",
+            "::made-up:hover",
+            "::made-up-fn(a):only-child",
+            "::made-up:not(:hover)",
+        ] {
+            assert!(
+                parse(Origin::UserAgent, with_names(), selectors).is_some(),
+                "{selectors}"
+            );
+        }
+        for selectors in [
+            "::made-up:only-child",
+            "::made-up-fn(a):first-child",
+            "::before:hover",
+            "::made-up:made-up",
+        ] {
+            assert!(!author(selectors), "{selectors}");
+        }
+    }
+
+    #[test]
+    fn selector_names_hook_in_stylesheets() {
+        let lock = SharedRwLock::new();
+        let rules = |options| {
+            let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+            let contents = StylesheetContents::from_str_with_options(
+                ":made-up {} ::made-up {} :horizontal {} ::-webkit-scrollbar {} p {}",
+                url,
+                Origin::Author,
+                &lock,
+                None,
+                None,
+                QuirksMode::NoQuirks,
+                AllowImportRules::Yes,
+                None,
+                options,
+            );
+            let guard = lock.read();
+            let count = contents.rules.read_with(&guard).0.len();
+            drop(guard);
+            count
+        };
+        assert_eq!(rules(with_names()), 3);
+        assert_eq!(rules(ParseOptions::default()), 3);
+        assert_eq!(with_names(), with_names());
+        assert_ne!(with_names(), ParseOptions::default());
+        assert!(format!("{:?}", with_names()).contains("selector_names: true"));
     }
 }

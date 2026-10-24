@@ -1644,7 +1644,8 @@ impl ComputedValues {
     /// Returns the pseudo-element that this style represents.
     #[cfg(feature = "servo")]
     pub fn pseudo(&self) -> Option<PseudoElement> {
-        self.pseudo
+        // VIPER-PATCH(selector-names-hook): a pseudo-element is `Clone`.
+        self.pseudo.clone()
     }
 
     /// Returns true if this is the style for a pseudo-element.
@@ -2854,8 +2855,9 @@ macro_rules! longhand_properties_idents {
 // Large pages generate tens of thousands of ComputedValues.
 #[cfg(feature = "gecko")]
 size_of_test!(ComputedValues, 248);
+// VIPER-PATCH(selector-names-hook): `pseudo` holds an `Unmatched` name.
 #[cfg(feature = "servo")]
-size_of_test!(ComputedValues, 232);
+size_of_test!(ComputedValues, 248);
 
 // FFI relies on this.
 size_of_test!(Option<Arc<ComputedValues>>, 8);

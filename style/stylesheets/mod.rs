@@ -76,7 +76,8 @@ pub use self::nested_declarations_rule::NestedDeclarationsRule;
 pub use self::origin::{Origin, OriginSet, OriginSetIterator, PerOrigin, PerOriginIter};
 pub use self::page_rule::{PagePseudoClassFlags, PageRule, PageSelector, PageSelectors};
 // VIPER-PATCH(stylesheet-parse-options): the parse options.
-pub use self::parse_options::ParseOptions;
+// VIPER-PATCH(selector-names-hook): the hook's trait.
+pub use self::parse_options::{ParseOptions, SelectorNames};
 // VIPER-PATCH(value-grammar-options): the declaration parser reads it.
 pub(crate) use self::parse_options::ValueRewrite;
 pub use self::position_try_rule::PositionTryRule;

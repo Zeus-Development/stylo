@@ -708,18 +708,19 @@ trait PrivateMatchMethods: TElement {
 
         // We need to call this before accessing the `ElementAnimationSet` from the
         // map because this call will do a RwLock::read().
+        // VIPER-PATCH(selector-names-hook): a pseudo-element is `Clone`.
         let needs_animations_update = self.needs_animations_update(
             context,
             old_values.as_deref(),
             new_values,
-            pseudo_element,
+            pseudo_element.clone(),
         );
 
         let might_need_transitions_update = self.might_need_transitions_update(
             context,
             old_values.as_deref(),
             new_values,
-            pseudo_element,
+            pseudo_element.clone(),
         );
 
         let mut after_change_style = None;

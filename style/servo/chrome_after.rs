@@ -10,21 +10,19 @@
 //! "The patch of V10b-4c2", lists where they decide). Upstream accepts only
 //! a user-action pseudo-class, and only after a pseudo-element that accepts
 //! state pseudo-classes. The pseudo-elements servo has no variant for are
-//! `PseudoElement::Unmatched`, whose [`UnmatchedKind`] says which row of
-//! Chrome's table applies.
+//! `PseudoElement::Unmatched`, whose name's [`UnmatchedKind`] says which
+//! row of Chrome's table applies (VIPER-PATCH(selector-names-hook): read
+//! from the name it holds).
 //! <https://chromium.googlesource.com/chromium/src/+/refs/tags/154.0.8037.57/third_party/blink/renderer/core/css/parser/css_selector_parser.cc>
 
 use super::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
-use crate::derives::*;
 use selectors::parser::{Component, NthSelectorData};
 
 /// Which of Chrome's pseudo-elements an `Unmatched` one is, for what may
-/// follow it in its compound. Every kind serializes, cascades and is
-/// indexed as the one `Unmatched` pseudo-element.
-#[derive(
-    Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize, ToShmem,
-)]
-pub enum UnmatchedKind {
+/// follow it in its compound.
+// VIPER-PATCH(selector-names-hook): read from the name, not held.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UnmatchedKind {
     /// `::-webkit-scrollbar` and its parts, and `::-webkit-resizer`: the
     /// scrollbar pseudo-classes.
     ScrollbarPart,
@@ -79,9 +77,18 @@ const SCROLLBAR_PSEUDO_CLASSES: [&str; 11] = [
     ":window-inactive",
 ];
 
+// VIPER-PATCH(selector-names-hook): the kind of the name an `Unmatched`
+// pseudo-element holds, plain or with `()`.
+fn kind(name: &str) -> UnmatchedKind {
+    match name.strip_suffix("()") {
+        Some(functional) => functional_kind(functional),
+        None => plain_kind(name),
+    }
+}
+
 /// The kind of the plain pseudo-element `name`, one Chrome accepts and
 /// servo has no variant for.
-pub(super) fn plain_kind(name: &str) -> UnmatchedKind {
+fn plain_kind(name: &str) -> UnmatchedKind {
     let is = |n: &str| name.eq_ignore_ascii_case(n);
     if SCROLLBAR_PARTS.iter().any(|part| is(part)) {
         UnmatchedKind::ScrollbarPart
@@ -105,12 +112,14 @@ pub(super) fn plain_kind(name: &str) -> UnmatchedKind {
     }
 }
 
-/// The kind of a functional pseudo-element: `::scroll-button()`, one of
-/// `view_transition_part`'s, or another (`::cue()`, `::highlight()`).
-pub(super) fn functional_kind(name: &str, view_transition_part: bool) -> UnmatchedKind {
+/// The kind of a functional pseudo-element: `::scroll-button()`, a
+/// view-transition part (VIPER-PATCH(selector-names-hook): the functional
+/// `view-transition-` names, all parts), or another (`::cue()`,
+/// `::highlight()`).
+fn functional_kind(name: &str) -> UnmatchedKind {
     if name.eq_ignore_ascii_case("scroll-button") {
         UnmatchedKind::ScrollButton
-    } else if view_transition_part {
+    } else if name.starts_with("view-transition-") {
         UnmatchedKind::ViewTransitionPart
     } else {
         UnmatchedKind::Other
@@ -126,13 +135,16 @@ pub(super) fn valid_after(
     let class = match simple {
         Component::NonTSPseudoClass(class) => class,
         Component::Nth(nth) => {
+            // VIPER-PATCH(selector-names-hook): the kind from the name.
             return *nth == NthSelectorData::only(false)
-                && *pseudo_element == PseudoElement::Unmatched(UnmatchedKind::ViewTransitionPart)
+                && matches!(pseudo_element, PseudoElement::Unmatched(name)
+                    if kind(name) == UnmatchedKind::ViewTransitionPart);
         },
         _ => return false,
     };
     match pseudo_element {
-        PseudoElement::Unmatched(kind) => valid_after_unmatched(*kind, class),
+        // VIPER-PATCH(selector-names-hook): the kind from the name.
+        PseudoElement::Unmatched(name) => valid_after_unmatched(kind(name), class),
         PseudoElement::Selection => named(class, &[":window-inactive"]),
         PseudoElement::FileSelectorButton => user_action(class),
         // `::before`, `::after` and `::marker` take `:hover` only behind a
