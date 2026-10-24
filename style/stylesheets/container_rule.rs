@@ -23,7 +23,7 @@ use crate::stylist::Stylist;
 use crate::values::computed::{CSSPixelLength, ContainerType, Context, Ratio};
 use crate::values::specified::ContainerName;
 use crate::{derives::*, LocalName};
-use app_units::Au;
+// VIPER-PATCH(container-size-px): no app units here any more (`use app_units::Au`).
 use cssparser::{Parser, SourceLocation};
 use euclid::default::Size2D;
 #[cfg(feature = "gecko")]
@@ -450,13 +450,17 @@ impl ContainerCondition {
 /// Information needed to evaluate an individual container query.
 #[derive(Clone)]
 pub struct ContainerInfo {
-    size: Size2D<Option<Au>>,
+    // VIPER-PATCH(container-size-px): CSS px instead of app units (1/60 px),
+    // so that an embedder's sizes in finer units (1/64 px, say) compare
+    // exactly (CSS Conditional 5 section 6.1). `TElement::query_container_size`
+    // answers in CSS px.
+    size: Size2D<Option<CSSPixelLength>>,
     wm: WritingMode,
     inherited_style: Option<Arc<ComputedValues>>,
 }
 
 impl ContainerInfo {
-    fn size(&self) -> Option<Size2D<Au>> {
+    fn size(&self) -> Option<Size2D<CSSPixelLength>> {
         Some(Size2D::new(self.size.width?, self.size.height?))
     }
 
@@ -466,40 +470,28 @@ impl ContainerInfo {
     }
 }
 
+// VIPER-PATCH(container-size-px): the sizes are CSS px already.
 fn eval_width(context: &Context) -> Option<CSSPixelLength> {
-    let info = context.container_info.as_ref()?;
-    Some(CSSPixelLength::new(info.size.width?.to_f32_px()))
+    context.container_info.as_ref()?.size.width
 }
 
 fn eval_height(context: &Context) -> Option<CSSPixelLength> {
-    let info = context.container_info.as_ref()?;
-    Some(CSSPixelLength::new(info.size.height?.to_f32_px()))
+    context.container_info.as_ref()?.size.height
 }
 
 fn eval_inline_size(context: &Context) -> Option<CSSPixelLength> {
     let info = context.container_info.as_ref()?;
-    Some(CSSPixelLength::new(
-        LogicalSize::from_physical(info.wm, info.size)
-            .inline?
-            .to_f32_px(),
-    ))
+    LogicalSize::from_physical(info.wm, info.size).inline
 }
 
 fn eval_block_size(context: &Context) -> Option<CSSPixelLength> {
     let info = context.container_info.as_ref()?;
-    Some(CSSPixelLength::new(
-        LogicalSize::from_physical(info.wm, info.size)
-            .block?
-            .to_f32_px(),
-    ))
+    LogicalSize::from_physical(info.wm, info.size).block
 }
 
 fn eval_aspect_ratio(context: &Context) -> Option<Ratio> {
     let info = context.container_info.as_ref()?;
-    Some(Ratio::new(
-        info.size.width?.0 as f32,
-        info.size.height?.0 as f32,
-    ))
+    Some(Ratio::new(info.size.width?.px(), info.size.height?.px()))
 }
 
 fn eval_orientation(context: &Context, value: Option<Orientation>) -> KleeneValue {
@@ -565,17 +557,23 @@ pub static CONTAINER_FEATURES: [QueryFeatureDescription; 6] = [
 /// element's writing mode.
 #[derive(Copy, Clone, Default)]
 pub struct ContainerSizeQueryResult {
-    width: Option<Au>,
-    height: Option<Au>,
+    // VIPER-PATCH(container-size-px): CSS px, as `ContainerInfo`'s size.
+    width: Option<CSSPixelLength>,
+    height: Option<CSSPixelLength>,
 }
 
 impl ContainerSizeQueryResult {
-    fn get_viewport_size(context: &Context) -> Size2D<Au> {
+    // VIPER-PATCH(container-size-px): the small viewport size in CSS px.
+    fn get_viewport_size(context: &Context) -> Size2D<CSSPixelLength> {
         use crate::values::specified::ViewportVariant;
-        context.viewport_size_for_viewport_unit_resolution(ViewportVariant::Small)
+        let size = context.viewport_size_for_viewport_unit_resolution(ViewportVariant::Small);
+        Size2D::new(
+            CSSPixelLength::new(size.width.to_f32_px()),
+            CSSPixelLength::new(size.height.to_f32_px()),
+        )
     }
 
-    fn get_logical_viewport_size(context: &Context) -> LogicalSize<Au> {
+    fn get_logical_viewport_size(context: &Context) -> LogicalSize<CSSPixelLength> {
         LogicalSize::from_physical(
             context.builder.writing_mode,
             Self::get_viewport_size(context),
@@ -583,7 +581,7 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the inline-size of the query container.
-    pub fn get_container_inline_size(&self, context: &Context) -> Au {
+    pub fn get_container_inline_size(&self, context: &Context) -> CSSPixelLength {
         if context.builder.writing_mode.is_horizontal() {
             if let Some(w) = self.width {
                 return w;
@@ -595,7 +593,7 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the block-size of the query container.
-    pub fn get_container_block_size(&self, context: &Context) -> Au {
+    pub fn get_container_block_size(&self, context: &Context) -> CSSPixelLength {
         if context.builder.writing_mode.is_horizontal() {
             self.get_container_height(context)
         } else {
@@ -604,7 +602,7 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the width of the query container.
-    pub fn get_container_width(&self, context: &Context) -> Au {
+    pub fn get_container_width(&self, context: &Context) -> CSSPixelLength {
         if let Some(w) = self.width {
             return w;
         }
@@ -612,7 +610,7 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the height of the query container.
-    pub fn get_container_height(&self, context: &Context) -> Au {
+    pub fn get_container_height(&self, context: &Context) -> CSSPixelLength {
         if let Some(h) = self.height {
             return h;
         }
@@ -884,5 +882,31 @@ mod tests {
         );
         // `gap` declares `row-gap` and `column-gap`.
         assert_eq!(block.len(), 7);
+    }
+
+    // VIPER-PATCH(container-size-px): a fork test of the sizes in CSS px.
+    #[test]
+    fn container_size_px_keeps_sizes_exact() {
+        use super::{ContainerSizeQueryResult, Orientation};
+        use crate::values::computed::CSSPixelLength;
+        use euclid::default::Size2D;
+        let px = CSSPixelLength::new;
+        // 333.328125 px is 21333/64 px: no whole number of app units.
+        let inline = ContainerSizeQueryResult {
+            width: Some(px(333.328125)),
+            height: None,
+        };
+        let outer = ContainerSizeQueryResult {
+            width: Some(px(1.0)),
+            height: Some(px(20.015625)),
+        };
+        assert!(!inline.is_complete());
+        let merged = inline.merge(outer);
+        assert!(merged.is_complete());
+        assert_eq!(merged.width, Some(px(333.328125)));
+        assert_eq!(merged.height, Some(px(20.015625)));
+        let wide = Size2D::new(px(10.015625), px(10.0));
+        assert!(Orientation::eval(wide, Some(Orientation::Landscape)));
+        assert!(!Orientation::eval(wide, Some(Orientation::Portrait)));
     }
 }

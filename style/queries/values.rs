@@ -5,7 +5,7 @@
 //! Common feature values between media and container features.
 
 use crate::derives::*;
-use app_units::Au;
+// VIPER-PATCH(container-size-px): no app units here any more (`use app_units::Au`).
 use euclid::default::Size2D;
 
 /// The orientation media / container feature.
@@ -21,7 +21,9 @@ pub enum Orientation {
 
 impl Orientation {
     /// A helper to evaluate a orientation query given a generic size getter.
-    pub fn eval(size: Size2D<Au>, value: Option<Self>) -> bool {
+    // VIPER-PATCH(container-size-px): generic over the unit, so container
+    // sizes in CSS px and viewport sizes in app units share it.
+    pub fn eval<T: PartialOrd>(size: Size2D<T>, value: Option<Self>) -> bool {
         let query_orientation = match value {
             Some(v) => v,
             None => return true,

@@ -963,10 +963,12 @@ pub trait TElement:
     /// Returns the size of the element to be used in container size queries.
     /// This will usually be the size of the content area of the primary box,
     /// but can be None if there is no box or if some axis lacks size containment.
+    // VIPER-PATCH(container-size-px): the size in CSS px, so that sizes finer
+    // than app units (1/60 px) compare exactly; was `Option<Au>`.
     fn query_container_size(
         &self,
         display: &Display,
-    ) -> euclid::default::Size2D<Option<app_units::Au>>;
+    ) -> euclid::default::Size2D<Option<crate::values::computed::CSSPixelLength>>;
 
     /// Returns true if the element has all of specified selector flags.
     fn has_selector_flags(&self, flags: ElementSelectorFlags) -> bool;

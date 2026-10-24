@@ -1116,7 +1116,12 @@ impl<'le> TElement for GeckoElement<'le> {
     }
 
     #[inline]
-    fn query_container_size(&self, display: &Display) -> Size2D<Option<Au>> {
+    // VIPER-PATCH(container-size-px): answers in CSS px; Gecko's sizes are
+    // app units, so the conversion is exact.
+    fn query_container_size(
+        &self,
+        display: &Display,
+    ) -> Size2D<Option<crate::values::computed::CSSPixelLength>> {
         // If an element gets 'display: contents' and its nsIFrame has not been removed yet,
         // Gecko_GetQueryContainerSize will not notice that it can't have size containment.
         // Other cases like 'display: inline' will be handled once the new nsIFrame is created.
@@ -1129,9 +1134,10 @@ impl<'le> TElement for GeckoElement<'le> {
         unsafe {
             bindings::Gecko_GetQueryContainerSize(self.0, &mut width, &mut height);
         }
+        let px = |au: i32| crate::values::computed::CSSPixelLength::new(Au(au).to_f32_px());
         Size2D::new(
-            if width >= 0 { Some(Au(width)) } else { None },
-            if height >= 0 { Some(Au(height)) } else { None },
+            if width >= 0 { Some(px(width)) } else { None },
+            if height >= 0 { Some(px(height)) } else { None },
         )
     }
 

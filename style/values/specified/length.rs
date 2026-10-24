@@ -971,19 +971,19 @@ impl NoCalcLength {
             LengthUnit::Cqh => size.get_container_height(context),
             LengthUnit::Cqi => size.get_container_inline_size(context),
             LengthUnit::Cqb => size.get_container_block_size(context),
-            LengthUnit::Cqmin => cmp::min(
-                size.get_container_inline_size(context),
-                size.get_container_block_size(context),
-            ),
-            LengthUnit::Cqmax => cmp::max(
-                size.get_container_inline_size(context),
-                size.get_container_block_size(context),
-            ),
+            // VIPER-PATCH(container-size-px): the sizes are CSS px, which
+            // `min` and `max` compare.
+            LengthUnit::Cqmin => size
+                .get_container_inline_size(context)
+                .min(size.get_container_block_size(context)),
+            LengthUnit::Cqmax => size
+                .get_container_inline_size(context)
+                .max(size.get_container_block_size(context)),
             _ => {
                 unreachable!("container_relative_to_computed_value: not a container-relative unit")
             },
         };
-        CSSPixelLength::new((container_length.to_f64_px() * factor as f64 / 100.0) as f32).finite()
+        CSSPixelLength::new((container_length.px() as f64 * factor as f64 / 100.0) as f32).finite()
     }
 
     /// Computes a ServoCharacterWidth length against a reference font size.
