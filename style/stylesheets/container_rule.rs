@@ -136,13 +136,39 @@ pub struct ContainerCondition {
 }
 
 /// The result of a successful container query lookup.
-pub struct ContainerLookupResult<E> {
+pub struct ContainerLookupResult<'a, E> {
     /// The relevant container.
     pub element: E,
     /// The sizing / writing-mode information of the container.
     pub info: ContainerInfo,
     /// The style of the element.
-    pub style: Arc<ComputedValues>,
+    // VIPER-PATCH(to-arc-provenance): was `Arc<ComputedValues>`, rebuilt
+    // with `ComputedValues::to_arc` from a reference that grants no access
+    // to the reference count (undefined behaviour under both of Miri's
+    // aliasing models). The style is now the reference the caller passed
+    // down, or a clone of the `Arc` the element data holds.
+    pub style: ContainerStyle<'a>,
+}
+
+/// VIPER-PATCH(to-arc-provenance): the style of a query container, as the
+/// lookup found it: borrowed from the caller (the style being computed for
+/// an originating element) or shared with the container's element data.
+pub enum ContainerStyle<'a> {
+    /// The style the caller passed down.
+    Borrowed(&'a ComputedValues),
+    /// The primary style of the container's element data.
+    Shared(Arc<ComputedValues>),
+}
+
+impl std::ops::Deref for ContainerStyle<'_> {
+    type Target = ComputedValues;
+
+    fn deref(&self) -> &ComputedValues {
+        match self {
+            Self::Borrowed(style) => style,
+            Self::Shared(style) => style,
+        }
+    }
 }
 
 fn container_type_axes(ty_: ContainerType, wm: WritingMode) -> FeatureFlags {
@@ -166,14 +192,16 @@ enum TraversalResult<T> {
     Done(T),
 }
 
-fn traverse_container<E, F, R>(
+// VIPER-PATCH(to-arc-provenance): the originating style's lifetime `'a` is
+// named, so that a result may borrow it.
+fn traverse_container<'a, E, F, R>(
     mut e: E,
-    originating_element_style: Option<&ComputedValues>,
+    originating_element_style: Option<&'a ComputedValues>,
     evaluator: F,
 ) -> Option<(E, R)>
 where
     E: TElement,
-    F: Fn(E, Option<&ComputedValues>) -> TraversalResult<R>,
+    F: Fn(E, Option<&'a ComputedValues>) -> TraversalResult<R>,
 {
     if originating_element_style.is_some() {
         match evaluator(e, originating_element_style) {
@@ -232,23 +260,22 @@ impl ContainerCondition {
         })
     }
 
-    fn valid_container_info<E>(
+    fn valid_container_info<'a, E>(
         &self,
         potential_container: E,
-        originating_element_style: Option<&ComputedValues>,
-    ) -> TraversalResult<ContainerLookupResult<E>>
+        originating_element_style: Option<&'a ComputedValues>,
+    ) -> TraversalResult<ContainerLookupResult<'a, E>>
     where
         E: TElement,
     {
-        let data;
+        // VIPER-PATCH(to-arc-provenance): the element data's `Arc` is
+        // cloned instead of borrowed, and a passed-down style stays a
+        // reference, so no `Arc` is rebuilt from a reference below.
         let style = match originating_element_style {
-            Some(s) => s,
-            None => {
-                data = match potential_container.borrow_data() {
-                    Some(d) => d,
-                    None => return TraversalResult::InProgress,
-                };
-                &**data.styles.primary()
+            Some(s) => ContainerStyle::Borrowed(s),
+            None => match potential_container.borrow_data() {
+                Some(data) => ContainerStyle::Shared(data.styles.primary().clone()),
+                None => return TraversalResult::InProgress,
             },
         };
         let wm = style.writing_mode;
@@ -270,7 +297,6 @@ impl ContainerCondition {
         }
 
         let size = potential_container.query_container_size(&box_style.clone_display());
-        let style = style.to_arc();
         TraversalResult::Done(ContainerLookupResult {
             element: potential_container,
             info: ContainerInfo {
@@ -289,11 +315,11 @@ impl ContainerCondition {
     }
 
     /// Performs container lookup for a given element.
-    pub fn find_container<E>(
+    pub fn find_container<'a, E>(
         &self,
         e: E,
-        originating_element_style: Option<&ComputedValues>,
-    ) -> Option<ContainerLookupResult<E>>
+        originating_element_style: Option<&'a ComputedValues>,
+    ) -> Option<ContainerLookupResult<'a, E>>
     where
         E: TElement,
     {
@@ -335,8 +361,10 @@ impl ContainerCondition {
         if self.flags.contains(FeatureFlags::STYLE) {
             invalidation_flags.insert(ComputedValueFlags::DEPENDS_ON_CONTAINER_STYLE_QUERY);
         }
-        let (container, info) = match result {
-            Some(r) => (r.element, (r.info, r.style)),
+        // VIPER-PATCH(to-arc-provenance): the style stays in the lookup's
+        // result, and the evaluation borrows it.
+        let (container, info, style) = match result {
+            Some(r) => (r.element, r.info, r.style),
             None => {
                 // If we did not find the named (or any) container,
                 // the query must fail to match.
@@ -352,7 +380,7 @@ impl ContainerCondition {
         Context::for_container_query_evaluation(
             stylist.device(),
             Some(stylist),
-            Some(info),
+            Some((info, &*style)),
             size_query_container_lookup,
             &container,
             |context| {

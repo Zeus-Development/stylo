@@ -283,7 +283,9 @@ impl<'a> Context<'a> {
     pub fn for_container_query_evaluation<F, R>(
         device: &Device,
         stylist: Option<&Stylist>,
-        container_info_and_style: Option<(ContainerInfo, Arc<ComputedValues>)>,
+        // VIPER-PATCH(to-arc-provenance): was `Arc<ComputedValues>`; the
+        // style is only borrowed below, so the caller lends it.
+        container_info_and_style: Option<(ContainerInfo, &ComputedValues)>,
         container_size_query: ContainerSizeQuery,
         element_context: &dyn ElementContext,
         f: F,
@@ -299,7 +301,6 @@ impl<'a> Context<'a> {
             None => (None, None),
         };
 
-        let style = style.as_deref();
         let quirks_mode = device.quirks_mode();
         let context = Context {
             builder: StyleBuilder::for_inheritance(device, stylist, style, None),

@@ -1906,14 +1906,10 @@ impl ComputedValues {
         })
     }
 
-    /// Converts the computed values to an Arc<> from a reference.
-    pub fn to_arc(&self) -> Arc<Self> {
-        // SAFETY: We're guaranteed to be allocated as an Arc<> since the
-        // functions above are the only ones that create ComputedValues
-        // instances in Servo (and that must be the case since ComputedValues'
-        // member is private).
-        unsafe { Arc::from_raw_addrefed(self) }
-    }
+    // VIPER-PATCH(to-arc-provenance): `to_arc` is removed from servo builds.
+    // It rebuilt an `Arc` with `Arc::from_raw_addrefed` from `&self`, a
+    // reference that grants no access to the reference count; its one
+    // caller, the container lookup, now keeps the `Arc` it has.
 
     /// Serializes the computed value of this property as a string.
     pub fn computed_value_to_string(&self, property: PropertyDeclarationId) -> String {
