@@ -296,6 +296,8 @@ impl ContainerCondition {
             }
         }
 
+        // VIPER-PATCH(to-arc-provenance): `style` is kept as found, borrowed or
+        // shared, with no `to_arc`.
         let size = potential_container.query_container_size(&box_style.clone_display());
         TraversalResult::Done(ContainerLookupResult {
             element: potential_container,
@@ -315,6 +317,9 @@ impl ContainerCondition {
     }
 
     /// Performs container lookup for a given element.
+    ///
+    /// VIPER-PATCH(to-arc-provenance): the result may borrow the originating
+    /// element's style for `'a`.
     pub fn find_container<'a, E>(
         &self,
         e: E,
@@ -383,6 +388,7 @@ impl ContainerCondition {
         Context::for_container_query_evaluation(
             stylist.device(),
             Some(stylist),
+            // VIPER-PATCH(to-arc-provenance): the container's style by reference.
             Some((info, &*style)),
             size_query_container_lookup,
             &container,
@@ -581,6 +587,8 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the inline-size of the query container.
+    ///
+    /// VIPER-PATCH(container-size-px): in CSS px.
     pub fn get_container_inline_size(&self, context: &Context) -> CSSPixelLength {
         if context.builder.writing_mode.is_horizontal() {
             if let Some(w) = self.width {
@@ -593,6 +601,8 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the block-size of the query container.
+    ///
+    /// VIPER-PATCH(container-size-px): in CSS px.
     pub fn get_container_block_size(&self, context: &Context) -> CSSPixelLength {
         if context.builder.writing_mode.is_horizontal() {
             self.get_container_height(context)
@@ -602,6 +612,8 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the width of the query container.
+    ///
+    /// VIPER-PATCH(container-size-px): in CSS px.
     pub fn get_container_width(&self, context: &Context) -> CSSPixelLength {
         if let Some(w) = self.width {
             return w;
@@ -610,6 +622,8 @@ impl ContainerSizeQueryResult {
     }
 
     /// Get the height of the query container.
+    ///
+    /// VIPER-PATCH(container-size-px): in CSS px.
     pub fn get_container_height(&self, context: &Context) -> CSSPixelLength {
         if let Some(h) = self.height {
             return h;

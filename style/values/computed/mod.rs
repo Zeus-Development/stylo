@@ -301,6 +301,8 @@ impl<'a> Context<'a> {
             None => (None, None),
         };
 
+        // VIPER-PATCH(to-arc-provenance): `style` is a reference already (the
+        // `style.as_deref()` that read the `Arc` is gone).
         let quirks_mode = device.quirks_mode();
         let context = Context {
             builder: StyleBuilder::for_inheritance(device, stylist, style, None),

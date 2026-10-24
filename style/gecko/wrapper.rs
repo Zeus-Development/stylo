@@ -1134,6 +1134,7 @@ impl<'le> TElement for GeckoElement<'le> {
         unsafe {
             bindings::Gecko_GetQueryContainerSize(self.0, &mut width, &mut height);
         }
+        // VIPER-PATCH(container-size-px): Gecko's app units, answered in CSS px.
         let px = |au: i32| crate::values::computed::CSSPixelLength::new(Au(au).to_f32_px());
         Size2D::new(
             if width >= 0 { Some(px(width)) } else { None },
