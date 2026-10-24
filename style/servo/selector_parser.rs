@@ -754,7 +754,9 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     ) -> Result<NonTSPseudoClass, ParseError> {
         // VIPER-PATCH(selector-names-hook): the embedder's names first.
         if let Some(names) = self.parse_options.selector_names {
-            if let Some(owned) = self.embedder_name(names, &name, |n| n.pseudo_class(&name, None)) {
+            if let Some(owned) =
+                self.embedder_name(names, &name, |n| n.pseudo_class(self, &name, None))
+            {
                 return owned;
             }
         } else {
@@ -826,7 +828,8 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         // VIPER-PATCH(selector-names-hook): the embedder's names first.
         let names = self.parse_options.selector_names;
         if let Some(names) = names {
-            let owned = self.embedder_name(names, &name, |n| n.pseudo_class(&name, Some(parser)));
+            let owned =
+                self.embedder_name(names, &name, |n| n.pseudo_class(self, &name, Some(parser)));
             if let Some(owned) = owned {
                 return owned;
             }
@@ -860,7 +863,8 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         use self::PseudoElement::*;
         // VIPER-PATCH(selector-names-hook): the embedder's names first.
         if let Some(names) = self.parse_options.selector_names {
-            if let Some(owned) = self.embedder_name(names, &name, |n| n.pseudo_element(&name, None))
+            if let Some(owned) =
+                self.embedder_name(names, &name, |n| n.pseudo_element(self, &name, None))
             {
                 return owned;
             }
@@ -957,9 +961,9 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     ) -> Result<PseudoElement, ParseError> {
         // VIPER-PATCH(selector-names-hook): the embedder's names, if any.
         let owned = match self.parse_options.selector_names {
-            Some(names) => {
-                self.embedder_name(names, &name, |n| n.pseudo_element(&name, Some(arguments)))
-            },
+            Some(names) => self.embedder_name(names, &name, |n| {
+                n.pseudo_element(self, &name, Some(arguments))
+            }),
             None => chrome_names::functional_pseudo_element(self, &name, arguments),
         };
         owned.unwrap_or_else(|| {

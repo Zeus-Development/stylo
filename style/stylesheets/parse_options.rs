@@ -10,7 +10,7 @@
 
 use crate::derives::*;
 // VIPER-PATCH(selector-names-hook): the types the hook answers with.
-use crate::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
+use crate::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl, SelectorParser};
 use cssparser::{Parser, Token};
 use selectors::parser::Component;
 use style_traits::ParseError;
@@ -132,9 +132,14 @@ pub trait SelectorNames: Sync {
     /// The pseudo-class `name`, with `args` the arguments of a functional
     /// one: `Some` when the embedder owns `name` (an `Err` when the
     /// arguments are invalid), `None` to leave it to servo's names; with
-    /// `None`, `args` is left unread.
+    /// `None`, `args` is left unread. `parser` is the enclosing selector's
+    /// parser: selectors nested in `args` parse with it, so they keep its
+    /// declared namespaces, origin, supports-condition mode and options
+    /// (this hook included), as the enclosing selector does.
     fn pseudo_class<'i>(
         &self,
+        // VIPER-PATCH(selector-names-hook): the enclosing parser.
+        parser: &SelectorParser<'_>,
         name: &str,
         args: Option<&mut Parser<'i>>,
     ) -> Option<Result<NonTSPseudoClass, ParseError>>;
@@ -142,6 +147,8 @@ pub trait SelectorNames: Sync {
     /// The same for the pseudo-element `name`.
     fn pseudo_element<'i>(
         &self,
+        // VIPER-PATCH(selector-names-hook): the enclosing parser.
+        parser: &SelectorParser<'_>,
         name: &str,
         args: Option<&mut Parser<'i>>,
     ) -> Option<Result<PseudoElement, ParseError>>;
@@ -558,6 +565,8 @@ mod selector_names_tests {
     impl SelectorNames for TestNames {
         fn pseudo_class<'i>(
             &self,
+            // VIPER-PATCH(selector-names-hook): the enclosing parser.
+            parser: &SelectorParser<'_>,
             name: &str,
             args: Option<&mut Parser<'i>>,
         ) -> Option<Result<NonTSPseudoClass, ParseError>> {
@@ -567,6 +576,28 @@ mod selector_names_tests {
                 ("made-up-fn", Some(args)) => {
                     Some(ident(args).map(|a| class(format!(":made-up-fn({a})"))))
                 },
+                // VIPER-PATCH(selector-names-hook): also
+                // `:host-context(<compound-selector>)`, parsed with the
+                // enclosing parser.
+                ("host-context", Some(args)) => {
+                    use selectors::parser::SelectorParseErrorKind::UnexpectedIdent;
+                    let list = SelectorList::parse(parser, args, ParseRelative::No);
+                    // One selector, no combinator and no pseudo-element.
+                    let compound = |l: &SelectorList<SelectorImpl>| match l.slice() {
+                        [s] => {
+                            let combinator = |c| matches!(c, &Component::Combinator(_));
+                            !s.has_pseudo_element() && !s.iter_raw_match_order().any(combinator)
+                        },
+                        _ => false,
+                    };
+                    Some(match list {
+                        Ok(l) if compound(&l) => {
+                            Ok(class(format!(":host-context({})", l.to_css_string())))
+                        },
+                        Ok(_) => Err(ParseError::custom(UnexpectedIdent)),
+                        Err(e) => Err(e),
+                    })
+                },
                 ("dir", Some(args)) => Some(ident(args).map(|a| NonTSPseudoClass::Dir(a.into()))),
                 _ => None,
             }
@@ -574,6 +605,8 @@ mod selector_names_tests {
 
         fn pseudo_element<'i>(
             &self,
+            // VIPER-PATCH(selector-names-hook): the enclosing parser.
+            _: &SelectorParser<'_>,
             name: &str,
             args: Option<&mut Parser<'i>>,
         ) -> Option<Result<PseudoElement, ParseError>> {
@@ -618,6 +651,8 @@ mod selector_names_tests {
     impl SelectorNames for NoTestNames {
         fn pseudo_class<'i>(
             &self,
+            // VIPER-PATCH(selector-names-hook): the enclosing parser.
+            _: &SelectorParser<'_>,
             _: &str,
             _: Option<&mut Parser<'i>>,
         ) -> Option<Result<NonTSPseudoClass, ParseError>> {
@@ -626,6 +661,8 @@ mod selector_names_tests {
 
         fn pseudo_element<'i>(
             &self,
+            // VIPER-PATCH(selector-names-hook): the enclosing parser.
+            _: &SelectorParser<'_>,
             _: &str,
             _: Option<&mut Parser<'i>>,
         ) -> Option<Result<PseudoElement, ParseError>> {
@@ -653,13 +690,26 @@ mod selector_names_tests {
     /// The serialization of `selectors` in a sheet of `origin` under
     /// `options`.
     fn parse(origin: Origin, options: ParseOptions, selectors: &str) -> Option<String> {
+        parse_in(origin, options, &Namespaces::default(), false, selectors)
+    }
+
+    /// The same with the sheet's `namespaces`, in a supports condition when
+    /// `for_supports_rule`.
+    // VIPER-PATCH(selector-names-hook): what a nested selector inherits.
+    fn parse_in(
+        origin: Origin,
+        options: ParseOptions,
+        namespaces: &Namespaces,
+        for_supports_rule: bool,
+        selectors: &str,
+    ) -> Option<String> {
         let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
-        let namespaces = Namespaces::default();
         let parser = SelectorParser {
             stylesheet_origin: origin,
-            namespaces: &namespaces,
+            // VIPER-PATCH(selector-names-hook): as given.
+            namespaces,
             url_data: &url,
-            for_supports_rule: false,
+            for_supports_rule,
             parse_options: options,
         };
         let mut input = Parser::new(selectors);
@@ -695,7 +745,8 @@ mod selector_names_tests {
             ":horizontal",
             "::-webkit-scrollbar",
             ":-webkit-any(p)",
-            ":host-context(p)",
+            // VIPER-PATCH(selector-names-hook): `:host-context()` is the
+            // test hook's own.
         ] {
             assert!(!author(selectors), "{selectors}");
         }
@@ -705,6 +756,48 @@ mod selector_names_tests {
         assert!(!default(":made-up") && !default("::made-up"));
         // Under a hook `:lang()` takes a string again, as upstream does.
         assert!(author(":lang(\"en\")") && !default(":lang(\"en\")"));
+    }
+
+    // VIPER-PATCH(selector-names-hook): nested selectors parse with the
+    // enclosing parser.
+    #[test]
+    fn selector_names_hook_nests_with_the_enclosing_parser() {
+        let mut svg = Namespaces::default();
+        let uri = "http://www.w3.org/2000/svg";
+        svg.prefixes.insert("svg".into(), uri.into());
+        let both = |namespaces: &Namespaces, supports, selectors| {
+            let hook = parse_in(
+                Origin::Author,
+                with_names(),
+                namespaces,
+                supports,
+                selectors,
+            );
+            let default = ParseOptions::default();
+            (
+                hook,
+                parse_in(Origin::Author, default, namespaces, supports, selectors),
+            )
+        };
+        // The sheet's namespaces carry into the argument.
+        let (hook, default) = both(&svg, false, ":host-context(svg|a)");
+        assert_eq!(hook.as_deref(), Some(":host-context(svg|a)"));
+        assert_eq!(hook, default);
+        assert_eq!(
+            both(&Namespaces::default(), false, ":host-context(svg|a)"),
+            (None, None)
+        );
+        // So does a supports condition's non-forgiving mode: elsewhere the
+        // unknown name is forgiven, kept as written and matching nothing.
+        let unknown = ":host-context(:is(:not-a-name))";
+        let (hook, default) = both(&Namespaces::default(), false, unknown);
+        assert_eq!(hook.as_deref(), Some(unknown));
+        assert_eq!(hook, default);
+        assert_eq!(both(&Namespaces::default(), true, unknown), (None, None));
+        // And the hook itself: `:made-up` is its name, nested too.
+        let made_up = ":host-context(:is(:made-up))";
+        let (hook, default) = both(&Namespaces::default(), true, made_up);
+        assert_eq!((hook.as_deref(), default), (Some(made_up), None));
     }
 
     #[test]
