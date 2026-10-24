@@ -905,9 +905,10 @@ mod tests {
         use crate::values::computed::CSSPixelLength;
         use euclid::default::Size2D;
         let px = CSSPixelLength::new;
-        // 333.328125 px is 21333/64 px: no whole number of app units.
+        // 21333/64 px (333.328125 px): no whole number of app units.
+        let exact = 21333.0 / 64.0;
         let inline = ContainerSizeQueryResult {
-            width: Some(px(333.328125)),
+            width: Some(px(exact)),
             height: None,
         };
         let outer = ContainerSizeQueryResult {
@@ -917,7 +918,7 @@ mod tests {
         assert!(!inline.is_complete());
         let merged = inline.merge(outer);
         assert!(merged.is_complete());
-        assert_eq!(merged.width, Some(px(333.328125)));
+        assert_eq!(merged.width, Some(px(exact)));
         assert_eq!(merged.height, Some(px(20.015625)));
         let wide = Size2D::new(px(10.015625), px(10.0));
         assert!(Orientation::eval(wide, Some(Orientation::Landscape)));
