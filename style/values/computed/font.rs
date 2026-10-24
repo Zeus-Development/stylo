@@ -1488,8 +1488,8 @@ pub type LineHeight = generics::GenericLineHeight<LineHeightNumber, NonNegativeL
 ///
 /// CSS Inline 3 section 5.1 makes the used line height the number
 /// multiplied by the element's computed font size, and CSS Values 4
-/// section 10.12 lets an implementation keep a `<number>` and the result
-/// of a math function at any precision. Upstream keeps the number in `f32`,
+/// section 5 leaves the precision of a `<number>`, and so of the result
+/// of a math function (section 10.1), to the implementation. Upstream keeps the number in `f32`,
 /// so `calc(20 / 12)` times 12px is a little under 20px and a
 /// line height rounded to a fixed-point unit loses a unit. Servo builds keep
 /// the number as written, in `f64`, and evaluate a math function of numbers

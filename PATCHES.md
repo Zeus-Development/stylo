@@ -1240,10 +1240,11 @@ Problem, change, every spot, the Miri commands and the before/after results:
   serialization and `f32` computation are unchanged) and the number as
   written in `f64`: the number token's text, or a math function of
   number tokens combined by `+`, `-`, `*`, `/`, parentheses and nested
-  `calc()`, evaluated in `f64` (CSS Values 4 sections 10.1 and 10.12).
-  Any other math function (percentages, other functions, constants) and
-  a result that `f64` does not round to the `f32` value (a clamped or
-  infinite one) keep the `f32` value. The resolved value and the `lh`
+  `calc()`, evaluated in `f64` (CSS Values 4 section 10.1; section 5
+  leaves a number's precision to the implementation). Any other math
+  function (percentages, other functions, constants) and a result that
+  `f64` does not round to the `f32` value (one clamped by range checking,
+  section 10.12, or an infinite one) keep the `f32` value. The resolved value and the `lh`
   unit multiply the `f64` number by the font size in `f64`, rounded once
   to `f32`. The specified value is larger, so the `line-height`
   declaration is boxed (`longhands.toml`, and the `font` shorthand boxes

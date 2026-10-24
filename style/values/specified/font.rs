@@ -1981,10 +1981,10 @@ pub type LineHeight = GenericLineHeight<LineHeightNumber, NonNegativeLengthPerce
 ///
 /// `exact` is the number token's text read as `f64`, or a math function of
 /// number tokens combined by `+`, `-`, `*`, `/`, parentheses and nested
-/// `calc()` evaluated in `f64` (CSS Values 4 sections 10.1 and 10.12 let
-/// a number keep any precision). It is `None` for a math function of
-/// another form (percentages, other functions, constants), whose `f32`
-/// value stands. Servo builds compute the number from `exact` (the
+/// `calc()` evaluated in `f64` (CSS Values 4 section 10.1; section 5
+/// leaves a number's precision to the implementation). It is `None` for a
+/// math function of another form (percentages, other functions,
+/// constants), whose `f32` value stands. Servo builds compute the number from `exact` (the
 /// computed `LineHeightNumber`).
 #[derive(Clone, Debug, MallocSizeOf, PartialEq, ToShmem)]
 pub struct LineHeightNumber {
