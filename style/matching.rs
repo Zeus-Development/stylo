@@ -713,14 +713,14 @@ trait PrivateMatchMethods: TElement {
             context,
             old_values.as_deref(),
             new_values,
-            pseudo_element.clone(),
+            pseudo_element.clone(), // VIPER-PATCH(selector-names-hook)
         );
 
         let might_need_transitions_update = self.might_need_transitions_update(
             context,
             old_values.as_deref(),
             new_values,
-            pseudo_element.clone(),
+            pseudo_element.clone(), // VIPER-PATCH(selector-names-hook)
         );
 
         let mut after_change_style = None;

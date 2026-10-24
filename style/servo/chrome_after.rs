@@ -17,6 +17,8 @@
 
 use super::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl};
 use selectors::parser::{Component, NthSelectorData};
+// VIPER-PATCH(selector-names-hook): the kind derives nothing from
+// `crate::derives` any more.
 
 /// Which of Chrome's pseudo-elements an `Unmatched` one is, for what may
 /// follow it in its compound.
@@ -89,6 +91,7 @@ fn kind(name: &str) -> UnmatchedKind {
 /// The kind of the plain pseudo-element `name`, one Chrome accepts and
 /// servo has no variant for.
 fn plain_kind(name: &str) -> UnmatchedKind {
+    // VIPER-PATCH(selector-names-hook)
     let is = |n: &str| name.eq_ignore_ascii_case(n);
     if SCROLLBAR_PARTS.iter().any(|part| is(part)) {
         UnmatchedKind::ScrollbarPart
@@ -120,6 +123,7 @@ fn functional_kind(name: &str) -> UnmatchedKind {
     if name.eq_ignore_ascii_case("scroll-button") {
         UnmatchedKind::ScrollButton
     } else if name.starts_with("view-transition-") {
+        // VIPER-PATCH(selector-names-hook)
         UnmatchedKind::ViewTransitionPart
     } else {
         UnmatchedKind::Other

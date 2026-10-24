@@ -76,17 +76,19 @@ impl Default for ParseOptions {
             value_aliases: &[],
             refused_values: &[],
             unsupported_values: &[],
-            selector_names: None,
+            selector_names: None, // VIPER-PATCH(selector-names-hook)
         }
     }
 }
 
 // VIPER-PATCH(selector-names-hook): two options are equal when their hooks
-// are the same object.
+// are the same object: hooks compare by identity, data and vtable pointers
+// both, since distinct zero-sized hooks may share an address. The same type
+// seen through two vtables compares unequal, the safe direction here.
 impl PartialEq for ParseOptions {
     fn eq(&self, other: &Self) -> bool {
         let same_hook = match (self.selector_names, other.selector_names) {
-            (Some(a), Some(b)) => std::ptr::addr_eq(a, b),
+            (Some(a), Some(b)) => std::ptr::eq(a, b),
             (a, b) => a.is_none() && b.is_none(),
         };
         self.attribute_s_flag == other.attribute_s_flag
@@ -129,7 +131,8 @@ impl std::fmt::Debug for ParseOptions {
 pub trait SelectorNames: Sync {
     /// The pseudo-class `name`, with `args` the arguments of a functional
     /// one: `Some` when the embedder owns `name` (an `Err` when the
-    /// arguments are invalid), `None` to leave it to servo's names.
+    /// arguments are invalid), `None` to leave it to servo's names; with
+    /// `None`, `args` is left unread.
     fn pseudo_class<'i>(
         &self,
         name: &str,
@@ -609,6 +612,37 @@ mod selector_names_tests {
 
     static TEST_NAMES: TestNames = TestNames;
 
+    /// Another zero-sized hook, which owns no name.
+    struct NoTestNames;
+
+    impl SelectorNames for NoTestNames {
+        fn pseudo_class<'i>(
+            &self,
+            _: &str,
+            _: Option<&mut Parser<'i>>,
+        ) -> Option<Result<NonTSPseudoClass, ParseError>> {
+            None
+        }
+
+        fn pseudo_element<'i>(
+            &self,
+            _: &str,
+            _: Option<&mut Parser<'i>>,
+        ) -> Option<Result<PseudoElement, ParseError>> {
+            None
+        }
+
+        fn refuses(&self, _: &str) -> bool {
+            false
+        }
+
+        fn valid_after(&self, _: &PseudoElement, _: &Component<SelectorImpl>) -> Option<bool> {
+            None
+        }
+    }
+
+    static NO_TEST_NAMES: NoTestNames = NoTestNames;
+
     fn with_names() -> ParseOptions {
         ParseOptions {
             selector_names: Some(&TEST_NAMES),
@@ -669,6 +703,8 @@ mod selector_names_tests {
         let default = |s| parse(Origin::Author, ParseOptions::default(), s).is_some();
         assert!(default(":horizontal") && default(":-webkit-any(p)"));
         assert!(!default(":made-up") && !default("::made-up"));
+        // Under a hook `:lang()` takes a string again, as upstream does.
+        assert!(author(":lang(\"en\")") && !default(":lang(\"en\")"));
     }
 
     #[test]
@@ -733,6 +769,12 @@ mod selector_names_tests {
         assert_eq!(rules(ParseOptions::default()), 3);
         assert_eq!(with_names(), with_names());
         assert_ne!(with_names(), ParseOptions::default());
+        // Distinct zero-sized hooks may share an address; they differ.
+        let no_names = ParseOptions {
+            selector_names: Some(&NO_TEST_NAMES),
+            ..Default::default()
+        };
+        assert_ne!(with_names(), no_names);
         assert!(format!("{:?}", with_names()).contains("selector_names: true"));
     }
 }

@@ -94,18 +94,14 @@ pub enum PseudoElement {
     ServoTableGrid,
     ServoTableWrapper,
 
-    // VIPER-PATCH(chrome-dom-api-pseudos): Chrome match. A pseudo-element
-    // Chrome 154's DOM selector APIs accept and that never matches an
-    // element there (`::cue`, `::highlight(x)`, `::-webkit-scrollbar`, any
-    // other `::-webkit-*` name, ...). Since `chrome-selector-names` servo's
-    // parser builds it too, so stylesheets keep its rules; it cascades
-    // lazily. Upstream has no such variant: Servo refuses those names.
-    // Keep it last. https://drafts.csswg.org/css-pseudo-4/
+    // VIPER-PATCH(chrome-dom-api-pseudos): see PATCHES.md.
     // VIPER-PATCH(selector-names-hook): a pseudo-element an embedder's
     // `SelectorNames` admits beyond servo's names, or the default tables
-    // do. It holds its name in ASCII lowercase, followed by `()` when it
-    // is functional (`-webkit-scrollbar`, `cue()`), which decides what may
-    // follow it in its compound; every name has the one index.
+    // do; upstream Servo refuses those names. It holds its name in ASCII
+    // lowercase, followed by `()` when it is functional (`made-up`,
+    // `cue()`), which decides what may follow it in its compound; it
+    // cascades lazily, and every name has the one index. Keep it last.
+    // https://drafts.csswg.org/css-pseudo-4/
     Unmatched(Box<str>),
 }
 
@@ -497,14 +493,12 @@ pub enum NonTSPseudoClass {
     UserValid,
     Valid,
     Visited,
-    // VIPER-PATCH(chrome-dom-api-pseudos): Chrome match. `:dir(<ident>)`,
-    // with the identifier as written, matched by an embedder from the
-    // element's directionality, and any other pseudo-class Chrome 154's DOM
-    // selector APIs accept and Servo does not, holding its serialization
-    // (`:horizontal`, `:host-context(div)`); Chrome matches nearly all of
-    // those on no element of a static page, and the embedder decides. Since
-    // `chrome-selector-names` servo's parser builds both, in stylesheets
-    // too; upstream Servo refuses those names.
+    // VIPER-PATCH(chrome-dom-api-pseudos): see PATCHES.md.
+    // VIPER-PATCH(selector-names-hook): a pseudo-class an embedder's
+    // `SelectorNames` (or the default tables) admits beyond servo's names;
+    // upstream Servo refuses those names. `Dir` holds the `:dir()`
+    // identifier as written, `Unmatched` its serialization; neither has
+    // element state, and they match only what the embedder matches.
     // https://drafts.csswg.org/selectors-4/#the-dir-pseudo
     Dir(Box<str>),
     Unmatched(Box<str>),
@@ -838,6 +832,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             }
         // VIPER-PATCH(chrome-selector-names): Chrome's names first.
         } else if let Some(chrome) = chrome_names::functional_pseudo_class(self, &name, parser) {
+            // VIPER-PATCH(selector-names-hook)
             return chrome;
         }
         let pseudo_class = match_ignore_ascii_case! { &name,
@@ -992,11 +987,13 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         simple: &selectors::parser::Component<SelectorImpl>,
     ) -> bool {
         let Some(names) = self.parse_options.selector_names else {
+            // VIPER-PATCH(selector-names-hook)
             return chrome_after::valid_after(pseudo_element, simple);
         };
         names
             .valid_after(pseudo_element, simple)
             .unwrap_or_else(|| {
+                // VIPER-PATCH(selector-names-hook)
                 use selectors::parser::{NonTSPseudoClass as _, PseudoElement as _};
                 matches!(simple, selectors::parser::Component::NonTSPseudoClass(class)
                 if pseudo_element.accepts_state_pseudo_classes() && class.is_user_action_state())
