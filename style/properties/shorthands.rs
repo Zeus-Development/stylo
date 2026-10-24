@@ -545,7 +545,7 @@ pub mod border {
     }
 }
 
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(servo-container-queries): built in servo builds too.
 pub mod container {
     use super::*;
     pub use crate::properties::generated::shorthands::container::*;

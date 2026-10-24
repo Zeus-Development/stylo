@@ -884,6 +884,20 @@ mod tests {
         assert_eq!(block.len(), 7);
     }
 
+    #[test]
+    fn servo_container_queries_parse_the_container_shorthand() {
+        let url = url();
+        let block = parse_style_attribute(
+            "container: card / inline-size",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
+        // `container-name` and `container-type`.
+        assert_eq!(block.len(), 2);
+    }
+
     // VIPER-PATCH(container-size-px): a fork test of the sizes in CSS px.
     #[test]
     fn container_size_px_keeps_sizes_exact() {

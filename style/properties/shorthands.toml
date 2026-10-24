@@ -209,7 +209,10 @@ spec = "https://wicg.github.io/overscroll-behavior/#overscroll-behavior-properti
 kind = "two_properties"
 
 [container]
-engine = "gecko"
+# VIPER-PATCH(servo-container-queries): servo builds parse the `container`
+# shorthand too (CSS Conditional 5 section 5.3), behind the preference of
+# its two longhands; upstream builds it for Gecko only.
+servo_pref = "layout.container-queries.enabled"
 sub_properties = ["container-name", "container-type"]
 spec = "https://drafts.csswg.org/css-contain-3/#container-shorthand"
 
