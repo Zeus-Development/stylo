@@ -2493,7 +2493,8 @@ pub mod font {
                 font_style: font_style::SpecifiedValue::system_font(sys),
                 font_width: font_width::SpecifiedValue::system_font(sys),
                 font_weight: font_weight::SpecifiedValue::system_font(sys),
-                line_height: LineHeight::normal(),
+                // VIPER-PATCH(line-height-number-f64): the boxed longhand.
+                line_height: Box::new(LineHeight::normal()),
                 font_kerning: font_kerning::get_initial_specified_value(),
                 font_language_override: font_language_override::get_initial_specified_value(),
                 font_size_adjust: font_size_adjust::get_initial_specified_value(),
@@ -2562,7 +2563,8 @@ pub mod font {
             font_width: unwrap_or_initial!(font_width, width),
             font_variant_caps: unwrap_or_initial!(font_variant_caps, variant_caps),
             font_size: size,
-            line_height: line_height.unwrap_or(LineHeight::normal()),
+            // VIPER-PATCH(line-height-number-f64): the boxed longhand.
+            line_height: Box::new(line_height.unwrap_or(LineHeight::normal())),
             font_family: family,
             font_optical_sizing: font_optical_sizing::get_initial_specified_value(),
             font_variation_settings: font_variation_settings::get_initial_specified_value(),

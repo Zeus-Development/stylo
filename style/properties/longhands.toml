@@ -1267,6 +1267,9 @@ affects = "paint"
 [line-height]
 type = "LineHeight"
 initial = "computed::LineHeight::normal()"
+# VIPER-PATCH(line-height-number-f64): the specified number keeps its `f64`
+# beside the parsed number, so the declaration is boxed.
+boxed = true
 struct = "font"
 spec = "https://drafts.csswg.org/css2/visudet.html#propdef-line-height"
 servo_restyle_damage = "rebuild_box"

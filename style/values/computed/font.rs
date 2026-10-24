@@ -1475,7 +1475,79 @@ impl ToAnimatedValue for FontWidth {
 }
 
 /// A computed value for the `line-height` property.
+#[cfg(not(feature = "servo"))]
 pub type LineHeight = generics::GenericLineHeight<NonNegativeNumber, NonNegativeLength>;
+
+/// VIPER-PATCH(line-height-number-f64): a computed value for the
+/// `line-height` property whose `<number>` is a [`LineHeightNumber`].
+#[cfg(feature = "servo")]
+pub type LineHeight = generics::GenericLineHeight<LineHeightNumber, NonNegativeLength>;
+
+/// VIPER-PATCH(line-height-number-f64): the computed `<number>` of
+/// `line-height`, non-negative, in `f64`.
+///
+/// CSS Inline 3 section 5.1 makes the used line height the number
+/// multiplied by the element's computed font size, and CSS Values 4
+/// section 10.12 lets an implementation keep a `<number>` and the result
+/// of a math function at any precision. Upstream keeps the number in `f32`,
+/// so `calc(20 / 12)` times 12px is a little under 20px and a
+/// line height rounded to a fixed-point unit loses a unit. Servo builds keep
+/// the number as written, in `f64`, and evaluate a math function of numbers
+/// in `f64` (the specified `line-height`'s `LineHeightNumber`); the other
+/// builds keep upstream's `f32`, which their C layout of the value needs.
+/// Serialization writes the number as upstream does, from its `f32`.
+#[cfg(feature = "servo")]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    Deserialize,
+    MallocSizeOf,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ToShmem,
+)]
+#[repr(transparent)]
+pub struct LineHeightNumber(pub f64);
+
+#[cfg(feature = "servo")]
+impl ToCss for LineHeightNumber {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
+        (self.0 as f32).to_css(dest)
+    }
+}
+
+#[cfg(feature = "servo")]
+impl ToTyped for LineHeightNumber {
+    fn to_typed(&self, dest: &mut ThinVec<TypedValue>) -> Result<(), ()> {
+        (self.0 as f32).to_typed(dest)
+    }
+}
+
+#[cfg(feature = "servo")]
+impl ToAnimatedValue for LineHeightNumber {
+    type AnimatedValue = Self;
+
+    #[inline]
+    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self {
+        self
+    }
+
+    /// An interpolated number is clamped to zero, as `NonNegative` does.
+    #[inline]
+    fn from_animated_value(animated: Self) -> Self {
+        Self(animated.0.max(0.))
+    }
+}
+
+#[cfg(feature = "servo")]
+impl style_traits::SpecifiedValueInfo for LineHeightNumber {}
 
 impl ToResolvedValue for LineHeight {
     type ResolvedValue = Self;
@@ -1503,7 +1575,10 @@ impl ToResolvedValue for LineHeight {
         {
             if let LineHeight::Number(num) = &self {
                 let size = context.style.get_font().clone_font_size().computed_size();
-                LineHeight::Length(NonNegativeLength::new(size.px() * num.0))
+                // VIPER-PATCH(line-height-number-f64): the product of the
+                // `f64` number, in `f64`, then rounded once to `f32`.
+                let product = f64::from(size.px()) * num.0;
+                LineHeight::Length(NonNegativeLength::new(product as f32))
             } else {
                 self
             }

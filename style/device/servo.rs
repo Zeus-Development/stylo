@@ -138,7 +138,11 @@ impl Device {
         (match font.line_height {
             // TODO: compute `normal` from the font metrics
             LineHeight::Normal => CSSPixelLength::new(0.),
-            LineHeight::Number(number) => font.font_size.computed_size() * number.0,
+            // VIPER-PATCH(line-height-number-f64): the `f64` number times
+            // the font size, in `f64`, rounded once to `f32`.
+            LineHeight::Number(number) => CSSPixelLength::new(
+                (f64::from(font.font_size.computed_size().px()) * number.0) as f32,
+            ),
             LineHeight::Length(length) => length.0,
         })
         .into()

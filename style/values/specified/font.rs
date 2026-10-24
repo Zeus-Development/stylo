@@ -7,7 +7,8 @@
 use crate::context::QuirksMode;
 use crate::derives::*;
 use crate::parser::{Parse, ParserContext};
-use crate::typed_om::NumericBaseType;
+// VIPER-PATCH(line-height-number-f64): `LineHeightNumber`'s Typed OM value.
+use crate::typed_om::{NumericBaseType, ToTyped, TypedValue};
 use crate::values::computed::font::{FamilyName, FontFamilyList, SingleFontFamily};
 use crate::values::computed::Percentage as ComputedPercentage;
 use crate::values::computed::{font as computed, Length, NonNegativeLength};
@@ -32,6 +33,8 @@ use std::fmt::{self, Write};
 use style_traits::values::specified::AllowedNumericType;
 use style_traits::{CssWriter, KeywordsCollectFn, ParseError};
 use style_traits::{SpecifiedValueInfo, StyleParseErrorKind, ToCss};
+// VIPER-PATCH(line-height-number-f64): `LineHeightNumber`'s Typed OM value.
+use thin_vec::ThinVec;
 
 // FIXME(emilio): The system font code is copy-pasta, and should be cleaned up.
 macro_rules! system_font_methods {
@@ -1968,22 +1971,154 @@ impl From<MozScriptSizeMultiplier> for f32 {
 }
 
 /// A specified value for the `line-height` property.
-pub type LineHeight = GenericLineHeight<NonNegativeNumber, NonNegativeLengthPercentage>;
+// VIPER-PATCH(line-height-number-f64): the `<number>` is a
+// `LineHeightNumber`, which keeps the number as written.
+pub type LineHeight = GenericLineHeight<LineHeightNumber, NonNegativeLengthPercentage>;
+
+/// VIPER-PATCH(line-height-number-f64): the specified `<number>` of
+/// `line-height`: the parsed number, which serializes, and the number as
+/// written in `f64` where the text gives it.
+///
+/// `exact` is the number token's text read as `f64`, or a math function of
+/// number tokens combined by `+`, `-`, `*`, `/`, parentheses and nested
+/// `calc()` evaluated in `f64` (CSS Values 4 sections 10.1 and 10.12 let
+/// a number keep any precision). It is `None` for a math function of
+/// another form (percentages, other functions, constants), whose `f32`
+/// value stands. Servo builds compute the number from `exact` (the
+/// computed `LineHeightNumber`).
+#[derive(Clone, Debug, MallocSizeOf, PartialEq, ToShmem)]
+pub struct LineHeightNumber {
+    number: NonNegativeNumber,
+    exact: Option<f64>,
+}
+
+impl LineHeightNumber {
+    /// The parsed `number`, with `text`, its source, read as `f64`.
+    fn new(number: NonNegativeNumber, text: &str) -> Self {
+        Self {
+            number,
+            exact: exact_number(text),
+        }
+    }
+
+    /// The computed number from `value`, the parsed number's computed
+    /// `f32`: in servo builds the `f64` as written when it is within the
+    /// rounding of `f32` arithmetic of `value` (so a clamped or otherwise
+    /// resolved number keeps `value`), else `value`.
+    #[cfg(feature = "servo")]
+    fn to_computed(&self, value: f32) -> computed::LineHeightNumber {
+        let close = |exact: &f64| (exact - f64::from(value)).abs() <= f64::from(value) * 1e-6;
+        computed::LineHeightNumber(self.exact.filter(close).unwrap_or(f64::from(value)))
+    }
+
+    #[cfg(not(feature = "servo"))]
+    fn to_computed(&self, value: f32) -> computed::NonNegativeNumber {
+        NonNegative(value)
+    }
+}
+
+impl ToCss for LineHeightNumber {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: Write,
+    {
+        self.number.to_css(dest)
+    }
+}
+
+impl ToTyped for LineHeightNumber {
+    fn to_typed(&self, dest: &mut ThinVec<TypedValue>) -> Result<(), ()> {
+        self.number.to_typed(dest)
+    }
+}
+
+impl SpecifiedValueInfo for LineHeightNumber {
+    const SUPPORTED_TYPES: u8 = NonNegativeNumber::SUPPORTED_TYPES;
+
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        NonNegativeNumber::collect_completion_keywords(f);
+    }
+}
+
+/// VIPER-PATCH(line-height-number-f64): `text`, a `<number>` that parsed,
+/// evaluated in `f64` (see [`LineHeightNumber`]); `None` for another form
+/// or a result that is not finite.
+fn exact_number(text: &str) -> Option<f64> {
+    let mut input = Parser::new(text);
+    let value = exact_sum(&mut input).ok()?;
+    value.is_finite().then_some(value)
+}
+
+/// VIPER-PATCH(line-height-number-f64): a sum of products, to the end of
+/// `input`.
+fn exact_sum(input: &mut Parser) -> Result<f64, ()> {
+    let mut value = exact_product(input)?;
+    while !input.is_exhausted() {
+        let sign = match input.next() {
+            Ok(Token::Delim('+')) => 1.0,
+            Ok(Token::Delim('-')) => -1.0,
+            _ => return Err(()),
+        };
+        value += sign * exact_product(input)?;
+    }
+    Ok(value)
+}
+
+/// VIPER-PATCH(line-height-number-f64): a product of operands.
+fn exact_product(input: &mut Parser) -> Result<f64, ()> {
+    let mut value = exact_operand(input)?;
+    loop {
+        let op = input.try_parse(|input| match input.next() {
+            Ok(&Token::Delim(op)) if op == '*' || op == '/' => Ok(op),
+            _ => Err(()),
+        });
+        match op {
+            Ok('*') => value *= exact_operand(input)?,
+            Ok(_) => value /= exact_operand(input)?,
+            Err(()) => return Ok(value),
+        }
+    }
+}
+
+/// VIPER-PATCH(line-height-number-f64): a number token's text read as
+/// `f64`, a parenthesized sum, or a nested `calc()`.
+fn exact_operand(input: &mut Parser) -> Result<f64, ()> {
+    input.skip_whitespace();
+    let start = input.position();
+    let nested = match input.next().map_err(|_| ())? {
+        Token::Number { .. } => false,
+        Token::ParenthesisBlock => true,
+        Token::Function(name) if name.eq_ignore_ascii_case("calc") => true,
+        _ => return Err(()),
+    };
+    if !nested {
+        return input.slice_from(start).parse().map_err(|_| ());
+    }
+    input
+        .parse_nested_block(|input| exact_sum(input).map_err(cssparser::ParseError::custom))
+        .map_err(|_: cssparser::ParseError<()>| ())
+}
 
 /// Parses a line height <number> value. Percentages in <number>-typed calc expressions
 /// are allowed in the `line-height` property, relative to the computed value of 1em.
 /// https://drafts.csswg.org/css-inline/#line-height-property
+// VIPER-PATCH(line-height-number-f64): the number keeps its source text's
+// value (`LineHeightNumber`).
 fn parse_line_height_number(
     context: &ParserContext,
     input: &mut Parser,
-) -> Result<NonNegativeNumber, ParseError> {
-    parse_number_with_clamping_mode(
+) -> Result<LineHeightNumber, ParseError> {
+    let start = input.position();
+    let number = parse_number_with_clamping_mode(
         context,
         input,
         AllowedNumericType::NonNegative,
         PercentageContext::allowed_with_hint(NumericBaseType::Length),
-    )
-    .map(NonNegative::<Number>)
+    )?;
+    Ok(LineHeightNumber::new(
+        NonNegative::<Number>(number),
+        input.slice_from(start),
+    ))
 }
 
 impl Parse for LineHeight {
@@ -2070,7 +2205,10 @@ impl ToComputedValue for LineHeight {
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
         match self {
             GenericLineHeight::Normal => GenericLineHeight::Normal,
-            GenericLineHeight::Number(number) => {
+            // VIPER-PATCH(line-height-number-f64): the computed number
+            // from the number as written (`LineHeightNumber::to_computed`).
+            GenericLineHeight::Number(line_height_number) => {
+                let number = &line_height_number.number;
                 let value = match number.as_calc() {
                     None => number.to_computed_value(context).0,
                     Some(calc) => {
@@ -2092,7 +2230,8 @@ impl ToComputedValue for LineHeight {
                             .clamp(crate::values::normalize(value).min(f32::MAX))
                     },
                 };
-                GenericLineHeight::Number(NonNegative(value))
+                // VIPER-PATCH(line-height-number-f64): see above.
+                GenericLineHeight::Number(line_height_number.to_computed(value))
             },
             GenericLineHeight::Length(non_negative_lp) => {
                 let result = match non_negative_lp.0 {
@@ -2177,8 +2316,23 @@ impl ToComputedValue for LineHeight {
     fn from_computed_value(computed: &Self::ComputedValue) -> Self {
         match *computed {
             GenericLineHeight::Normal => GenericLineHeight::Normal,
+            // VIPER-PATCH(line-height-number-f64): the number back from its
+            // computed value, `f64` in servo builds.
+            #[cfg(feature = "servo")]
             GenericLineHeight::Number(ref number) => {
-                GenericLineHeight::Number(NonNegativeNumber::from_computed_value(number))
+                let value = NonNegative(Number::new(number.0 as f32));
+                GenericLineHeight::Number(LineHeightNumber {
+                    number: value,
+                    exact: Some(number.0),
+                })
+            },
+            #[cfg(not(feature = "servo"))]
+            GenericLineHeight::Number(ref number) => {
+                let number = NonNegativeNumber::from_computed_value(number);
+                GenericLineHeight::Number(LineHeightNumber {
+                    number,
+                    exact: None,
+                })
             },
             GenericLineHeight::Length(ref length) => {
                 GenericLineHeight::Length(NoCalcLength::from_computed_value(&length.0).into())
@@ -2242,5 +2396,57 @@ mod line_height_calc_layout_unit_tests {
         assert_eq!(unit(10.99), 703.0 / 64.0);
         assert_eq!(unit(20.0), 20.0);
         assert_eq!(unit(0.01), 0.0);
+    }
+}
+
+// VIPER-PATCH(line-height-number-f64): the patch's fork test.
+#[cfg(all(test, feature = "servo"))]
+mod line_height_number_f64_tests {
+    use super::{exact_number, LineHeightNumber, Number};
+    use crate::values::generics::NonNegative;
+
+    #[test]
+    fn line_height_number_f64_reads_numbers_as_written() {
+        assert_eq!(exact_number("1.66666667"), Some(1.66666667));
+        assert_eq!(exact_number("2.3478261"), Some(2.3478261));
+        assert_eq!(exact_number(".5e1"), Some(5.0));
+        assert_eq!(exact_number("+1.5"), Some(1.5));
+        // A math function of numbers, in `f64` (CSS Values 4 section 10.1).
+        assert_eq!(exact_number("calc(20 / 12)"), Some(20.0 / 12.0));
+        assert_eq!(exact_number("calc(13/11)"), Some(13.0 / 11.0));
+        assert_eq!(exact_number("CALC( 1 / 3 )"), Some(1.0 / 3.0));
+        // `*` and `/` before `+` and `-`, each from the left (section 10.1).
+        assert_eq!(exact_number("calc(1 + 2 * 3)"), Some(7.0));
+        assert_eq!(exact_number("calc(3 - 1 - 1)"), Some(1.0));
+        assert_eq!(exact_number("calc(8 / 2 / 2)"), Some(2.0));
+        assert_eq!(exact_number("calc((1 + 2) * calc(1 / 3))"), Some(1.0));
+        assert_eq!(exact_number("calc(1 /* a comment */ * 2)"), Some(2.0));
+        // Other forms keep the `f32` value.
+        for other in [
+            "calc(1 + 10%)",
+            "min(1, 2)",
+            "calc(pi)",
+            "calc(1 / 0)",
+            "1e400",
+        ] {
+            assert_eq!(exact_number(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn line_height_number_f64_computes_the_number_as_written() {
+        let computed = |value: f32, text: &str| {
+            LineHeightNumber::new(NonNegative(Number::new(value)), text)
+                .to_computed(value)
+                .0
+        };
+        assert_eq!(computed(20.0 / 12.0, "calc(20 / 12)"), 20.0 / 12.0);
+        assert_eq!(computed(1.666_666_7, "1.66666667"), 1.66666667);
+        assert_eq!(computed(1.3, "1.3"), 1.3);
+        // A value the `f64` does not round to keeps the `f32`: a clamped
+        // negative result, or `f32::MAX` for an infinite one.
+        assert_eq!(computed(0.0, "calc(1 - 2)"), 0.0);
+        assert_eq!(computed(f32::MAX, "calc(1 / 0)"), f64::from(f32::MAX));
+        assert_eq!(computed(5.0, "1"), 5.0);
     }
 }
