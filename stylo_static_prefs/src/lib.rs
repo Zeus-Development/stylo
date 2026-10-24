@@ -21,4 +21,6 @@ fn test_basic_preferences() {
     assert!(pref!("layout.writing-mode.enabled"));
     assert!(pref!("layout.css.grid-template-subgrid-value.enabled"));
     assert!(pref!("layout.container-queries.enabled"));
+    // VIPER-PATCH(servo-container-queries): `style()` queries parse.
+    assert!(pref!("layout.css.style-queries.enabled"));
 }

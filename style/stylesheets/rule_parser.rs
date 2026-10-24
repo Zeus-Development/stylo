@@ -282,7 +282,10 @@ impl AtRuleType {
             "counter-style" if cfg!(feature = "gecko") => Self::CounterStyle,
             "media" => Self::Media,
             "custom-media" if crate::pref!("layout.css.custom-media.enabled") => Self::CustomMedia,
-            "container" if cfg!(feature = "gecko") => Self::Container,
+            // VIPER-PATCH(servo-container-queries): servo builds parse
+            // `@container` too (CSS Conditional 5 section 5.4); upstream
+            // parses it in Gecko builds only.
+            "container" => Self::Container,
             "supports" => Self::Supports,
             "keyframes" => Self::Keyframes(None),
             "-webkit-keyframes" => Self::Keyframes(Some(VendorPrefix::WebKit)),

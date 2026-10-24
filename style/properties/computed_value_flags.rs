@@ -137,6 +137,13 @@ bitflags! {
 
         /// Whether this style uses `sibling-index()`.
         const USES_SIBLING_INDEX = 1 << 27;
+
+        /// VIPER-PATCH(servo-container-queries): whether matching evaluated a
+        /// container condition for this style (a size, name-only or style
+        /// query), so that an embedder knows the style may change with a
+        /// container's size. Upstream flags style queries and container
+        /// units only.
+        const DEPENDS_ON_CONTAINER_QUERY = 1 << 28;
     }
 }
 
@@ -175,6 +182,8 @@ impl ComputedValueFlags {
             | Self::CONSIDERED_NONTRIVIAL_SCOPED_STYLE
             | Self::DEPENDS_ON_CONTAINER_STYLE_QUERY
             | Self::USES_FONT_OR_WM_RELATIVE_UNITS_ON_CONTAINER_QUERIES
+            // VIPER-PATCH(servo-container-queries): set by matching, as above.
+            | Self::DEPENDS_ON_CONTAINER_QUERY
     }
 
     /// Flags corresponding to usage of tree-counting functions.

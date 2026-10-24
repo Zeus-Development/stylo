@@ -344,6 +344,9 @@ impl ContainerCondition {
     where
         E: TElement,
     {
+        // VIPER-PATCH(servo-container-queries): every evaluated condition
+        // marks the style, whatever it queries.
+        invalidation_flags.insert(ComputedValueFlags::DEPENDS_ON_CONTAINER_QUERY);
         let result = self.find_container(element, originating_element_style);
         let condition = match self.condition {
             Some(ref c) => c,
@@ -793,5 +796,93 @@ impl<'a> ContainerSizeQuery<'a> {
             },
             Self::Evaluated(info) => *info,
         }
+    }
+}
+
+// VIPER-PATCH(servo-container-queries): fork tests of `@container`, container
+// units and `style()` queries parsing in servo builds (CSS Conditional 5
+// sections 5.4, 6.2, 7 and 9.1).
+#[cfg(test)]
+mod tests {
+    use crate::context::QuirksMode;
+    use crate::properties::parse_style_attribute;
+    use crate::shared_lock::SharedRwLock;
+    use crate::stylesheets::{AllowImportRules, CssRule, CssRuleType, Origin};
+    use crate::stylesheets::{StylesheetContents, UrlExtraData};
+    use style_traits::ToCss;
+
+    fn url() -> UrlExtraData {
+        UrlExtraData::from(::url::Url::parse("about:blank").unwrap())
+    }
+
+    /// Each top-level rule's container conditions, serialized as
+    /// `conditionText` (None for a rule that is not `@container`).
+    fn conditions(css: &str) -> Vec<Option<String>> {
+        let lock = SharedRwLock::new();
+        let contents = StylesheetContents::from_str(
+            css,
+            url(),
+            Origin::Author,
+            &lock,
+            None,
+            None,
+            QuirksMode::NoQuirks,
+            AllowImportRules::Yes,
+            None,
+        );
+        let guard = lock.read();
+        let rules = &contents.rules.read_with(&guard).0;
+        rules
+            .iter()
+            .map(|rule| match rule {
+                CssRule::Container(rule) => Some(rule.conditions.to_css_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn servo_container_queries_parse_container_rules() {
+        let text = |s: &str| Some(s.to_owned());
+        assert_eq!(
+            conditions(
+                "@container (width > 400px) {} \
+                 @container card (400px <= inline-size <= 800px) {} \
+                 @container a (orientation: portrait), b {} \
+                 @container not (aspect-ratio > 1/2) {} \
+                 @container style(--x: 1) and style(--y) {} \
+                 p {}"
+            ),
+            [
+                text("(width > 400px)"),
+                text("card (400px <= inline-size <= 800px)"),
+                text("a (orientation: portrait), b"),
+                text("not (aspect-ratio > 1 / 2)"),
+                text("style(--x: 1) and style(--y)"),
+                None,
+            ]
+        );
+        // No name and no query, a reserved name, and a bad list are invalid.
+        assert_eq!(
+            conditions("@container {} @container none (width) {} @container a, {}"),
+            [] as [Option<String>; 0]
+        );
+        // An unknown function is <general-enclosed>, kept as written.
+        assert_eq!(conditions("@container foo(bar) {}"), [text("foo(bar)")]);
+    }
+
+    #[test]
+    fn servo_container_queries_parse_container_units() {
+        let url = url();
+        let block = parse_style_attribute(
+            "width: 1cqw; height: calc(2cqh + 1px); margin-left: 3cqi; \
+             padding-top: 4cqb; font-size: max(5cqmin, 1px); gap: 6cqmax",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
+        // `gap` declares `row-gap` and `column-gap`.
+        assert_eq!(block.len(), 7);
     }
 }
