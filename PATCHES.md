@@ -100,7 +100,7 @@ apart from the packaging files.
 | `servo-arc-header-slice` | `servo_arc`: `lib.rs`; detail in [`servo_arc/PATCHES.md`](servo_arc/PATCHES.md) | Soundness: `HeaderSlice` reaches its items through a reference to the sized struct (servo/stylo#210); undefined behaviour under Stacked Borrows | `miri` | Never offered (owner decision) | Viper PR #43 (V10a part 1) | 13 / 137 |
 | `selectors-attr-flag-hook` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_case_sensitive_attribute_flag`, lets a parser refuse the `s` attribute flag while parsing, so `[a=b s]` fails as a parse error of that selector and a forgiving list (`:is()`, `:where()`) drops just that item; Chrome 154 rejects the flag (Viper's selector goldens `attr-flag-s`, `attr-flag-s-nested`, `attr-flag-s-forgiving`); upstream accepts it and has no hook | `viper-style::api fork_patches::attr_flag_hook_rejects_s_while_parsing`, `viper-style::api fork_patches::attr_flag_hook_lets_forgiving_lists_drop_the_item` | Candidate; draft to the owner first | Viper PR #47 (V10a part 2) | 25 / 57 |
 | `element-data-checked` | `stylo`: `data.rs` | Soundness: `ElementDataWrapper::borrow` and `borrow_mut` are safe functions that hand out `&ElementData` and `&mut ElementData` from an `UnsafeCell`, and upstream checks the borrow flag only under `debug_assertions`, so a release build lets safe code alias `&mut`; the flag is now checked in every build, and `try_borrow`/`try_borrow_mut` report a conflict | `viper-style::api fork_patches::element_data_checked_try_borrow_mut_refuses_a_second_borrow` | Candidate; draft to the owner first | Viper V10a part 3a | 47 / 23 |
-| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them); since Viper V13b part 2f1 also `layout.writing-mode.enabled` and `layout.css.grid-template-subgrid-value.enabled` true (Chrome 154 computes `writing-mode` and the `subgrid` value of `grid-template-columns` and `-rows`; upstream's servo defaults drop both declarations); since Viper V10b-6 also `layout.container-queries.enabled` true (Chrome 154 parses `container-type` and `container-name`; servo builds still parse no `@container` rule) | `viper-style::api fork_patches::chrome_prefs_defaults`, and `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute` | Chrome-specific; not offered | Viper V10a part 3b; extended by Viper V13b part 2f1 and V10b-6 | 33 / 6 |
+| `chrome-prefs` | `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Chrome match: compiled defaults instead of run-time preferences, each justified by a Viper test: `layout.threads` 0 (no style thread pool; Viper styles sequentially), `layout.css.has-selector.enabled`, `layout.css.nth-child-of.enabled` and `layout.grid.enabled` true (Chrome 154 parses `:has()`, `:nth-child(An+B of S)` and `display: grid` in stylesheets; upstream's servo defaults refuse them); since Viper V13b part 2f1 also `layout.writing-mode.enabled` and `layout.css.grid-template-subgrid-value.enabled` true (Chrome 154 computes `writing-mode` and the `subgrid` value of `grid-template-columns` and `-rows`; upstream's servo defaults drop both declarations); Viper V10b-6's `layout.container-queries.enabled` moved to `servo-container-queries` in Viper V10b-10a | `viper-style::api fork_patches::chrome_prefs_defaults`, and `fork_patches::chrome_prefs_writing_mode_and_subgrid_compute` | Chrome-specific; not offered | Viper V10a part 3b; extended by Viper V13b part 2f1 and V10b-6 | 27 / 5 |
 | `dom-apis-local-name` | `stylo`: `dom_apis.rs` | Chrome match and consistency: `query_selector`'s fast paths for a lone or rightmost type selector compared `TElement::local_name` for equality, while selector matching asks `Element::has_local_name`; both spots now ask `has_local_name`, so Viper's ASCII case-insensitive names of non-HTML elements hold there too (Chrome 154 matches `foreignobject` and `foreignObject` against SVG's `foreignObject`; Viper's selector goldens `svg-lower-case-name`, `svg-upper-case-name`) | `viper-style::api fork_patches::dom_apis_local_name_matches_mixed_case_svg_names`, and the selector golden suite through `dom_apis` | Candidate; draft to the owner first | Viper V10a part 3a | 17 / 0 |
 | `chrome-font-size-precision` | `stylo`: `values/specified/font.rs` | Chrome match: computed font sizes stay exact in servo builds (Chrome 154: `1.17em` of 16px is 18.72px, `smaller` of 16px is 13.3333px); upstream quantizes them to 10 bits of precision, as Gecko does (18.7188px, 13.3281px), which also shifts the em lengths and line heights derived from them (Viper's computed-value goldens `ua-structure-font-size`, `cascade-inherit-font-size`); Gecko builds still quantize | `viper-style::cascade fork_patches::chrome_font_size_precision`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 11 / 0 |
 | `chrome-display-ruby` | `stylo`: `values/specified/box.rs` | Chrome match: servo builds parse and report `display: ruby` and `ruby-text` (Chrome 154 gives them to `ruby` and `rt` and reports them; Viper's golden `ua-text-display`), and a blockified ruby serializes as `block ruby`; upstream has them in Gecko builds only. The other internal ruby values, which Chrome refuses, and the Gecko ruby style adjustments stay Gecko-only | `viper-style::cascade fork_patches::chrome_display_ruby`, and the computed-value golden suite | Chrome-specific; not offered | Viper V10a part 4 | 19 / 43 |
@@ -125,6 +125,9 @@ apart from the packaging files.
 | `stylesheet-parse-options` | `stylo`: `stylesheets/parse_options.rs` (new), `stylesheets/mod.rs`, `parser.rs`, `selector_parser.rs`, `servo/selector_parser.rs`, `stylesheets/stylesheet.rs`, `properties/declaration_block.rs`, `stylesheets/rule_parser.rs`, `stylesheets/supports_rule.rs`, `stylesheets/scope_rule.rs`; the struct literals of the tests in `servo/chrome_names.rs` and `servo/chrome_after.rs` | Embedder control: `ParseOptions`, a non-exhaustive set of options whose default is upstream's behaviour, is carried by `ParserContext` and by `SelectorParser` (from the context wherever one exists), and set through new `_with_options` forms of `StylesheetContents::from_str`, `Stylesheet::from_str` and `parse_style_attribute`. Its first field, `attribute_s_flag` (default `true`, Selectors 4 section 6.3), is what servo's `SelectorParser` answers to `selectors-attr-flag-hook`'s hook, so an embedder decides per sheet whether the `s` attribute flag parses; upstream always accepts it and has no per-parse options | `viper-style::cascade fork_patches::stylesheet_parse_options_decide_the_s_flag` | Candidate; draft to the owner first | Viper STY-FORK-1 | 167 / 97 |
 | `value-grammar-options` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/supports_rule.rs`, `stylesheets/mod.rs`, `properties/mod.rs`, `values/specified/text.rs`, `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`; the test import of `values/specified/box.rs` | Embedder control and standard grammars: `ParseOptions` gains `value_aliases` (`(property, spelling, keyword)`: every whole identifier of a declared value equal to a listed spelling is replaced by its keyword before the grammar parses) and `refused_values` (`(property, keyword or function)`: a declared value holding a listed identifier or function name at any depth is invalid), both ASCII case-insensitive, in every origin, empty by default, applied in `PropertyDeclaration::parse_into` (style rules, `style` attributes, `@supports` and `CSS.supports`), and `unsupported_values` (the same shape), which only a supports condition reads (`@supports` and `CSS.supports`). Servo builds also parse the standard grammars upstream builds for Gecko or behind `layout.unimplemented`: `text-decoration-line`'s `spelling-error` and `grammar-error` (CSS Text Decoration 4 section 2.1), `text-indent`'s `hanging` and `each-line` (CSS Text 3 and 4 section 9.1), `text-wrap-style` with `pretty` and the `text-wrap` shorthand (CSS Text 4 sections 5.4 and 5.5), and `counter-reset`, `counter-increment` and `counter-set` (CSS Lists 3 section 4) | `viper-style::api value_grammar::value_grammar_options_take_a_test_list` (and `value_grammar_basic_answers`, Viper's Basic lists) | Options: candidate, draft to the owner first; grammars: candidate | Viper STY-FORK-2 | 191 / 153 |
 | `servo-scripting-media-feature` | `stylo`: `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5 section 9.1's `scripting` feature (`none`, `initial-only` or `enabled`), which upstream's servo list lacks; it evaluates to `enabled`, because the embedder runs scripts | `viper-style::api value_grammar::servo_scripting_media_feature_is_enabled` | Candidate; draft to the owner first | Viper STY-FORK-2 (from `chrome-value-parsing`, V10b-6) | 22 / 44 |
+| `to-arc-provenance` | `stylo`: `stylesheets/container_rule.rs`, `values/computed/mod.rs`, `properties/properties.mako.rs` | Soundness: the container lookup rebuilt an `Arc` from `&ComputedValues` with `ComputedValues::to_arc` (`Arc::from_raw_addrefed`), a reference that grants no access to the reference count, undefined behaviour under both of Miri's aliasing models; the lookup now keeps the style it has (the caller's reference, or a clone of the element data's `Arc`), and servo builds drop `to_arc` | `miri` (`viper-style::api containers::a_container_query_matches_under_miri`, under both models) | Candidate; draft to the owner first | Viper V10b-10a | 58 / 0 |
+| `servo-container-queries` | `stylo`: `stylesheets/rule_parser.rs`, `values/specified/length.rs`, `stylesheets/container_rule.rs` (its tests), `properties/computed_value_flags.rs`, `properties/shorthands.toml`, `properties/shorthands.rs`; `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Standard: servo builds parse CSS Conditional 5's `@container` rules (section 5.4), container relative lengths (section 7), `style()` queries (section 6.2) and the `container` shorthand (section 5.3), which upstream builds for Gecko only or leaves off, and a new computed-value flag `DEPENDS_ON_CONTAINER_QUERY` marks every style whose matching evaluated a container condition | `viper-style::api containers::servo_container_queries_evaluate` | Candidate; draft to the owner first | Viper V10b-10a | 40 / 106 |
+| `container-size-px` | `stylo`: `dom.rs`, `stylesheets/container_rule.rs`, `values/specified/length.rs`, `queries/values.rs`, `gecko/wrapper.rs` | Precision: `TElement::query_container_size` answers in CSS px instead of app units (1/60 px), so an embedder's sizes in finer units (1/64 px) compare and compute exactly in size queries and container relative lengths | `viper-style::api containers::container_size_px_compares_exactly` | Candidate; draft to the owner first | Viper V10b-10a | 52 / 27 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -141,7 +144,12 @@ anything makes it reachable.
 
 | Site | Fault | Why unreachable now | Viper register entry |
 | --- | --- | --- | --- |
-| `ComputedValues::to_arc` (`style/properties/properties.mako.rs`), called only from `ContainerCondition`'s container lookup (`style/stylesheets/container_rule.rs`) | Rebuilds an `Arc` with `Arc::from_raw_addrefed` from `&self`, a reference that grants no access to the refcount: the fault `style-struct-arc-borrow` and `stylesheet-contents-arc` fix elsewhere, undefined behaviour under both of Miri's aliasing models | Servo builds parse no `@container` rule (`rule_parser.rs` accepts `container` in Gecko builds only) and no container unit (`cqw` and the others, `values/specified/length.rs`, Gecko builds only), so no container condition exists and no container lookup runs. Since Viper V10b-6 `container-type` and `container-name` parse (`layout.container-queries.enabled` is `true`), which nothing reads in servo builds | `adr:style-container-to-arc` |
+| (none) | | | |
+
+Since Viper V10b-10a (2026-10-24) no site is listed: its last one,
+`ComputedValues::to_arc`, reached by the container lookup once servo builds
+parse `@container`, was removed by `to-arc-provenance`, and the register
+entry `adr:style-container-to-arc` closed.
 
 ## Patch `servo-arc-provenance`
 
@@ -292,13 +300,11 @@ Problem, change, every spot, the Miri commands and the before/after results:
   viewports (156 to 180 of 263) and `grid-19-subgrid` is unchanged, since
   Viper's conversion already gave `subgrid` no explicit tracks. Laying out
   vertical modes and subgrids is still Viper's work, not the patch's.
-- **Extension (Viper V10b-6).** `layout.container-queries.enabled` true:
-  upstream's servo default leaves `container-type` and `container-name`
-  out, which Chrome 154 parses. Servo builds still parse no `@container`
-  rule and no container unit, so `ComputedValues::to_arc` stays
-  unreachable (see "Known unpatched sites"). `test_basic_preferences`
-  also expects the value.
-- **Spots.** `stylo_static_prefs/preferences.toml` (seven values) and
+- **Extension (Viper V10b-6), moved.** `layout.container-queries.enabled`
+  true, so `container-type` and `container-name` parse. Since Viper
+  V10b-10a the line is `servo-container-queries`' (standard container
+  queries), with its marker, test line and proof.
+- **Spots.** `stylo_static_prefs/preferences.toml` (six values) and
   `stylo_static_prefs/src/lib.rs` (the test's expectations).
 - **Fork tests.** `test_basic_preferences`.
 - **Viper proofs.** `chrome_prefs_defaults` (the six values) in the gate's
@@ -307,9 +313,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   thread test `restyle_spawns_no_thread`, and since V13b part 2f1
   `chrome_prefs_writing_mode_and_subgrid_compute` (a stylesheet's
   `writing-mode: vertical-rl` and `grid-template-columns: subgrid` are
-  computed); since V10b-6 `chrome_prefs_defaults` asserts the container
-  queries' preference, and `chrome_layout_properties_parse_and_compute`
-  computes `container-type`.
+  computed); since V10b-6 `chrome_layout_properties_parse_and_compute`
+  computes `container-type` (the preference's assertion moved to
+  `servo_container_queries_evaluate` with the line).
 - **Commands.** `cargo test -p stylo_static_prefs`.
 - **Upstream.** Chrome-specific defaults, so not offered.
 
@@ -1124,6 +1130,100 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
+
+## Patch `to-arc-provenance`
+
+- **Problem.** `ContainerCondition`'s container lookup turned the
+  container's style into an `Arc` with `ComputedValues::to_arc`, which
+  calls `Arc::from_raw_addrefed(self)` on `&self`. That reference covers
+  the values only, not the reference count in front of them: the fault
+  `style-struct-arc-borrow` and `stylesheet-contents-arc` fix elsewhere,
+  undefined behaviour under both of Miri's aliasing models. Servo builds
+  reach it as soon as they parse `@container` (`servo-container-queries`).
+- **Change.** `ContainerLookupResult` gains a lifetime and holds a
+  `ContainerStyle`: `Borrowed` for the style the caller passed down (an
+  originating element's, while a pseudo-element is matched) and `Shared`
+  for a clone of the element data's primary `Arc`; it dereferences to
+  `ComputedValues`. `Context::for_container_query_evaluation` borrows the
+  style instead of taking an `Arc`, as it only ever read it. Servo builds
+  drop `ComputedValues::to_arc`; Gecko's (`gecko.mako.rs`) is unchanged.
+- **Spots.** `style/stylesheets/container_rule.rs` (`ContainerStyle`,
+  `traverse_container`, `valid_container_info`, `find_container`,
+  `matches`), `style/values/computed/mod.rs`
+  (`for_container_query_evaluation`) and
+  `style/properties/properties.mako.rs` (servo's `to_arc`).
+- **Fork tests.** None: a container lookup needs a `TElement` with element
+  data and a stylist, which the fork's tests do not build. All `stylo`
+  library tests pass.
+- **Viper proof.** `miri`: `a_container_query_matches_under_miri` styles a
+  document whose rules match through both lookups (an element's, and a
+  `::before`'s through its originating element's style), under Stacked
+  Borrows and Tree Borrows.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** A generic soundness fix: candidate, draft to the owner
+  first.
+
+## Patch `servo-container-queries`
+
+- **Problem.** Upstream parses `@container` rules
+  (`stylesheets/rule_parser.rs`) and the container relative lengths
+  `cqw`, `cqh`, `cqi`, `cqb`, `cqmin` and `cqmax`
+  (`values/specified/length.rs`) in Gecko builds only, builds the
+  `container` shorthand for Gecko only, and leaves `style()` queries and
+  `container-type` and `container-name` off in servo's preferences. CSS
+  Conditional 5 defines all of them (sections 5.2 to 5.4, 6.2 and 7).
+  Upstream also flags a style that read a `style()` query or a container
+  unit, but not one that read a size or name-only query, so an embedder
+  cannot tell which styles a container's size may change.
+- **Change.** The two `cfg!(feature = "gecko")` guards go; the shorthand
+  is built in servo builds behind `layout.container-queries.enabled`, the
+  preference of its longhands; `layout.container-queries.enabled` (from
+  `chrome-prefs`) and `layout.css.style-queries.enabled` are true. The
+  rules take part in servo's cascade, rule tree and invalidation through
+  the code Gecko builds already use. `ComputedValueFlags` gains
+  `DEPENDS_ON_CONTAINER_QUERY` (bit 28), a cascade input that
+  `ContainerCondition::matches` sets for every condition it evaluates.
+  Units in `@page` stay refused, as in Gecko builds.
+- **Spots.** `style/stylesheets/rule_parser.rs`,
+  `style/values/specified/length.rs`, `style/stylesheets/container_rule.rs`
+  (`matches`, and the test module),
+  `style/properties/computed_value_flags.rs`,
+  `style/properties/shorthands.toml`, `style/properties/shorthands.rs`,
+  `stylo_static_prefs/preferences.toml` and `stylo_static_prefs/src/lib.rs`.
+- **Fork tests.** `servo_container_queries_parse_container_rules` (the
+  preludes and their serialization, invalid preludes dropped,
+  `<general-enclosed>` kept), `servo_container_queries_parse_container_units`,
+  `servo_container_queries_parse_the_container_shorthand` and
+  `test_basic_preferences`.
+- **Viper proof.** `servo_container_queries_evaluate`; Viper's own parse
+  suite and cascade tests hold the rest (V10b-10a).
+- **Commands.** `cargo test -p stylo --lib`, `cargo test -p
+  stylo_static_prefs`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `container-size-px`
+
+- **Problem.** `TElement::query_container_size` answered in app units
+  (1/60 px). An embedder whose layout measures in finer units (1/64 px,
+  say) loses the size's exact value: a 333.328125 px container reads
+  333.333 px, so `(width < 333.33px)` fails and `100cqw` computes the
+  wrong length.
+- **Change.** The trait method answers
+  `Size2D<Option<CSSPixelLength>>`; `ContainerInfo` and
+  `ContainerSizeQueryResult` keep CSS px, the size features read them
+  directly, `cqmin` and `cqmax` compare them with `min` and `max`, and the
+  small-viewport fallback converts its app units to px.
+  `Orientation::eval` is generic over the unit, so media and container
+  queries share it. Gecko's implementation converts its app units, which
+  is exact.
+- **Spots.** `style/dom.rs`, `style/stylesheets/container_rule.rs`,
+  `style/values/specified/length.rs`, `style/queries/values.rs` and
+  `style/gecko/wrapper.rs` (not built by Viper).
+- **Fork tests.** `container_size_px_keeps_sizes_exact`.
+- **Viper proof.** `container_size_px_compares_exactly`.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Generic; a candidate, drafted to the owner first.
 
 ## Retired patches
 
