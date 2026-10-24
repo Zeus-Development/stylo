@@ -128,6 +128,7 @@ apart from the packaging files.
 | `to-arc-provenance` | `stylo`: `stylesheets/container_rule.rs`, `values/computed/mod.rs`, `properties/properties.mako.rs` | Soundness: the container lookup rebuilt an `Arc` from `&ComputedValues` with `ComputedValues::to_arc` (`Arc::from_raw_addrefed`), a reference that grants no access to the reference count, undefined behaviour under both of Miri's aliasing models; the lookup now keeps the style it has (the caller's reference, or a clone of the element data's `Arc`), and servo builds drop `to_arc` | `viper-style::api containers::a_container_query_matches_under_miri` (the gate, named; Miri under both models in the PR's pool Miri job and the nightly slow run) | Candidate; draft to the owner first | Viper V10b-10a | 58 / 0 |
 | `servo-container-queries` | `stylo`: `stylesheets/rule_parser.rs`, `values/specified/length.rs`, `stylesheets/container_rule.rs` (its tests), `properties/computed_value_flags.rs`, `properties/shorthands.toml`, `properties/shorthands.rs`; `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Standard: servo builds parse CSS Conditional 5's `@container` rules (section 5.4), container relative lengths (section 7), `style()` queries (section 6.2) and the `container` shorthand (section 5.3), which upstream leaves out of servo builds (behind its other build feature) or turns off, and a new computed-value flag `DEPENDS_ON_CONTAINER_QUERY` marks every style whose matching evaluated a container condition | `viper-style::api containers::servo_container_queries_evaluate` | Candidate; draft to the owner first | Viper V10b-10a | 40 / 106 |
 | `container-size-px` | `stylo`: `dom.rs`, `stylesheets/container_rule.rs`, `values/specified/length.rs`, `queries/values.rs`, `gecko/wrapper.rs` | Precision: `TElement::query_container_size` answers in CSS px instead of app units (1/60 px), so an embedder's sizes in finer units (1/64 px) compare and compute exactly in size queries and container relative lengths | `viper-style::api containers::container_size_px_compares_exactly` | Candidate; draft to the owner first | Viper V10b-10a | 52 / 27 |
+| `line-height-number-f64` | `stylo`: `values/specified/font.rs`, `values/computed/font.rs`, `device/servo.rs`, `properties/longhands.toml`, `properties/shorthands.rs` | Precision: a unitless `line-height` keeps its number as written: in servo builds the computed number is `f64`, read from the number token's text or from a math function of numbers evaluated in `f64`, so the used line height (CSS Inline 3 section 5.1) is the exact number times the font size (`calc(20 / 12)` of 12px is 20px, where the `f32` number makes it a little less); the specified number keeps the parsed one for serialization, and the declaration is boxed for the extra `f64` | `viper-style::cascade fork_patches::line_height_number_f64` | Candidate; draft to the owner first | Viper V10b-8b | 252 / 51 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1223,6 +1224,40 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `style/gecko/wrapper.rs` (not built by Viper).
 - **Fork tests.** `container_size_px_keeps_sizes_exact`.
 - **Viper proof.** `container_size_px_compares_exactly`.
+- **Commands.** `cargo test -p stylo --lib`.
+- **Upstream.** Generic; a candidate, drafted to the owner first.
+
+## Patch `line-height-number-f64`
+
+- **Problem.** CSS Inline 3 section 5.1 makes a unitless `line-height`'s
+  used value the number times the element's font size. Upstream keeps the
+  computed number in `f32` and folds a `calc()` of numbers in `f32`, so
+  `calc(20 / 12)` of 12px is a little under 20px, and a layout that
+  truncates to a fixed-point unit (1/64 px) loses a unit there; so does a
+  plain number with more digits than `f32` holds (`1.66666667` of 12px).
+- **Change.** In servo builds the computed number is `LineHeightNumber`,
+  an `f64`. The specified number keeps the parsed number (its
+  serialization and `f32` computation are unchanged) and the number as
+  written in `f64`: the number token's text, or a math function of
+  number tokens combined by `+`, `-`, `*`, `/`, parentheses and nested
+  `calc()`, evaluated in `f64` (CSS Values 4 sections 10.1 and 10.12).
+  Any other math function (percentages, other functions, constants) and
+  a result that `f64` does not round to the `f32` value (a clamped or
+  infinite one) keep the `f32` value. The resolved value and the `lh`
+  unit multiply the `f64` number by the font size in `f64`, rounded once
+  to `f32`. The specified value is larger, so the `line-height`
+  declaration is boxed (`longhands.toml`, and the `font` shorthand boxes
+  its longhand). Other builds keep the `f32` computed number.
+- **Spots.** `style/values/specified/font.rs` (`LineHeightNumber`,
+  `exact_number` and its parser, `parse_line_height_number`,
+  `to_computed_value`, `from_computed_value`, the test module),
+  `style/values/computed/font.rs` (the computed type and the resolved
+  value), `style/device/servo.rs` (`calc_line_height`),
+  `style/properties/longhands.toml` and `style/properties/shorthands.rs`.
+- **Fork tests.** `line_height_number_f64_reads_numbers_as_written`,
+  `line_height_number_f64_computes_the_number_as_written`.
+- **Viper proof.** `line_height_number_f64`; Viper's layout multiplies
+  the number in `f64` (its ADR 0024).
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Generic; a candidate, drafted to the owner first.
 
