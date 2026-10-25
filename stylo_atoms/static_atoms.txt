@@ -39,6 +39,7 @@ click
 close
 closing
 color
+color-gamut
 command
 complete
 compositionend
@@ -56,6 +57,7 @@ device-height
 device-pixel-ratio
 device-width
 durationchange
+dynamic-range
 email
 emptied
 end
@@ -68,6 +70,7 @@ fetch
 file
 fill
 fill-opacity
+forced-colors
 formdata
 fullscreenchange
 fullscreenerror
@@ -124,6 +127,8 @@ pointer
 popstate
 postershown
 prefers-color-scheme
+prefers-contrast
+prefers-reduced-motion
 print
 progress
 radio

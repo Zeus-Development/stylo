@@ -14,6 +14,9 @@ use crate::properties::style_structs::Font;
 use crate::properties::ComputedValues;
 use crate::queries::values::PrefersColorScheme;
 use crate::servo::media_features::PointerCapabilities;
+// VIPER-PATCH(servo-device-media-features): the settings of the color and
+// user-preference media features.
+use crate::servo::media_features::DeviceMediaFeatures;
 use crate::values::computed::font::GenericFontFamily;
 use crate::values::computed::{
     CSSPixelLength, Length, LineHeight, LinkParameters, NonNegativeLength,
@@ -75,6 +78,11 @@ pub(super) struct ExtraDeviceData {
     /// The union of the capabilities of all pointer inputs
     #[ignore_malloc_size_of = "Pure stack type"]
     all_pointer_capabilities: PointerCapabilities,
+    // VIPER-PATCH(servo-device-media-features): the embedder's settings.
+    /// The display's and the user's settings the color and user-preference
+    /// media features report.
+    #[ignore_malloc_size_of = "Pure stack type"]
+    device_media_features: DeviceMediaFeatures,
     /// An implementation of a trait which implements support for querying font metrics.
     #[ignore_malloc_size_of = "Owned by embedder"]
     font_metrics_provider: Box<dyn FontMetricsProvider>,
@@ -121,6 +129,8 @@ impl Device {
                 prefers_color_scheme,
                 primary_pointer_capabilities,
                 all_pointer_capabilities,
+                // VIPER-PATCH(servo-device-media-features): the defaults.
+                device_media_features: DeviceMediaFeatures::default(),
                 font_metrics_provider,
             },
         }
@@ -281,8 +291,29 @@ impl Device {
     }
 
     /// Returns whether document colors are enabled.
+    // VIPER-PATCH(servo-device-media-features): the embedder's
+    // `forced-colors` (upstream: always `none`); `active` also makes the
+    // cascade ignore author colors (CSS Color Adjustment 1 section 3).
     pub fn forced_colors(&self) -> ForcedColors {
-        ForcedColors::None
+        self.extra.device_media_features.forced_colors
+    }
+
+    // VIPER-PATCH(servo-device-media-features): the settings' accessors.
+    /// Set the settings behind `color-gamut`, `dynamic-range`,
+    /// `prefers-reduced-motion`, `prefers-contrast` and `forced-colors` on
+    /// this [`Device`].
+    ///
+    /// Note that this does not update any associated `Stylist`. For this you must call
+    /// `Stylist::media_features_change_changed_style` and
+    /// `Stylist::force_stylesheet_origins_dirty`.
+    pub fn set_device_media_features(&mut self, features: DeviceMediaFeatures) {
+        self.extra.device_media_features = features;
+    }
+
+    /// Returns the settings behind the color and user-preference media
+    /// features of this [`Device`].
+    pub fn device_media_features(&self) -> DeviceMediaFeatures {
+        self.extra.device_media_features
     }
 
     /// Returns the default background color.
