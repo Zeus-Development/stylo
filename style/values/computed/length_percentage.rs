@@ -67,6 +67,7 @@ pub enum LengthPercentageTag {
 #[derive(MallocSizeOf)]
 #[repr(C)]
 pub struct LengthPercentage(
+    // VIPER-PATCH(percentage-number-f64): the inline number's type.
     NumericUnion<LengthPercentageTag, PercentageFraction, CalcLengthPercentage>,
 );
 
@@ -334,6 +335,7 @@ impl LengthPercentage {
                 Unpacked::Length(Length::new(v as CSSFloat))
             },
             tagged::Unpacked::Inline(LengthPercentageTag::Percentage, v) => {
+                // VIPER-PATCH(percentage-number-f64): the fraction rounded to `f32`.
                 Unpacked::Percentage(Percentage(v as CSSFloat))
             },
         }
