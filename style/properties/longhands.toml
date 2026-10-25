@@ -132,7 +132,9 @@ affects = "layout"
 # alignment-baseline, baseline-shift and baseline-source go under
 # `ParseOptions::vertical_align_longhand`, so they cascade apart from
 # vertical-align, CSS 2.1's one property; the first takes SVG 1.1's
-# grammar and initial value auto (SVG 1.1 section 10.9.2), servo's values.
+# initial value auto (section 10.9.2) with servo's alignment keywords, and
+# the last affects layout as baseline-source does (a layout reads it where
+# the box's baseline-source, then always auto, is auto).
 [-x-alignment-baseline]
 struct = "box"
 engine = "servo"
@@ -159,7 +161,9 @@ engine = "servo"
 animation_type = "discrete"
 enabled_in = ""
 spec = "https://drafts.csswg.org/css-inline-3/#baseline-source"
-affects = ""
+# VIPER-PATCH(vertical-align-longhand): it affects layout.
+servo_restyle_damage = "rebuild_box"
+affects = "layout"
 
 [accent-color]
 type = "ColorOrAuto"

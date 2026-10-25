@@ -83,12 +83,19 @@ pub struct ParseOptions {
     ///   `-x-alignment-baseline`, `-x-baseline-shift` and
     ///   `-x-baseline-source` instead, so they cascade on their own; the
     ///   first takes SVG 1.1's initial value `auto` ([SVG 1.1 section
-    ///   10.9.2]).
+    ///   10.9.2]) with servo's alignment keywords (`baseline`,
+    ///   `text-bottom`, `middle`, `text-top`). The box's `baseline_source`
+    ///   is then always `auto`, so a layout reads `-x-baseline-source`
+    ///   where it is `auto` (exact in both models: without the option
+    ///   nothing declares the internal longhand).
     ///
     /// Sheets parsed without the option, the user-agent sheets for one,
     /// keep the shorthand. A value substituted from `var()` parses as
     /// without the option, as for `value_aliases`, and `all` does not
-    /// reset the internal longhands, which are not enabled in content.
+    /// reset the internal longhands, which are not enabled in content (nor
+    /// `baseline-source` for layout, then). A declaration block serializes
+    /// them by their internal names, and its `getPropertyValue`,
+    /// `setProperty` and `removeProperty` of the public names miss them.
     ///
     /// [CSS 2.1 section 10.8.1]: https://www.w3.org/TR/CSS21/visudet.html#propdef-vertical-align
     /// [CSS Inline 3 section 4.2]: https://drafts.csswg.org/css-inline-3/#transverse-alignment
@@ -225,14 +232,19 @@ impl ParseOptions {
     /// VIPER-PATCH(vertical-align-longhand): the longhand a declaration of
     /// `id` declares: under `vertical_align_longhand`, the internal
     /// longhand of `alignment-baseline`, `baseline-shift` or
-    /// `baseline-source`; else `id`.
-    pub(crate) fn declared_id(&self, id: LonghandId) -> LonghandId {
+    /// `baseline-source`; else `id`. An embedder reads a computed value
+    /// of one of the three from the longhand this names.
+    pub fn declared_id(&self, id: LonghandId) -> LonghandId {
         if !self.vertical_align_longhand {
             return id;
         }
+        // The internal longhands are servo's (`longhands.toml`).
         match id {
+            #[cfg(feature = "servo")]
             LonghandId::AlignmentBaseline => LonghandId::XAlignmentBaseline,
+            #[cfg(feature = "servo")]
             LonghandId::BaselineShift => LonghandId::XBaselineShift,
+            #[cfg(feature = "servo")]
             LonghandId::BaselineSource => LonghandId::XBaselineSource,
             other => other,
         }
@@ -929,9 +941,10 @@ mod vertical_align_tests {
     use crate::stylesheets::{CssRuleType, UrlExtraData};
 
     fn longhand() -> ParseOptions {
-        let mut options = ParseOptions::default();
-        options.vertical_align_longhand = true;
-        options
+        ParseOptions {
+            vertical_align_longhand: true,
+            ..ParseOptions::default()
+        }
     }
 
     /// A `style` attribute parsed under `options`, serialized.
