@@ -137,7 +137,7 @@ apart from the packaging files.
 | `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `servo/chrome_names.rs`, `servo/chrome_after.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; its name methods receive the enclosing `SelectorParser`, so the selectors an embedder parses in a functional name's arguments keep the sheet's declared namespaces, origin, supports-condition mode and options as the enclosing selector does; without a hook the parser keeps this branch's default name tables (recorded in their own rows), and with one it answers upstream's names and rule where the hook does not. `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy`, and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a; extended by Viper STY-FORK-3a2 | 281 / 335 |
 | `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 142 / 52 |
 | `servo-device-media-features` | `stylo`: `servo/media_features.rs`, `device/servo.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5's `color-gamut` (section 6.4), `dynamic-range` (6.5), `prefers-reduced-motion` (12.1), `prefers-contrast` (12.3) and `forced-colors` (12.4), which upstream's servo list lacks, so a query on one was unknown; each reads the embedder's setting from the `Device` (`DeviceMediaFeatures`, defaulting to `srgb`, `standard`, `no-preference`, `no-preference`, `none`), and `Device::forced_colors` returns its setting instead of a fixed `none` | `viper-style::cascade device::servo_device_media_features_take_the_config` | Candidate; draft to the owner first | Viper STY-FORK-DEVICE-1 | 190 / 118 |
-| `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 110 / 90 |
+| `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own; the box's `baseline_source` is then always `auto`, and a layout reads `-x-baseline-source` where it is | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 121 / 91 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1417,28 +1417,35 @@ Problem, change, every spot, the Miri commands and the before/after results:
     `super`, `top`, `bottom`, a length or a percentage), never `center`,
     `first` or `last` or two values; it still declares the box's
     `alignment_baseline`, `baseline_shift` and `baseline_source` (the last
-    `auto`), which then hold its value alone, so layout reads them as
-    before;
+    `auto`), which then hold its value alone, so layout reads the first two
+    as before;
   - a declaration of `alignment-baseline`, `baseline-shift` or
     `baseline-source` declares the internal longhand
     `-x-alignment-baseline`, `-x-baseline-shift` or `-x-baseline-source`
     instead, CSS-wide keywords and `var()` included, so each cascades on
-    its own; `-x-alignment-baseline` takes SVG 1.1's grammar in servo's
-    values (`auto`, `baseline`, `text-bottom`, `middle`, `text-top`) and
-    its initial value `auto`.
+    its own; `-x-alignment-baseline` takes SVG 1.1's initial value `auto`
+    with servo's alignment keywords (`baseline`, `text-bottom`, `middle`,
+    `text-top`), and `-x-baseline-source` affects layout as
+    `baseline-source` does: since the box's `baseline_source` is then
+    always `auto`, a layout reads `-x-baseline-source` where the box's is
+    `auto`, which is exact in both models (without the option nothing
+    declares the internal longhand).
 
   The internal longhands are not enabled in content: no sheet names them,
-  and `all` does not reset them. Sheets parsed without the option (the
-  user-agent sheets) keep the shorthand. A value substituted from `var()`
-  in `vertical-align` parses as without the option, as for
-  `value_aliases`.
+  and `all` does not reset them (nor, so, `baseline-source` for layout). A
+  declaration block serializes them by their internal names, and its
+  `getPropertyValue`, `setProperty` and `removeProperty` of the public
+  names miss them. Sheets parsed without the option (the user-agent
+  sheets) keep the shorthand. A value substituted from `var()` in
+  `vertical-align` parses as without the option, as for `value_aliases`.
 - **Spots.** `style/stylesheets/parse_options.rs` (the field, its default,
   comparison and debug output, `declared_id`, public so an embedder reads
   the three computed values where they are held, and the test module),
   `style/properties/mod.rs` (`parse_value_into` asks `declared_id`),
   `style/properties/shorthands.rs` (CSS 2.1's grammar in
   `vertical_align::parse_value`) and `style/properties/longhands.toml` (the
-  three internal longhands, servo only).
+  three internal longhands, servo only; `-x-baseline-source` with
+  `baseline-source`'s layout damage).
 - **Fork tests.** `vertical_align_longhand_default_keeps_the_shorthand`,
   `vertical_align_longhand_separates_the_parts` and
   `vertical_align_longhand_options_compare`.
