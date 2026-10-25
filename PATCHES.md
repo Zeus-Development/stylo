@@ -86,7 +86,9 @@ retires `chrome-value-parsing` for `value-grammar-options` (`stylo`) and
 `servo-scripting-media-feature` (`stylo` and `stylo_atoms`, whose marker
 now sits beside the `atom!("scripting")`); Viper's STY-FORK-3a adds
 `selector-names-hook` to `stylo`, and Viper's STY-FORK-3a2 passes its name
-methods the enclosing selector parser.
+methods the enclosing selector parser; Viper's STY-FORK-DEVICE-1 adds
+`servo-device-media-features` to `stylo` and `stylo_atoms` (its five atoms,
+whose marker sits beside the `atom!(...)` entries that use them).
 The other five directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -133,6 +135,7 @@ apart from the packaging files.
 | `line-height-number-f64` | `stylo`: `values/specified/font.rs`, `values/computed/font.rs`, `device/servo.rs`, `properties/longhands.toml`, `properties/shorthands.rs` | Precision: a unitless `line-height` keeps its number as written: in servo builds the computed number is `f64`, read from the number token's text or from a math function of numbers evaluated in `f64`, so the used line height (CSS Inline 3 section 5.1) is the exact number times the font size (`calc(20 / 12)` of 12px is 20px, where the `f32` number makes it a little less); the specified number keeps the parsed one for serialization, and the declaration is boxed for the extra `f64` | `viper-style::cascade fork_patches::line_height_number_f64` | Candidate; draft to the owner first | Viper V10b-8b | 252 / 51 |
 | `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `servo/chrome_names.rs`, `servo/chrome_after.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; its name methods receive the enclosing `SelectorParser`, so the selectors an embedder parses in a functional name's arguments keep the sheet's declared namespaces, origin, supports-condition mode and options as the enclosing selector does; without a hook the parser keeps this branch's default name tables (recorded in their own rows), and with one it answers upstream's names and rule where the hook does not. `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy`, and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a; extended by Viper STY-FORK-3a2 | 281 / 335 |
 | `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 142 / 52 |
+| `servo-device-media-features` | `stylo`: `servo/media_features.rs`, `device/servo.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5's `color-gamut` (section 6.4), `dynamic-range` (6.5), `prefers-reduced-motion` (11.1), `prefers-contrast` (11.3) and `forced-colors` (11.4), which upstream's servo list lacks, so a query on one was unknown; each reads the embedder's setting from the `Device` (`DeviceMediaFeatures`, defaulting to `srgb`, `standard`, `no-preference`, `no-preference`, `none`), and `Device::forced_colors` returns its setting instead of a fixed `none` | `viper-style::cascade device::servo_device_media_features_take_the_config` | Candidate; draft to the owner first | Viper STY-FORK-DEVICE-1 | 190 / 118 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1362,6 +1365,38 @@ Problem, change, every spot, the Miri commands and the before/after results:
   number written (its ADR 0023).
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Generic; a candidate, drafted to the owner first.
+
+## Patch `servo-device-media-features`
+
+- **Problem.** Upstream's servo media feature list lacks Media Queries 5's
+  `color-gamut` (section 6.4), `dynamic-range` (6.5),
+  `prefers-reduced-motion` (11.1), `prefers-contrast` (11.3) and
+  `forced-colors` (11.4), so a query on one parses as `<general-enclosed>`
+  and is unknown: neither `(prefers-reduced-motion: no-preference)` nor its
+  negation matches. Servo's `Device::forced_colors` is fixed at `none`
+  (Gecko's evaluators ask its document).
+- **Change.** The four keyword types (`ColorGamut` and `DynamicRange`
+  ordered from the narrowest, `PrefersReducedMotion`, `PrefersContrast`;
+  `forced-colors` keeps the shared `ForcedColors`) and
+  `DeviceMediaFeatures`, the embedder's five settings, whose default is
+  `srgb`, `standard`, `no-preference`, `no-preference` and `none`. The
+  servo `Device` keeps one (`set_device_media_features`,
+  `device_media_features`), and `forced_colors` returns its setting, so
+  `active` also makes the cascade ignore author colors, as CSS Color
+  Adjustment 1 section 3 asks and Gecko's cascade already does. The five
+  features join the servo list with their atoms. A gamut or range matches
+  every value up to the device's; in a boolean context every gamut and
+  range matches, and `no-preference` and `none` do not (Media Queries 5's
+  boolean-context rule). `Device::new` keeps its signature.
+- **Spots.** `style/servo/media_features.rs` (the types, the evaluators,
+  the five list entries and the test module), `style/device/servo.rs` (the
+  field, its default, the accessors and `forced_colors`) and
+  `stylo_atoms/static_atoms.txt` (the five atoms).
+- **Fork tests.** `servo_device_media_features_evaluate`.
+- **Viper proof.** `servo_device_media_features_take_the_config`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Retired patches
 
