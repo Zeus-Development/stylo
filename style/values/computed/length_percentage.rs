@@ -29,6 +29,8 @@ use crate::values::resolved::{Context as ResolvedContext, ToResolvedValue};
 use crate::values::specified::length::{EqualsPercentage, FontBaseSize, LineHeightBase};
 use crate::values::specified::number::NoCalcNumber;
 use crate::values::specified::percentage::NoCalcPercentage;
+// VIPER-PATCH(percentage-number-f64): the fraction a percentage keeps.
+use crate::values::specified::percentage::PercentageFraction;
 use crate::values::tagged_numeric::{self as tagged, NumericUnion};
 use crate::values::{specified, CSSFloat};
 use crate::{Zero, ZeroNoPercent};
@@ -58,9 +60,15 @@ pub enum LengthPercentageTag {
 ///
 /// cbindgen:derive-eq=false
 /// cbindgen:derive-neq=false
+///
+/// VIPER-PATCH(percentage-number-f64): the inline number is a
+/// `PercentageFraction`, so a percentage keeps the fraction of the number
+/// written ([`Self::to_percentage_fraction`]); a length keeps its `f32`.
 #[derive(MallocSizeOf)]
 #[repr(C)]
-pub struct LengthPercentage(NumericUnion<LengthPercentageTag, f32, CalcLengthPercentage>);
+pub struct LengthPercentage(
+    NumericUnion<LengthPercentageTag, PercentageFraction, CalcLengthPercentage>,
+);
 
 impl ToAnimatedValue for LengthPercentage {
     type AnimatedValue = Self;
@@ -162,7 +170,8 @@ impl LengthPercentage {
     fn map_lengths(&self, mut map_fn: impl FnMut(Length) -> Length) -> Self {
         match self.unpack() {
             Unpacked::Length(l) => Self::new_length(map_fn(l)),
-            Unpacked::Percentage(p) => Self::new_percent(p),
+            // VIPER-PATCH(percentage-number-f64): the fraction as kept.
+            Unpacked::Percentage(_) => self.clone(),
             Unpacked::Calc(lp) => Self::new_calc_unchecked(Box::new(CalcLengthPercentage {
                 clamping_mode: lp.clamping_mode,
                 node: lp.node.map_leaves(|leaf| match *leaf {
@@ -178,7 +187,8 @@ impl LengthPercentage {
     pub fn new_length(length: Length) -> Self {
         Self(NumericUnion::inline(
             LengthPercentageTag::Length,
-            length.px(),
+            // VIPER-PATCH(percentage-number-f64): the `f32` length, widened.
+            PercentageFraction::from(length.px()),
         ))
     }
 
@@ -187,8 +197,37 @@ impl LengthPercentage {
     pub fn new_percent(percentage: Percentage) -> Self {
         Self(NumericUnion::inline(
             LengthPercentageTag::Percentage,
-            percentage.0,
+            // VIPER-PATCH(percentage-number-f64): the `f32` fraction, widened.
+            PercentageFraction::from(percentage.0),
         ))
+    }
+
+    /// VIPER-PATCH(percentage-number-f64): the percentage `percentage`,
+    /// keeping `fraction` (a specified fraction, as written) when it rounds
+    /// to `percentage`, else `percentage`'s own fraction.
+    #[inline]
+    pub fn new_percent_fraction(percentage: Percentage, fraction: PercentageFraction) -> Self {
+        if fraction as CSSFloat != percentage.0 {
+            return Self::new_percent(percentage);
+        }
+        Self(NumericUnion::inline(
+            LengthPercentageTag::Percentage,
+            fraction,
+        ))
+    }
+
+    /// VIPER-PATCH(percentage-number-f64): the fraction a percentage keeps,
+    /// which rounds to [`Self::to_percentage`]'s; `None` for a length or a
+    /// `calc()`. In servo builds it is the fraction of the number written
+    /// in `f64` where the value came from a percentage token (CSS Values 4
+    /// section 5.1.3), so `66.666667%` is not the `f32` fraction's
+    /// `66.66667`; a percentage computed otherwise keeps its `f32`.
+    #[inline]
+    pub fn to_percentage_fraction(&self) -> Option<PercentageFraction> {
+        match self.0.unpack() {
+            tagged::Unpacked::Inline(LengthPercentageTag::Percentage, v) => Some(v),
+            _ => None,
+        }
     }
 
     /// Given a `LengthPercentage` value `v`, construct the value representing
@@ -274,9 +313,12 @@ impl LengthPercentage {
     fn unpack_mut<'a>(&'a mut self) -> UnpackedMut<'a> {
         match self.0.unpack_mut() {
             tagged::UnpackedMut::Boxed(calc) => UnpackedMut::Calc(calc),
+            // VIPER-PATCH(percentage-number-f64): the number rounded to `f32`.
             tagged::UnpackedMut::Inline(t, n) => match *t {
-                LengthPercentageTag::Length => UnpackedMut::Length(Length::new(*n)),
-                LengthPercentageTag::Percentage => UnpackedMut::Percentage(Percentage(*n)),
+                LengthPercentageTag::Length => UnpackedMut::Length(Length::new(*n as CSSFloat)),
+                LengthPercentageTag::Percentage => {
+                    UnpackedMut::Percentage(Percentage(*n as CSSFloat))
+                },
             },
         }
     }
@@ -287,11 +329,12 @@ impl LengthPercentage {
     pub fn unpack<'a>(&'a self) -> Unpacked<'a> {
         match self.0.unpack() {
             tagged::Unpacked::Boxed(calc) => Unpacked::Calc(calc),
+            // VIPER-PATCH(percentage-number-f64): the number rounded to `f32`.
             tagged::Unpacked::Inline(LengthPercentageTag::Length, v) => {
-                Unpacked::Length(Length::new(v))
+                Unpacked::Length(Length::new(v as CSSFloat))
             },
             tagged::Unpacked::Inline(LengthPercentageTag::Percentage, v) => {
-                Unpacked::Percentage(Percentage(v))
+                Unpacked::Percentage(Percentage(v as CSSFloat))
             },
         }
     }
@@ -416,6 +459,9 @@ impl ClampToNonNegative for LengthPercentage {
     fn clamp_to_non_negative(mut self) -> Self {
         match self.unpack_mut() {
             UnpackedMut::Length(l) => Self::new_length(l.clamp_to_non_negative()),
+            // VIPER-PATCH(percentage-number-f64): a positive percentage keeps
+            // its fraction.
+            UnpackedMut::Percentage(p) if p.0 > 0. => self,
             UnpackedMut::Percentage(p) => Self::new_percent(p.clamp_to_non_negative()),
             UnpackedMut::Calc(ref mut c) => {
                 c.clamping_mode = AllowedNumericType::NonNegative;
@@ -427,7 +473,12 @@ impl ClampToNonNegative for LengthPercentage {
 
 impl PartialEq for LengthPercentage {
     fn eq(&self, other: &Self) -> bool {
-        self.unpack() == other.unpack()
+        // VIPER-PATCH(percentage-number-f64): inline numbers compare as
+        // kept, so percentages whose fractions differ are not equal.
+        match (self.0.unpack(), other.0.unpack()) {
+            (tagged::Unpacked::Inline(t, v), tagged::Unpacked::Inline(u, w)) => t == u && v == w,
+            _ => self.unpack() == other.unpack(),
+        }
     }
 }
 
@@ -449,11 +500,8 @@ impl ToAnimatedZero for LengthPercentage {
 
 impl Clone for LengthPercentage {
     fn clone(&self) -> Self {
-        match self.unpack() {
-            Unpacked::Length(l) => Self::new_length(l),
-            Unpacked::Percentage(p) => Self::new_percent(p),
-            Unpacked::Calc(c) => Self::new_calc_unchecked(Box::new(c.clone())),
-        }
+        // VIPER-PATCH(percentage-number-f64): the inline number as kept.
+        Self(self.0.clone())
     }
 }
 
@@ -465,8 +513,12 @@ impl ToComputedValue for specified::LengthPercentage {
             specified::LengthPercentage::Length(ref value) => {
                 LengthPercentage::new_length(value.to_computed_value(context))
             },
+            // VIPER-PATCH(percentage-number-f64): the fraction as written.
             specified::LengthPercentage::Percentage(value) => {
-                LengthPercentage::new_percent(value.to_computed_value(context))
+                LengthPercentage::new_percent_fraction(
+                    value.to_computed_value(context),
+                    value.fraction(),
+                )
             },
             specified::LengthPercentage::Calc(ref calc) => (**calc).to_computed_value(context),
         }

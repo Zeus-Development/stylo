@@ -1426,6 +1426,10 @@ impl LengthPercentage {
         allow_quirks: AllowQuirks,
         allow_anchor: AllowAnchorPositioningFunctions,
     ) -> Result<Self, ParseError> {
+        // VIPER-PATCH(percentage-number-f64): the token's source position,
+        // after the whitespace and comments `next` skips.
+        input.skip_whitespace();
+        let start = input.position();
         let token = input.next()?;
         match *token {
             Token::Dimension {
@@ -1438,8 +1442,11 @@ impl LengthPercentage {
             Token::Percentage { unit_value, .. }
                 if num_context.is_ok(context.parsing_mode, unit_value) =>
             {
-                Ok(LengthPercentage::Percentage(NoCalcPercentage::new(
-                    unit_value,
+                // VIPER-PATCH(percentage-number-f64): the fraction from the
+                // token's text, the number written.
+                let text = input.slice_from(start);
+                Ok(LengthPercentage::Percentage(NoCalcPercentage::from_token(
+                    unit_value, text,
                 )))
             },
             Token::Number { value, .. } if num_context.is_ok(context.parsing_mode, value) => {
