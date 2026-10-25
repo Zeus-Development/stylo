@@ -132,6 +132,7 @@ apart from the packaging files.
 | `container-size-px` | `stylo`: `dom.rs`, `stylesheets/container_rule.rs`, `values/specified/length.rs`, `queries/values.rs`, `gecko/wrapper.rs` | Precision: `TElement::query_container_size` answers in CSS px instead of app units (1/60 px), so an embedder's sizes in finer units (1/64 px) compare and compute exactly in size queries and container relative lengths | `viper-style::api containers::container_size_px_compares_exactly` | Candidate; draft to the owner first | Viper V10b-10a | 52 / 27 |
 | `line-height-number-f64` | `stylo`: `values/specified/font.rs`, `values/computed/font.rs`, `device/servo.rs`, `properties/longhands.toml`, `properties/shorthands.rs` | Precision: a unitless `line-height` keeps its number as written: in servo builds the computed number is `f64`, read from the number token's text or from a math function of numbers evaluated in `f64`, so the used line height (CSS Inline 3 section 5.1) is the exact number times the font size (`calc(20 / 12)` of 12px is 20px, where the `f32` number makes it a little less); the specified number keeps the parsed one for serialization, and the declaration is boxed for the extra `f64` | `viper-style::cascade fork_patches::line_height_number_f64` | Candidate; draft to the owner first | Viper V10b-8b | 252 / 51 |
 | `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `servo/chrome_names.rs`, `servo/chrome_after.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; its name methods receive the enclosing `SelectorParser`, so the selectors an embedder parses in a functional name's arguments keep the sheet's declared namespaces, origin, supports-condition mode and options as the enclosing selector does; without a hook the parser keeps this branch's default name tables (recorded in their own rows), and with one it answers upstream's names and rule where the hook does not. `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy`, and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a; extended by Viper STY-FORK-3a2 | 281 / 335 |
+| `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 128 / 51 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1313,6 +1314,52 @@ Problem, change, every spot, the Miri commands and the before/after results:
   do), with two test implementations.
 - **Viper proof.** `selector_names_hook_in_stylesheets_and_queries`:
   Viper's Basic names in its sheets and its DOM selector APIs alike.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Generic; a candidate, drafted to the owner first.
+
+## Patch `percentage-number-f64`
+
+- **Problem.** CSS Values 4 section 5.1.3 defines a `<percentage>` by
+  the number written. Upstream keeps a percentage as that number divided
+  by 100 in `f32`, so a number with more significant digits than `f32`
+  holds cannot be recovered from it: `66.666667%` is the fraction
+  `0.6666667`, which reads back as `66.66667`, where the number written,
+  rounded to `f32`, is `66.666664`. A layout that resolves a percentage as
+  the number written times its basis over 100 (777px of it is 518px from
+  the read-back number and 517.984375px from the written one, in a
+  1/64 px unit) cannot get the second.
+- **Change.** In servo builds `NoCalcPercentage` keeps its fraction as a
+  `PercentageFraction`, an `f64` (other builds keep upstream's `f32`,
+  which their C layout needs). `LengthPercentage`'s parser reads the
+  percentage token's text (after the whitespace and comments `next`
+  skips) and keeps its number over 100 in `f64` when that rounds to the
+  token's `unit_value`, else the `unit_value` (`from_token`); every other
+  constructor widens its `f32`. `get` rounds to `f32`, so every value
+  servo computes, serializes and reifies is unchanged. The computed
+  `LengthPercentage`'s inline number is a `PercentageFraction` too
+  (lengths keep their `f32`, widened): `new_percent_fraction` keeps the
+  specified fraction when it rounds to the computed percentage (so a
+  clamped or normalized value keeps its own), and
+  `to_percentage_fraction` returns it. `Clone`, `map_lengths` and a
+  positive percentage's `clamp_to_non_negative` keep the fraction, and
+  `PartialEq` compares inline numbers as kept. A percentage computed
+  otherwise (a `calc()`, an interpolation, `from_computed_value`) keeps
+  its `f32`. The computed `LengthPercentage` grows from 8 to 16 bytes in
+  64-bit servo builds, and with it the style structs that hold one (the
+  `Position` struct from 448 to 568 bytes, `Margin` from 72 to 104,
+  `Padding` from 32 to 64, `Border` from 392 to 488).
+- **Spots.** `style/values/specified/percentage.rs`
+  (`PercentageFraction`, `NoCalcPercentage`, `from_token`, `fraction`,
+  `get`, the conversions, the test module), `style/values/specified/length.rs`
+  (`LengthPercentage::parse_internal`), `style/values/computed/length_percentage.rs`
+  (the type, `new_length`, `new_percent`, `new_percent_fraction`,
+  `to_percentage_fraction`, `unpack`, `unpack_mut`, `map_lengths`,
+  `clamp_to_non_negative`, `PartialEq`, `Clone` and the specified value's
+  `to_computed_value`).
+- **Fork tests.** `percentage_number_f64_keeps_the_number_written`,
+  `percentage_number_f64_computes_the_number_written`.
+- **Viper proof.** `percentage_number_f64`; Viper's layout resolves the
+  number written (its ADR 0023).
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Generic; a candidate, drafted to the owner first.
 
