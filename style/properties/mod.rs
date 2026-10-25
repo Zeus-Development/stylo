@@ -968,6 +968,9 @@ impl PropertyDeclaration {
         };
         match non_custom_id.longhand_or_shorthand() {
             Ok(longhand_id) => {
+                // VIPER-PATCH(vertical-align-longhand): the longhand the
+                // embedder's options make the declaration declare.
+                let longhand_id = context.parse_options.declared_id(longhand_id);
                 parse_non_custom_property_declaration_value_into(
                     declarations,
                     context,

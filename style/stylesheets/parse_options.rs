@@ -9,6 +9,8 @@
 //! CSS levels. `ParseOptions::default()` is upstream's behaviour.
 
 use crate::derives::*;
+// VIPER-PATCH(vertical-align-longhand): the longhands `declared_id` maps.
+use crate::properties::LonghandId;
 // VIPER-PATCH(selector-names-hook): the types the hook answers with.
 use crate::selector_parser::{NonTSPseudoClass, PseudoElement, SelectorImpl, SelectorParser};
 use cssparser::{Parser, Token};
@@ -67,6 +69,31 @@ pub struct ParseOptions {
     /// Default `None`: servo's parser keeps its built-in answers.
     #[ignore_malloc_size_of = "static data"]
     pub selector_names: Option<&'static dyn SelectorNames>,
+    /// VIPER-PATCH(vertical-align-longhand): whether `vertical-align` is
+    /// CSS 2.1's one property ([CSS 2.1 section 10.8.1]) instead of CSS
+    /// Inline 3's shorthand of `alignment-baseline`, `baseline-shift` and
+    /// `baseline-source` ([CSS Inline 3 section 4.2]). Default `false`, the
+    /// shorthand. When `true`:
+    /// - `vertical-align` takes CSS 2.1's grammar, one keyword or one
+    ///   length or percentage, and still declares the box's
+    ///   `alignment_baseline`, `baseline_shift` and `baseline_source`,
+    ///   which then hold `vertical-align`'s value alone;
+    /// - declarations of `alignment-baseline`, `baseline-shift` and
+    ///   `baseline-source` declare the internal longhands
+    ///   `-x-alignment-baseline`, `-x-baseline-shift` and
+    ///   `-x-baseline-source` instead, so they cascade on their own; the
+    ///   first takes SVG 1.1's initial value `auto` ([SVG 1.1 section
+    ///   10.9.2]).
+    ///
+    /// Sheets parsed without the option, the user-agent sheets for one,
+    /// keep the shorthand. A value substituted from `var()` parses as
+    /// without the option, as for `value_aliases`, and `all` does not
+    /// reset the internal longhands, which are not enabled in content.
+    ///
+    /// [CSS 2.1 section 10.8.1]: https://www.w3.org/TR/CSS21/visudet.html#propdef-vertical-align
+    /// [CSS Inline 3 section 4.2]: https://drafts.csswg.org/css-inline-3/#transverse-alignment
+    /// [SVG 1.1 section 10.9.2]: https://www.w3.org/TR/SVG11/text.html#AlignmentBaselineProperty
+    pub vertical_align_longhand: bool,
 }
 
 impl Default for ParseOptions {
@@ -76,7 +103,8 @@ impl Default for ParseOptions {
             value_aliases: &[],
             refused_values: &[],
             unsupported_values: &[],
-            selector_names: None, // VIPER-PATCH(selector-names-hook)
+            selector_names: None,           // VIPER-PATCH(selector-names-hook)
+            vertical_align_longhand: false, // VIPER-PATCH(vertical-align-longhand)
         }
     }
 }
@@ -96,6 +124,8 @@ impl PartialEq for ParseOptions {
             && self.refused_values == other.refused_values
             && self.unsupported_values == other.unsupported_values
             && same_hook
+            // VIPER-PATCH(vertical-align-longhand)
+            && self.vertical_align_longhand == other.vertical_align_longhand
     }
 }
 
@@ -109,6 +139,8 @@ impl std::fmt::Debug for ParseOptions {
             .field("refused_values", &self.refused_values)
             .field("unsupported_values", &self.unsupported_values)
             .field("selector_names", &self.selector_names.is_some())
+            // VIPER-PATCH(vertical-align-longhand)
+            .field("vertical_align_longhand", &self.vertical_align_longhand)
             .finish()
     }
 }
@@ -190,6 +222,22 @@ pub(crate) enum ValueRewrite {
 }
 
 impl ParseOptions {
+    /// VIPER-PATCH(vertical-align-longhand): the longhand a declaration of
+    /// `id` declares: under `vertical_align_longhand`, the internal
+    /// longhand of `alignment-baseline`, `baseline-shift` or
+    /// `baseline-source`; else `id`.
+    pub(crate) fn declared_id(&self, id: LonghandId) -> LonghandId {
+        if !self.vertical_align_longhand {
+            return id;
+        }
+        match id {
+            LonghandId::AlignmentBaseline => LonghandId::XAlignmentBaseline,
+            LonghandId::BaselineShift => LonghandId::XBaselineShift,
+            LonghandId::BaselineSource => LonghandId::XBaselineSource,
+            other => other,
+        }
+    }
+
     /// VIPER-PATCH(value-grammar-options): reads the value of a declaration
     /// of `property` from `input`, which is left at its start unless the
     /// value is refused or rewritten.
@@ -869,5 +917,95 @@ mod selector_names_tests {
         };
         assert_ne!(with_names(), no_names);
         assert!(format!("{:?}", with_names()).contains("selector_names: true"));
+    }
+}
+
+// VIPER-PATCH(vertical-align-longhand): the option's declarations.
+#[cfg(all(test, feature = "servo"))]
+mod vertical_align_tests {
+    use super::ParseOptions;
+    use crate::context::QuirksMode;
+    use crate::properties::parse_style_attribute_with_options;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+
+    fn longhand() -> ParseOptions {
+        let mut options = ParseOptions::default();
+        options.vertical_align_longhand = true;
+        options
+    }
+
+    /// A `style` attribute parsed under `options`, serialized.
+    fn declared(options: ParseOptions, css: &str) -> String {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let block = parse_style_attribute_with_options(
+            css,
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+            options,
+        );
+        let mut text = String::new();
+        block.to_css(&mut text).unwrap();
+        text
+    }
+
+    #[test]
+    fn vertical_align_longhand_default_keeps_the_shorthand() {
+        let options = ParseOptions::default();
+        assert!(!options.vertical_align_longhand);
+        let cases = [
+            ("vertical-align: middle", "vertical-align: middle;"),
+            (
+                "vertical-align: first middle 2px",
+                "vertical-align: first middle 2px;",
+            ),
+            ("alignment-baseline: middle", "alignment-baseline: middle;"),
+            ("baseline-shift: 3px", "baseline-shift: 3px;"),
+            ("alignment-baseline: auto", ""),
+        ];
+        for (css, expected) in cases {
+            assert_eq!(declared(options, css), expected, "{css}");
+        }
+    }
+
+    #[test]
+    fn vertical_align_longhand_separates_the_parts() {
+        let cases = [
+            ("vertical-align: middle", "vertical-align: middle;"),
+            ("vertical-align: sub", "vertical-align: sub;"),
+            ("vertical-align: 25%", "vertical-align: 25%;"),
+            ("vertical-align: -8px", "vertical-align: -8px;"),
+            ("vertical-align: inherit", "vertical-align: inherit;"),
+            // CSS 2.1's grammar: one value, and no `center` or `first`.
+            ("vertical-align: middle 2px", ""),
+            ("vertical-align: first", ""),
+            ("vertical-align: center", ""),
+            (
+                "alignment-baseline: middle",
+                "-x-alignment-baseline: middle;",
+            ),
+            ("alignment-baseline: auto", "-x-alignment-baseline: auto;"),
+            (
+                "alignment-baseline: inherit",
+                "-x-alignment-baseline: inherit;",
+            ),
+            ("baseline-shift: 3px", "-x-baseline-shift: 3px;"),
+            ("baseline-shift: var(--a)", "-x-baseline-shift: var(--a);"),
+            ("baseline-source: first", "-x-baseline-source: first;"),
+            (
+                "alignment-baseline: text-top; vertical-align: bottom",
+                "-x-alignment-baseline: text-top; vertical-align: bottom;",
+            ),
+        ];
+        for (css, expected) in cases {
+            assert_eq!(declared(longhand(), css), expected, "{css}");
+        }
+    }
+
+    #[test]
+    fn vertical_align_longhand_options_compare() {
+        assert_ne!(longhand(), ParseOptions::default());
+        assert!(format!("{:?}", longhand()).contains("vertical_align_longhand: true"));
     }
 }

@@ -589,11 +589,31 @@ pub mod vertical_align {
     pub use crate::properties::generated::shorthands::vertical_align::*;
 
     use crate::values::specified::{AlignmentBaseline, BaselineShift, BaselineSource};
+    // VIPER-PATCH(vertical-align-longhand)
+    use crate::values::generics::box_::BaselineShiftKeyword;
 
     pub fn parse_value(
         context: &ParserContext,
         input: &mut Parser,
     ) -> Result<Longhands, ParseError> {
+        // VIPER-PATCH(vertical-align-longhand): under the option, CSS 2.1
+        // section 10.8.1's grammar: one alignment keyword or one shift
+        // other than `center` (CSS Inline 3's), the other parts initial.
+        if context.parse_options.vertical_align_longhand {
+            let alignment = input.try_parse(AlignmentBaseline::parse).ok();
+            let shift = match alignment {
+                Some(_) => BaselineShift::zero(),
+                None => BaselineShift::parse(context, input)?,
+            };
+            if shift == BaselineShift::Keyword(BaselineShiftKeyword::Center) {
+                return Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError));
+            }
+            return Ok(expanded! {
+                baseline_source: BaselineSource::Auto,
+                alignment_baseline: alignment.unwrap_or(AlignmentBaseline::Baseline),
+                baseline_shift: shift,
+            });
+        }
         let mut baseline_source = None;
         let mut alignment_baseline = None;
         let mut baseline_shift = None;

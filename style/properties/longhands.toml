@@ -128,6 +128,39 @@ has_effect_on_gecko_scrollbars = false
 spec = "Internal (not web-exposed)"
 affects = "layout"
 
+# VIPER-PATCH(vertical-align-longhand): where declarations of
+# alignment-baseline, baseline-shift and baseline-source go under
+# `ParseOptions::vertical_align_longhand`, so they cascade apart from
+# vertical-align, CSS 2.1's one property; the first takes SVG 1.1's
+# grammar and initial value auto (SVG 1.1 section 10.9.2), servo's values.
+[-x-alignment-baseline]
+struct = "box"
+engine = "servo"
+animation_type = "discrete"
+enabled_in = ""
+spec = "https://www.w3.org/TR/SVG11/text.html#AlignmentBaselineProperty"
+affects = ""
+keyword = { values = ["auto", "baseline", "text-bottom", "middle", "text-top"] }
+
+[-x-baseline-shift]
+type = "BaselineShift"
+initial = "computed::BaselineShift::zero()"
+struct = "box"
+engine = "servo"
+enabled_in = ""
+spec = "https://drafts.csswg.org/css-inline-3/#baseline-shift"
+affects = ""
+
+[-x-baseline-source]
+type = "BaselineSource"
+initial = "computed::BaselineSource::Auto"
+struct = "box"
+engine = "servo"
+animation_type = "discrete"
+enabled_in = ""
+spec = "https://drafts.csswg.org/css-inline-3/#baseline-source"
+affects = ""
+
 [accent-color]
 type = "ColorOrAuto"
 initial = "generics::color::ColorOrAuto::Auto"
