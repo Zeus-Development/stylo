@@ -181,9 +181,9 @@ fn eval_scripting(_: &Context, query_value: Option<Scripting>) -> bool {
 
 // VIPER-PATCH(servo-device-media-features): the color and user-preference
 // features of Media Queries 5 sections 6.4 (`color-gamut`), 6.5
-// (`dynamic-range`), 11.1 (`prefers-reduced-motion`), 11.3
-// (`prefers-contrast`) and 11.4 (`forced-colors`), which upstream's servo
-// list lacks (Gecko's evaluators ask its document). They read the
+// (`dynamic-range`), 12.1 (`prefers-reduced-motion`), 12.3
+// (`prefers-contrast`) and 12.4 (`forced-colors`), which upstream's servo
+// list lacks (upstream's gecko build reads its document). They read the
 // embedder's values from the `Device` (`DeviceMediaFeatures`). In a
 // boolean context (https://drafts.csswg.org/mediaqueries-5/#mq-boolean-context)
 // each matches unless its value is one the specification makes false:
@@ -212,7 +212,7 @@ pub enum DynamicRange {
     High,
 }
 
-/// A `prefers-reduced-motion` value (Media Queries 5 section 11.1).
+/// A `prefers-reduced-motion` value (Media Queries 5 section 12.1).
 #[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
 #[repr(u8)]
 pub enum PrefersReducedMotion {
@@ -222,7 +222,7 @@ pub enum PrefersReducedMotion {
     Reduce,
 }
 
-/// A `prefers-contrast` value (Media Queries 5 section 11.3).
+/// A `prefers-contrast` value (Media Queries 5 section 12.3).
 #[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
 #[repr(u8)]
 pub enum PrefersContrast {
