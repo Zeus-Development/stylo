@@ -1812,3 +1812,99 @@ pub fn parse_property_declaration_list(
     parser.state.report_errors_if_needed(context, selectors);
     state.output_block
 }
+
+// VIPER-PATCH(engine-gates): a fork test of the standard longhands and
+// shorthands servo builds now parse (PATCHES.md, `engine-gates`).
+#[cfg(test)]
+mod engine_gates_tests {
+    use super::parse_style_attribute;
+    use crate::context::QuirksMode;
+    use crate::properties::PropertyId;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+
+    /// The value `block` declares for `name`, serialized.
+    fn declared(block: &super::PropertyDeclarationBlock, name: &str) -> String {
+        let id = PropertyId::parse_enabled_for_all_content(name).unwrap();
+        let mut text = String::new();
+        block.property_value_to_css(&id, &mut text).unwrap();
+        text
+    }
+
+    #[test]
+    fn engine_gates_parse_the_standard_longhands() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let cases = [
+            ("anchor-name", "--a, --b"),
+            ("anchor-scope", "all"),
+            ("break-after", "left"),
+            ("break-before", "page"),
+            ("break-inside", "avoid"),
+            ("column-fill", "auto"),
+            ("column-rule-color", "red"),
+            ("column-rule-style", "dashed"),
+            ("column-rule-width", "2px"),
+            ("contain-intrinsic-block-size", "auto 30px"),
+            ("contain-intrinsic-inline-size", "none"),
+            ("offset-anchor", "left top"),
+            ("offset-distance", "10%"),
+            ("offset-position", "normal"),
+            ("offset-rotate", "auto 30deg"),
+            ("overflow-anchor", "none"),
+            ("position-anchor", "--a"),
+            ("position-try-order", "most-height"),
+            ("position-visibility", "no-overflow"),
+            ("resize", "both"),
+            ("scroll-snap-align", "center start"),
+            ("scroll-snap-stop", "always"),
+            ("scroll-snap-type", "x mandatory"),
+            ("scrollbar-gutter", "stable both-edges"),
+            ("shape-image-threshold", "0.5"),
+            ("shape-margin", "2px"),
+            ("shape-outside", "circle(50%)"),
+        ];
+        let css: String = cases.iter().map(|(n, v)| format!("{n}: {v}; ")).collect();
+        let block =
+            parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        assert_eq!(block.len(), cases.len());
+        for (name, value) in cases {
+            assert_eq!(declared(&block, name), value, "{name}");
+        }
+    }
+
+    #[test]
+    fn engine_gates_parse_the_shorthands() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let block = parse_style_attribute(
+            "scroll-margin: 1px 2px 3px 4px; scroll-margin-block: 5px 6px; \
+             scroll-margin-inline: 7px 8px; scroll-padding: 1% 2px 3px auto; \
+             scroll-padding-block: 5px 6px; scroll-padding-inline: 7px 8px; \
+             contain-intrinsic-size: 10px auto 20px; -webkit-line-clamp: 3; \
+             column-rule: 2px dashed red; offset: left top path('M 0 0 H 9') 4px; \
+             page-break-before: always; page-break-after: left; page-break-inside: avoid",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
+        // Eight and eight scroll longhands, two intrinsic sizes, line-clamp,
+        // three column rule parts, five offset parts and three breaks.
+        assert_eq!(block.len(), 30);
+        assert_eq!(declared(&block, "scroll-margin-left"), "4px");
+        assert_eq!(declared(&block, "scroll-margin-inline-end"), "8px");
+        assert_eq!(declared(&block, "scroll-padding-top"), "1%");
+        assert_eq!(declared(&block, "scroll-padding-left"), "auto");
+        assert_eq!(declared(&block, "scroll-padding-block-start"), "5px");
+        assert_eq!(declared(&block, "contain-intrinsic-width"), "10px");
+        assert_eq!(declared(&block, "contain-intrinsic-height"), "auto 20px");
+        assert_eq!(declared(&block, "contain-intrinsic-size"), "10px auto 20px");
+        assert_eq!(declared(&block, "-webkit-line-clamp"), "3");
+        assert_eq!(declared(&block, "line-clamp"), "3");
+        assert_eq!(declared(&block, "column-rule"), "2px dashed red");
+        assert_eq!(declared(&block, "offset-position"), "left top");
+        assert_eq!(declared(&block, "offset-distance"), "4px");
+        // CSS Fragmentation 3 section 3.4: `always` is `page`.
+        assert_eq!(declared(&block, "break-before"), "page");
+        assert_eq!(declared(&block, "page-break-before"), "always");
+        assert_eq!(declared(&block, "break-inside"), "avoid");
+    }
+}

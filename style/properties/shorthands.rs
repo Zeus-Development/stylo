@@ -664,7 +664,7 @@ pub mod vertical_align {
     }
 }
 
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(engine-gates): built in servo builds too (CSS Motion Path 1).
 pub mod offset {
     use super::*;
     pub use crate::properties::generated::shorthands::offset::*;
@@ -833,7 +833,7 @@ pub mod columns {
     }
 }
 
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(engine-gates): built in servo builds too (CSS Multi-column 1).
 pub mod column_rule {
     pub use crate::properties::generated::shorthands::column_rule::*;
 

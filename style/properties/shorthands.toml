@@ -19,19 +19,19 @@ rule_types_allowed = ["style", "keyframe", "page", "scope", "position-try"]
 kind = "two_properties"
 
 [scroll-margin]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["scroll-margin-top", "scroll-margin-right", "scroll-margin-bottom", "scroll-margin-left"]
 spec = "https://drafts.csswg.org/css-scroll-snap-1/#propdef-scroll-margin"
 kind = "four_sides"
 
 [scroll-margin-block]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["scroll-margin-block-start", "scroll-margin-block-end"]
 spec = "https://drafts.csswg.org/css-scroll-snap-1/#propdef-scroll-margin-block"
 kind = "two_properties"
 
 [scroll-margin-inline]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["scroll-margin-inline-start", "scroll-margin-inline-end"]
 spec = "https://drafts.csswg.org/css-scroll-snap-1/#propdef-scroll-margin-inline"
 kind = "two_properties"
@@ -55,19 +55,19 @@ rule_types_allowed = ["style", "keyframe", "page", "scope", "position-try"]
 kind = "two_properties"
 
 [scroll-padding]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["scroll-padding-top", "scroll-padding-right", "scroll-padding-bottom", "scroll-padding-left"]
 spec = "https://drafts.csswg.org/css-scroll-snap-1/#propdef-scroll-padding"
 kind = "four_sides"
 
 [scroll-padding-block]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["scroll-padding-block-start", "scroll-padding-block-end"]
 spec = "https://drafts.csswg.org/css-scroll-snap-1/#propdef-scroll-padding-block"
 kind = "two_properties"
 
 [scroll-padding-inline]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["scroll-padding-inline-start", "scroll-padding-inline-end"]
 spec = "https://drafts.csswg.org/css-scroll-snap-1/#propdef-scroll-padding-inline"
 kind = "two_properties"
@@ -221,25 +221,25 @@ sub_properties = ["alignment-baseline", "baseline-shift", "baseline-source"]
 spec = "https://drafts.csswg.org/css-inline-3/#transverse-alignment"
 
 [page-break-before]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 flags = "IS_LEGACY_SHORTHAND"
 sub_properties = ["break-before"]
 spec = "https://drafts.csswg.org/css-break-3/#page-break-properties"
 
 [page-break-after]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 flags = "IS_LEGACY_SHORTHAND"
 sub_properties = ["break-after"]
 spec = "https://drafts.csswg.org/css-break-3/#page-break-properties"
 
 [page-break-inside]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 flags = "IS_LEGACY_SHORTHAND"
 sub_properties = ["break-inside"]
 spec = "https://drafts.csswg.org/css-break-3/#page-break-properties"
 
 [offset]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["offset-path", "offset-distance", "offset-rotate", "offset-anchor", "offset-position"]
 spec = "https://drafts.fxtf.org/motion-1/#offset-shorthand"
 
@@ -288,7 +288,7 @@ rule_types_allowed = ["style", "keyframe", "scope", "position-try"]
 kind = "two_properties"
 
 [contain-intrinsic-size]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["contain-intrinsic-width", "contain-intrinsic-height"]
 spec = "https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override"
 kind = "two_properties"
@@ -484,7 +484,7 @@ spec = "https://drafts.csswg.org/css-multicol/#propdef-columns"
 servo_pref = "layout.columns.enabled"
 
 [column-rule]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 sub_properties = ["column-rule-width", "column-rule-style", "column-rule-color"]
 spec = "https://drafts.csswg.org/css-multicol/#propdef-column-rule"
 derive_serialize = true
@@ -568,7 +568,7 @@ spec = "https://compat.spec.whatwg.org/#the-webkit-text-stroke"
 derive_serialize = true
 
 [-webkit-line-clamp]
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see scroll-snap-type in longhands.toml.
 flags = "IS_LEGACY_SHORTHAND ALLOWS_DISABLED_SUBPROPERTIES"
 sub_properties = ["line-clamp"]
 spec = "https://drafts.csswg.org/css-overflow-4/#webkit-line-clamp"
