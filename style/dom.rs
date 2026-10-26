@@ -559,6 +559,18 @@ pub trait TElement:
         _: &SharedStyleContext,
     ) -> Option<Arc<Locked<PropertyDeclarationBlock>>>;
 
+    /// VIPER-PATCH(pseudo-animation-rule): the animation rule of the
+    /// element's pseudo-element `pseudo`, which matching the pseudo-element
+    /// adds, so that its after-change style includes its running animations
+    /// (CSS Transitions 1 section 3). None by default, upstream's answer.
+    fn pseudo_animation_rule(
+        &self,
+        _: &SharedStyleContext,
+        _: &PseudoElement,
+    ) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
+        None
+    }
+
     /// Get this element's transition rule.
     fn transition_rule(
         &self,

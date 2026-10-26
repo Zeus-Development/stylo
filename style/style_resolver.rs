@@ -588,12 +588,23 @@ where
 
         // NB: We handle animation rules for ::before and ::after when
         // traversing them.
+        //
+        // VIPER-PATCH(pseudo-animation-rule): an element that keeps its
+        // pseudo-elements' animations gives them here, so that the
+        // pseudo-element's after-change style includes its running
+        // animations (CSS Transitions 1 section 3); upstream passed none.
+        let animation_declarations = crate::properties::AnimationDeclarations {
+            animations: self
+                .element
+                .pseudo_animation_rule(self.context.shared, pseudo_element),
+            transitions: None,
+        };
         stylist.push_applicable_declarations(
             self.element,
             Some(pseudo_element),
             None,
             None,
-            /* animation_declarations = */ Default::default(),
+            animation_declarations, // VIPER-PATCH(pseudo-animation-rule)
             self.rule_inclusion,
             &mut applicable_declarations,
             &mut matching_context,
