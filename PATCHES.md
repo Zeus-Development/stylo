@@ -140,6 +140,7 @@ apart from the packaging files.
 | `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own; the box's `baseline_source` is then always `auto`, and a layout reads `-x-baseline-source` where it is | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 121 / 91 |
 | `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built only for upstream's other engine, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f | 66 / 96 |
 | `normal-color-scheme-option` | `stylo`: `device/servo.rs` | Embedder control: CSS Color Adjustment 1 section 2.1 renders an element whose `color-scheme` is `normal` (it lists no scheme) in the user agent's default scheme, and upstream's servo `Device` always uses the user's preferred one for its system colours and `light-dark()`; the `Device` gains `NormalColorScheme` (`Preferred`, upstream's answer and the default, `Light` or `Dark`), read only for `normal`, so a listed scheme (`light`, `dark`, `light dark`) still follows the author and the preference | `viper-style::cascade device::normal_color_scheme_takes_the_config` | Candidate; draft to the owner first | Viper STY-FORK-SCHEME-1 | 53 / 82 |
+| `animation-names-continue` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 3 runs one animation for each name of `animation-name`, and upstream's servo `maybe_start_animations` returned from its loop over the names after updating the first name that matches a running animation, so every later name was neither started (a name added after a running one) nor updated (a later name's changed `animation-*` values, such as a pause); the loop now goes on with the next name | `viper-style::animation css_animation_cases` (cases `name-added`, `later-name-paused`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 7 / 0 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1535,6 +1536,31 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Embedder control, so a candidate; a draft goes to the
   Viper owner first.
+
+## Patch `animation-names-continue`
+
+- **Problem.** CSS Animations 1 section 3 runs one animation for each name
+  of `animation-name`. Upstream's servo `maybe_start_animations` walks the
+  names, and when a name matches an animation the element already runs it
+  updates that animation and returns from the whole function. Every name
+  after it is then neither started nor updated: `animation: k 10s, m 1s`
+  set on an element that runs `k` never starts `m`, and a later name's
+  changed `animation-*` values (a pause, a new duration) are ignored.
+- **Change.** The loop over the names is labelled, and the match goes on
+  with the next name (`continue 'names`) instead of returning. A name
+  without a running animation is pushed as before.
+- **Spots.** `style/servo/animation.rs` (`maybe_start_animations`: the
+  loop's label and the `continue`).
+- **Fork tests.** None: starting an animation needs a `TElement`, a
+  stylist and a style resolver, which the fork's tests do not build. All
+  53 `stylo` library tests pass.
+- **Viper proof.** `css_animation_cases` (the `animation` test binary),
+  cases `name-added` (a name added after a running one starts at the
+  restyle) and `later-name-paused` (pausing the second name keeps its
+  value); both fail without the patch.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Retired patches
 

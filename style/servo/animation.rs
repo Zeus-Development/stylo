@@ -1808,7 +1808,9 @@ pub fn maybe_start_animations<E>(
     E: TElement,
 {
     let style = new_style.get_ui();
-    for (i, name) in style.animation_name_iter().enumerate() {
+    // VIPER-PATCH(animation-names-continue): labelled, so that a name that
+    // matches a running animation goes on to the next name.
+    'names: for (i, name) in style.animation_name_iter().enumerate() {
         let name = match name.as_atom() {
             Some(atom) => atom,
             None => continue,
@@ -1913,7 +1915,10 @@ pub fn maybe_start_animations<E>(
             if new_animation.name == existing_animation.name {
                 existing_animation
                     .update_from_other(&new_animation, context.current_time_for_animations);
-                return;
+                // VIPER-PATCH(animation-names-continue): every later name of
+                // `animation-name` still starts or updates its own animation
+                // (CSS Animations 1 section 3); upstream returned here.
+                continue 'names;
             }
         }
 
