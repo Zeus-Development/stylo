@@ -56,6 +56,24 @@ pub trait FontMetricsProvider: Debug + Sync {
     fn base_size_for_generic(&self, generic: GenericFontFamily) -> Length;
 }
 
+// VIPER-PATCH(normal-color-scheme-option): the embedder's choices.
+/// The colour scheme an element whose `color-scheme` is `normal` (or lists
+/// no scheme the user agent supports) uses for system colours and
+/// `light-dark()`. CSS Color Adjustment 1 section 2.1 renders such an
+/// element in the user agent's default scheme.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NormalColorScheme {
+    /// The user's preferred scheme (`prefers-color-scheme`): upstream's
+    /// behaviour, the default.
+    #[default]
+    Preferred,
+    /// Always the light scheme.
+    Light,
+    /// Always the dark scheme.
+    Dark,
+}
+
 #[derive(Debug, MallocSizeOf)]
 pub(super) struct ExtraDeviceData {
     /// The current media type used by de device.
@@ -83,6 +101,11 @@ pub(super) struct ExtraDeviceData {
     /// media features report.
     #[ignore_malloc_size_of = "Pure stack type"]
     device_media_features: DeviceMediaFeatures,
+    // VIPER-PATCH(normal-color-scheme-option): the embedder's scheme for
+    // `color-scheme: normal`.
+    /// The colour scheme an element whose `color-scheme` is `normal` uses.
+    #[ignore_malloc_size_of = "Pure stack type"]
+    normal_color_scheme: NormalColorScheme,
     /// An implementation of a trait which implements support for querying font metrics.
     #[ignore_malloc_size_of = "Owned by embedder"]
     font_metrics_provider: Box<dyn FontMetricsProvider>,
@@ -131,6 +154,8 @@ impl Device {
                 all_pointer_capabilities,
                 // VIPER-PATCH(servo-device-media-features): the defaults.
                 device_media_features: DeviceMediaFeatures::default(),
+                // VIPER-PATCH(normal-color-scheme-option): upstream's answer.
+                normal_color_scheme: NormalColorScheme::default(),
                 font_metrics_provider,
             },
         }
@@ -368,6 +393,23 @@ impl Device {
         self.extra.all_pointer_capabilities
     }
 
+    // VIPER-PATCH(normal-color-scheme-option): the accessors.
+    /// Set the colour scheme an element whose `color-scheme` is `normal`
+    /// uses for system colours and `light-dark()` on this [`Device`].
+    ///
+    /// Note that this does not update any associated `Stylist`. For this you must call
+    /// `Stylist::media_features_change_changed_style` and
+    /// `Stylist::force_stylesheet_origins_dirty`.
+    pub fn set_normal_color_scheme(&mut self, scheme: NormalColorScheme) {
+        self.extra.normal_color_scheme = scheme;
+    }
+
+    /// Returns the colour scheme an element whose `color-scheme` is
+    /// `normal` uses.
+    pub fn normal_color_scheme(&self) -> NormalColorScheme {
+        self.extra.normal_color_scheme
+    }
+
     pub(crate) fn is_dark_color_scheme(&self, color_scheme_flags: ColorSchemeFlags) -> bool {
         // Inspired by
         // https://searchfox.org/firefox-main/rev/0a7f146ccac85b8f413264042dcd764028d419ec/widget/nsXPLookAndFeel.cpp#1296
@@ -377,6 +419,17 @@ impl Device {
         // If only one is supported, then use dark mode if it was the supported one.
         if supports_dark_mode != supports_light_mode {
             return supports_dark_mode;
+        }
+
+        // VIPER-PATCH(normal-color-scheme-option): `normal` (neither scheme
+        // listed) uses the embedder's choice; CSS Color Adjustment 1 section
+        // 2.1 leaves it to the user agent. Upstream uses the preference.
+        if !supports_dark_mode {
+            match self.normal_color_scheme() {
+                NormalColorScheme::Preferred => {},
+                NormalColorScheme::Light => return false,
+                NormalColorScheme::Dark => return true,
+            }
         }
 
         // If either both or none are supported, then use the preferred color scheme
@@ -538,5 +591,87 @@ impl Device {
     #[inline]
     pub fn link_parameters(&self) -> Option<&LinkParameters> {
         None
+    }
+}
+
+// VIPER-PATCH(normal-color-scheme-option): `normal` follows the embedder's
+// choice, and a listed scheme still follows the author and the preference.
+#[cfg(test)]
+mod normal_color_scheme_tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct NoMetrics;
+
+    impl FontMetricsProvider for NoMetrics {
+        fn query_font_metrics(
+            &self,
+            _: bool,
+            _: &Font,
+            _: CSSPixelLength,
+            _: QueryFontMetricsFlags,
+        ) -> FontMetrics {
+            FontMetrics::default()
+        }
+
+        fn base_size_for_generic(&self, _: GenericFontFamily) -> Length {
+            Length::new(16.)
+        }
+    }
+
+    fn device(preference: PrefersColorScheme, normal: Option<NormalColorScheme>) -> Device {
+        let mut device = Device::new(
+            MediaType::screen(),
+            QuirksMode::NoQuirks,
+            Size2D::new(800., 600.),
+            Size2D::new(800., 600.),
+            Scale::new(1.),
+            Box::new(NoMetrics),
+            ComputedValues::initial_values_with_font_override(Font::initial_values()),
+            preference,
+            PointerCapabilities::default(),
+            PointerCapabilities::default(),
+        );
+        if let Some(normal) = normal {
+            device.set_normal_color_scheme(normal);
+        }
+        device
+    }
+
+    #[test]
+    fn normal_color_scheme_option_decides_normal_only() {
+        use NormalColorScheme::*;
+        use PrefersColorScheme as P;
+        let normal = ColorSchemeFlags::empty();
+        let both = ColorSchemeFlags::LIGHT | ColorSchemeFlags::DARK;
+        let cases = [
+            // (preference, option (None: the default), dark for `normal`, dark for `light dark`)
+            (P::Dark, None, true, true),
+            (P::Light, None, false, false),
+            (P::Dark, Some(Preferred), true, true),
+            (P::Dark, Some(Light), false, true),
+            (P::Light, Some(Light), false, false),
+            (P::Light, Some(Dark), true, false),
+            (P::Dark, Some(Dark), true, true),
+        ];
+        for (preference, option, normal_dark, both_dark) in cases {
+            let device = device(preference, option);
+            let case = format!("{preference:?} {option:?}");
+            assert_eq!(device.is_dark_color_scheme(normal), normal_dark, "{case}");
+            assert_eq!(device.is_dark_color_scheme(both), both_dark, "{case}");
+            assert!(
+                !device.is_dark_color_scheme(ColorSchemeFlags::LIGHT),
+                "{case}"
+            );
+            assert!(
+                device.is_dark_color_scheme(ColorSchemeFlags::DARK),
+                "{case}"
+            );
+        }
+        assert_eq!(device(P::Dark, None).normal_color_scheme(), Preferred);
+        let light = device(P::Dark, Some(Light));
+        let text = |flags| light.system_color(SystemColor::Canvastext, flags);
+        assert_eq!(text(normal), AbsoluteColor::BLACK);
+        assert_ne!(text(both), AbsoluteColor::BLACK);
     }
 }
