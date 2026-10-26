@@ -141,7 +141,7 @@ apart from the packaging files.
 | `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built only for upstream's other engine, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f | 66 / 96 |
 | `normal-color-scheme-option` | `stylo`: `device/servo.rs` | Embedder control: CSS Color Adjustment 1 section 2.1 renders an element whose `color-scheme` is `normal` (it lists no scheme) in the user agent's default scheme, and upstream's servo `Device` always uses the user's preferred one for its system colours and `light-dark()`; the `Device` gains `NormalColorScheme` (`Preferred`, upstream's answer and the default, `Light` or `Dark`), read only for `normal`, so a listed scheme (`light`, `dark`, `light dark`) still follows the author and the preference | `viper-style::cascade device::normal_color_scheme_takes_the_config` | Candidate; draft to the owner first | Viper STY-FORK-SCHEME-1 | 53 / 82 |
 | `animation-names-continue` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 3 runs one animation for each name of `animation-name`, and upstream's servo `maybe_start_animations` returned from its loop over the names after updating the first name that matches a running animation, so every later name was neither started (a name added after a running one) nor updated (a later name's changed `animation-*` values, such as a pause); the loop now goes on with the next name | `viper-style::animation css_animation_cases` (cases `name-added`, `later-name-paused`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 7 / 0 |
-| `pseudo-animation-rule` | `stylo`: `dom.rs`, `style_resolver.rs` | Standard: CSS Transitions 1 section 3 compares a style change against the after-change style, which includes the running animations, and upstream matched a `::before` or `::after` with no animation declarations, so a base value changed under the pseudo-element's running animation started a transition; `TElement` gains `pseudo_animation_rule` (default none, upstream's answer), which matching the pseudo-element adds at the animations level | `viper-style::animation css_animation_cases` (case `pseudo-transition-under-animation`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 23 / 0 |
+| `pseudo-animation-rule` | `stylo`: `dom.rs`, `style_resolver.rs`, `matching.rs` | Standard: CSS Transitions 1 section 3 compares a style change against the after-change style, which includes the running animations, and upstream matched a `::before` or `::after` with no animation declarations, so a base value changed under the pseudo-element's running animation started a transition; `TElement` gains `pseudo_animation_rule` (default none, upstream's answer), which matching the pseudo-element adds at the animations level, and servo's `process_animations_for_pseudo` no longer returns early on an empty set, so that level leaves the rule node when the pseudo-element's last animation is cancelled | `viper-style::animation css_animation_cases` (cases `pseudo-transition-under-animation`, `pseudo-animation-removed`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 27 / 0 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1579,18 +1579,25 @@ Problem, change, every spot, the Miri commands and the before/after results:
   (upstream's answer). `match_pseudo` passes it as the animations
   declarations (the transitions stay none, as for upstream's servo
   `transition_rule`), so the matched pseudo-element style holds the
-  animations level; the traversal's later replacement of that level with
-  the current values is unchanged. Upstream's comment on traversing the
-  pseudo-elements stays.
-- **Spots.** `style/dom.rs` (the trait method and its default) and
-  `style/style_resolver.rs` (`match_pseudo`).
+  animations level. Servo's `process_animations_for_pseudo` then replaces
+  that level with the set's current values as before, but without its
+  early return on an empty set: upstream's return was safe only while no
+  pseudo-element's rule node had an animations level, and with it a
+  pseudo-element whose last animation is cancelled kept the value matched
+  before the cancel. An unchanged rule node still returns before the
+  recascade. Upstream's comment on traversing the pseudo-elements stays.
+- **Spots.** `style/dom.rs` (the trait method and its default),
+  `style/style_resolver.rs` (`match_pseudo`) and `style/matching.rs`
+  (servo's `process_animations_for_pseudo`, the early return).
 - **Fork tests.** None: matching a pseudo-element needs a `TElement` and a
   stylist, which the fork's tests do not build. All 53 `stylo` library
   tests pass.
 - **Viper proof.** `css_animation_cases` (the `animation` test binary),
-  case `pseudo-transition-under-animation` (a `::before`'s opacity changed
-  under its running animation starts no transition); it fails without the
-  patch and Viper's `pseudo_animation_rule`.
+  cases `pseudo-transition-under-animation` (a `::before`'s opacity changed
+  under its running animation starts no transition; it fails without the
+  patch and Viper's `pseudo_animation_rule`) and `pseudo-animation-removed`
+  (a `::before`'s removed animation leaves its value; it fails with the
+  early return kept).
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.

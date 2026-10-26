@@ -649,9 +649,10 @@ trait PrivateMatchMethods: TElement {
             context.shared.current_time_for_animations,
             self.as_node().owner_doc().shared_lock(),
         );
-        if declarations.is_empty() {
-            return;
-        }
+        // VIPER-PATCH(pseudo-animation-rule): no early return when the set
+        // is empty: matching may have put an animations level into the rule
+        // node that the cancelled animation must leave (the replacement
+        // below removes it; an unchanged node still returns early).
 
         let mut rule_node = style.rules().clone();
         Self::replace_single_rule_node(
