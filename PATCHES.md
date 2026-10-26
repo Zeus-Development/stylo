@@ -142,6 +142,7 @@ apart from the packaging files.
 | `normal-color-scheme-option` | `stylo`: `device/servo.rs` | Embedder control: CSS Color Adjustment 1 section 2.1 renders an element whose `color-scheme` is `normal` (it lists no scheme) in the user agent's default scheme, and upstream's servo `Device` always uses the user's preferred one for its system colours and `light-dark()`; the `Device` gains `NormalColorScheme` (`Preferred`, upstream's answer and the default, `Light` or `Dark`), read only for `normal`, so a listed scheme (`light`, `dark`, `light dark`) still follows the author and the preference | `viper-style::cascade device::normal_color_scheme_takes_the_config` | Candidate; draft to the owner first | Viper STY-FORK-SCHEME-1 | 53 / 82 |
 | `animation-names-continue` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 3 runs one animation for each name of `animation-name`, and upstream's servo `maybe_start_animations` returned from its loop over the names after updating the first name that matches a running animation, so every later name was neither started (a name added after a running one) nor updated (a later name's changed `animation-*` values, such as a pause); the loop now goes on with the next name | `viper-style::animation css_animation_cases` (cases `name-added`, `later-name-paused`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 7 / 0 |
 | `pseudo-animation-rule` | `stylo`: `dom.rs`, `style_resolver.rs`, `matching.rs` | Standard: CSS Transitions 1 section 3 compares a style change against the after-change style, which includes the running animations, and upstream matched a `::before` or `::after` with no animation declarations, so a base value changed under the pseudo-element's running animation started a transition; `TElement` gains `pseudo_animation_rule` (default none, upstream's answer), which matching the pseudo-element adds at the animations level, and servo's `process_animations_for_pseudo` no longer returns early on an empty set, so that level leaves the rule node when the pseudo-element's last animation is cancelled | `viper-style::animation css_animation_cases` (cases `pseudo-transition-under-animation`, `pseudo-animation-removed`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 27 / 0 |
+| `animation-name-entries` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 2 runs one animation for each entry of `animation-name`, a name listed twice running twice, and matches a changed list against the running animations from its last entry to its first, each entry taking the last running animation of its name; upstream's servo `maybe_start_animations` matched a running animation by its name alone, so a repeated name ran one animation with the later entry's values, and `is_cancelled_in_new_style` read the name's first entry. An `Animation` now records its entry among the entries of its name, counted from the last (`name_index`), and both spots match on it | `viper-style::animation css_animation_cases` (cases `name-repeated`, `name-repeated-added`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-2 | 44 / 0 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1598,6 +1599,42 @@ Problem, change, every spot, the Miri commands and the before/after results:
   patch and Viper's `pseudo_animation_rule`) and `pseudo-animation-removed`
   (a `::before`'s removed animation leaves its value; it fails with the
   early return kept).
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `animation-name-entries`
+
+- **Problem.** CSS Animations 1 section 2 runs one animation for each entry
+  of `animation-name`; the same name may be listed more than once, and a
+  changed list is matched against the running animations from its last
+  entry to its first, each entry taking the last running animation of its
+  name that no later entry took. Upstream's servo `maybe_start_animations`
+  matched a running animation by its name alone, so
+  `animation: k 1s, k 2s` ran one animation (both entries updated it, the
+  later one last), and `Animation::is_cancelled_in_new_style` read the
+  first entry of the name.
+- **Change.** `Animation` gains `name_index`: its entry among the entries
+  of `animation-name` listing its name, counted from the last (0 for the
+  last). `maybe_start_animations` gives each new animation its entry's
+  index and updates the running animation only when the name and the
+  index both match, so a name listed before a running one of that name
+  starts a new animation and the running one goes on as the later entry.
+  `is_cancelled_in_new_style` reads the animation's own entry, so an entry
+  removed from the list (or set to a zero duration) cancels its own
+  animation only. Two private helpers give an entry's index and the entry
+  of an index.
+- **Spots.** `style/servo/animation.rs` (`Animation`'s field,
+  `is_cancelled_in_new_style`, the helpers `name_index` and `name_entry`,
+  and `maybe_start_animations`: the new field and the match).
+- **Fork tests.** None: starting an animation needs a `TElement`, a
+  stylist and a style resolver, which the fork's tests do not build. All
+  53 `stylo` library tests pass.
+- **Viper proof.** `css_animation_cases` (the `animation` test binary),
+  cases `name-repeated` (`animation: k 1s, k 2s` runs two animations with
+  their own events, the later winning) and `name-repeated-added` (a `k`
+  listed before a running `k` starts a new animation and the running one
+  goes on, winning); both fail without the patch.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.

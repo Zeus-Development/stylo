@@ -562,6 +562,12 @@ pub struct Animation {
     /// The name of this animation as defined by the style.
     pub name: Atom,
 
+    // VIPER-PATCH(animation-name-entries): an animation is one entry of
+    // `animation-name`, so a name listed twice runs twice.
+    /// This animation's entry among the entries of `animation-name` that
+    /// list its name, counted from the last (0 for the last).
+    pub name_index: usize,
+
     /// The properties that change in this animation.
     properties_changed: PropertyDeclarationIdSet,
 
@@ -605,9 +611,8 @@ impl Animation {
     /// Whether or not this animation is cancelled by changes from a new style.
     fn is_cancelled_in_new_style(&self, new_style: &Arc<ComputedValues>) -> bool {
         let new_ui = new_style.get_ui();
-        let index = new_ui
-            .animation_name_iter()
-            .position(|animation_name| Some(&self.name) == animation_name.as_atom());
+        // VIPER-PATCH(animation-name-entries): this animation's own entry.
+        let index = name_entry(new_ui, &self.name, self.name_index);
         let index = match index {
             Some(index) => index,
             None => return true,
@@ -1796,6 +1801,33 @@ pub fn start_transitions_if_applicable(
     properties_that_transition
 }
 
+// VIPER-PATCH(animation-name-entries): an entry's index among those of
+// its name, counted from the last, and back.
+/// The number of entries of `animation-name` after entry `index` that list
+/// its name `name`.
+fn name_index(ui: &crate::properties::style_structs::UI, index: usize, name: &Atom) -> usize {
+    ui.animation_name_iter()
+        .skip(index + 1)
+        .filter(|later| later.as_atom() == Some(name))
+        .count()
+}
+
+/// The index in `animation-name` of the entry listing `name` that has
+/// `name_index` later entries listing it.
+fn name_entry(
+    ui: &crate::properties::style_structs::UI,
+    name: &Atom,
+    name_index: usize,
+) -> Option<usize> {
+    let entries: Vec<usize> = ui
+        .animation_name_iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.as_atom() == Some(name))
+        .map(|(index, _)| index)
+        .collect();
+    entries.into_iter().rev().nth(name_index)
+}
+
 /// Triggers animations for a given node looking at the animation property
 /// values.
 pub fn maybe_start_animations<E>(
@@ -1886,6 +1918,8 @@ pub fn maybe_start_animations<E>(
 
         let mut new_animation = Animation {
             name: name.clone(),
+            // VIPER-PATCH(animation-name-entries): this entry's identity.
+            name_index: name_index(style, i, name),
             properties_changed: keyframe_animation.properties_changed.clone(),
             computed_steps,
             started_at,
@@ -1912,7 +1946,13 @@ pub fn maybe_start_animations<E>(
                 continue;
             }
 
-            if new_animation.name == existing_animation.name {
+            // VIPER-PATCH(animation-name-entries): the running animation of
+            // this entry, as CSS Animations 1 section 2 matches the names
+            // from the last: a name added before a running one of that name
+            // starts a new animation, and the running one goes on.
+            if new_animation.name == existing_animation.name
+                && new_animation.name_index == existing_animation.name_index
+            {
                 existing_animation
                     .update_from_other(&new_animation, context.current_time_for_animations);
                 // VIPER-PATCH(animation-names-continue): every later name of
