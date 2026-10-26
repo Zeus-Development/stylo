@@ -313,8 +313,14 @@ impl ParseOptions {
                 Ok(token) => token.clone(),
                 Err(_) => return refused,
             };
-            let name = match token {
+            // VIPER-PATCH(value-grammar-options): a name as `&str`, so that a
+            // token other than a name can still give one.
+            let name: Option<&str> = match token {
                 Token::Ident(ref name) | Token::Function(ref name) => Some(name),
+                // VIPER-PATCH(value-grammar-options): an unquoted `url(…)` is
+                // one token (CSS Syntax 3 section 4.3.6), the quoted spelling
+                // the function `url`; both name `url`.
+                Token::UnquotedUrl(_) => Some("url"),
                 _ => None,
             };
             if let Some(name) = name {
@@ -582,6 +588,35 @@ pub(crate) mod value_grammar_tests {
             declared(options, "text-transform: full-width; text-align: center"),
             "text-align: center;"
         );
+    }
+
+    // VIPER-PATCH(value-grammar-options): a refused `url` refuses the
+    // unquoted spelling too.
+    #[test]
+    fn value_grammar_options_refuse_url_in_both_spellings() {
+        let value = |quoted: bool| {
+            if quoted {
+                "url(\"x.png\")"
+            } else {
+                "url(x.png)"
+            }
+        };
+        let mut options = ParseOptions::default();
+        for quoted in [true, false] {
+            assert!(supports(options, "shape-outside", value(quoted)));
+        }
+        options.refused_values = &[("shape-outside", "URL")];
+        for quoted in [true, false] {
+            assert!(
+                !supports(options, "shape-outside", value(quoted)),
+                "{quoted}"
+            );
+        }
+        assert!(supports(options, "shape-outside", "circle(50%)"));
+        assert!(supports(options, "background-image", value(false)));
+        options.refused_values = &[];
+        options.unsupported_values = &[("shape-outside", "url")];
+        assert!(!supports(options, "shape-outside", value(false)));
     }
 
     #[test]
