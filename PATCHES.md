@@ -138,6 +138,7 @@ apart from the packaging files.
 | `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 142 / 52 |
 | `servo-device-media-features` | `stylo`: `servo/media_features.rs`, `device/servo.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5's `color-gamut` (section 6.4), `dynamic-range` (6.5), `prefers-reduced-motion` (12.1), `prefers-contrast` (12.3) and `forced-colors` (12.4), which upstream's servo list lacks, so a query on one was unknown; each reads the embedder's setting from the `Device` (`DeviceMediaFeatures`, defaulting to `srgb`, `standard`, `no-preference`, `no-preference`, `none`), and `Device::forced_colors` returns its setting instead of a fixed `none` | `viper-style::cascade device::servo_device_media_features_take_the_config` | Candidate; draft to the owner first | Viper STY-FORK-DEVICE-1 | 190 / 118 |
 | `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own; the box's `baseline_source` is then always `auto`, and a layout reads `-x-baseline-source` where it is | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 121 / 91 |
+| `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built for Gecko only upstream, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f | 66 / 96 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1453,6 +1454,54 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Embedder control, so a candidate; a draft goes to the
   Viper owner first.
+
+## Patch `engine-gates`
+
+- **Problem.** Upstream builds 46 standard longhands and 13 shorthands for
+  Gecko only (`engine = "gecko"`), so a servo build's parser drops their
+  declarations and its computed style has no value for them, although
+  their specifications define them for every engine. The longhands:
+  `scroll-snap-type`, `scroll-snap-align`, `scroll-snap-stop` and the sixteen
+  `scroll-margin-*` and `scroll-padding-*` longhands (CSS Scroll Snap 1);
+  `break-before`, `break-after`, `break-inside` (CSS Fragmentation 3);
+  `column-fill`, `column-rule-color`, `column-rule-style`,
+  `column-rule-width` (CSS Multi-column 1); `contain-intrinsic-width`,
+  `-height`, `-inline-size`, `-block-size` (CSS Box Sizing 4);
+  `offset-anchor`, `offset-distance`, `offset-position`, `offset-rotate`
+  (CSS Motion Path 1); `overflow-anchor` (CSS Scroll Anchoring 1);
+  `anchor-name`, `anchor-scope`, `position-anchor`, `position-try-order`,
+  `position-visibility` (CSS Anchor Positioning 1); `resize` (CSS UI 4);
+  `scrollbar-gutter` (CSS Overflow 3); `line-clamp` (CSS Overflow 4, the
+  longhand of `-webkit-line-clamp`); `shape-outside`, `shape-margin`,
+  `shape-image-threshold` (CSS Shapes 1). The shorthands: `scroll-margin`,
+  `scroll-margin-block`, `scroll-margin-inline`, `scroll-padding`,
+  `scroll-padding-block`, `scroll-padding-inline`, `page-break-before`,
+  `page-break-after`, `page-break-inside`, `offset`,
+  `contain-intrinsic-size`, `column-rule` and `-webkit-line-clamp`.
+- **Change.** The `engine = "gecko"` line of each goes (the Gecko
+  preference and FFI names stay, which servo builds ignore), and the
+  `offset` and `column_rule` modules of `shorthands.rs` lose their
+  `#[cfg(feature = "gecko")]`. Nothing else changes: the value types were
+  already built for both engines, and a servo layout that does not use a
+  value ignores it. The longhands keep upstream's `affects` (layout,
+  overflow, paint or none), so their restyle damage is upstream's.
+- **Known difference (not patched).** Stylo's `BreakBetween` has no
+  `column`, `avoid-page`, `avoid-column`, `recto` or `verso` in either
+  build, though CSS Fragmentation 3 section 3.1 defines them, so
+  `break-before: column` is still dropped; `BreakWithin` has all four of
+  its values. Viper registers the gap; a later patch of the grammar is its
+  own row.
+- **Spots.** `style/properties/longhands.toml` (46 entries, the reason in
+  full at `scroll-snap-type`), `style/properties/shorthands.toml` (13
+  entries), `style/properties/shorthands.rs` (two module gates) and
+  `style/properties/declaration_block.rs` (the test module).
+- **Fork tests.** `engine_gates_parse_the_standard_longhands` and
+  `engine_gates_parse_the_shorthands`; all 51 `stylo` library tests pass.
+- **Viper proof.** `engine_gates`, which computes values of the
+  longhands through Viper's cascade and `computed_value`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Retired patches
 
