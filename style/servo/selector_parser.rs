@@ -15,10 +15,6 @@ use crate::invalidation::element::element_wrapper::ElementSnapshot;
 use crate::properties::longhands::display::computed_value::T as Display;
 use crate::properties::{ComputedValues, PropertyFlags};
 use crate::selector_parser::AttrValue as SelectorAttrValue;
-// VIPER-PATCH(chrome-selector-names): Chrome's names.
-use super::chrome_names;
-// VIPER-PATCH(chrome-after-pseudo-element): what follows a pseudo-element.
-use super::chrome_after;
 use crate::selector_parser::{PseudoElementCascadeType, SelectorParser};
 // VIPER-PATCH(selector-names-hook): the embedder's names.
 use crate::stylesheets::SelectorNames;
@@ -32,7 +28,7 @@ use rustc_hash::FxHashMap;
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use selectors::parser::SelectorParseErrorKind;
 use std::fmt;
-// VIPER-PATCH(chrome-after-pseudo-element): no transmute, no `std::mem`.
+// VIPER-PATCH(selector-names-hook): no transmute, no `std::mem`.
 use std::ops::{Deref, DerefMut};
 use style_traits::{ParseError, StyleParseErrorKind};
 
@@ -96,11 +92,12 @@ pub enum PseudoElement {
 
     // VIPER-PATCH(chrome-dom-api-pseudos): see PATCHES.md.
     // VIPER-PATCH(selector-names-hook): a pseudo-element an embedder's
-    // `SelectorNames` admits beyond servo's names, or the default tables
-    // do; upstream Servo refuses those names. It holds its name in ASCII
-    // lowercase, followed by `()` when it is functional (`made-up`,
-    // `cue()`), which decides what may follow it in its compound; it
-    // cascades lazily, and every name has the one index. Keep it last.
+    // `SelectorNames` admits beyond servo's names; upstream Servo, and
+    // servo's parser without a hook, refuse those names. It holds its name
+    // in ASCII lowercase, followed by `()` when it is functional
+    // (`made-up`, `cue()`), which decides what may follow it in its
+    // compound; it cascades lazily, and every name has the one index. Keep
+    // it last.
     // https://drafts.csswg.org/css-pseudo-4/
     Unmatched(Box<str>),
 }
@@ -174,8 +171,8 @@ impl PseudoElement {
     }
 
     /// An index for this pseudo-element to be indexed in an enumerated array.
-    // VIPER-PATCH(chrome-after-pseudo-element): `as usize` needs an enum
-    // without fields; the indices are the variants' order, as before.
+    // VIPER-PATCH(selector-names-hook): `as usize` needs an enum without
+    // fields; the indices are the variants' order, as before.
     #[inline]
     pub const fn index(&self) -> usize {
         use self::PseudoElement::*;
@@ -215,8 +212,8 @@ impl PseudoElement {
     /// Creates a pseudo-element from an eager index.
     #[inline]
     pub fn from_eager_index(i: usize) -> Self {
-        // VIPER-PATCH(chrome-after-pseudo-element): a transmute needs an
-        // enum without fields.
+        // VIPER-PATCH(selector-names-hook): a transmute needs an enum
+        // without fields.
         let result = match i {
             0 => PseudoElement::After,
             1 => PseudoElement::Before,
@@ -345,7 +342,7 @@ impl PseudoElement {
             | PseudoElement::ServoTextControlInnerContainer
             | PseudoElement::ServoTextControlInnerEditor => PseudoElementCascadeType::Lazy,
             // VIPER-PATCH(chrome-dom-api-pseudos): computed only on request.
-            // VIPER-PATCH(chrome-after-pseudo-element): every kind.
+            // VIPER-PATCH(selector-names-hook): every name.
             PseudoElement::Unmatched(_) => PseudoElementCascadeType::Lazy,
             PseudoElement::ServoAnonymousBox
             | PseudoElement::ServoAnonymousTable
@@ -495,10 +492,11 @@ pub enum NonTSPseudoClass {
     Visited,
     // VIPER-PATCH(chrome-dom-api-pseudos): see PATCHES.md.
     // VIPER-PATCH(selector-names-hook): a pseudo-class an embedder's
-    // `SelectorNames` (or the default tables) admits beyond servo's names;
-    // upstream Servo refuses those names. `Dir` holds the `:dir()`
-    // identifier as written, `Unmatched` its serialization; neither has
-    // element state, and they match only what the embedder matches.
+    // `SelectorNames` admits beyond servo's names; upstream Servo, and
+    // servo's parser without a hook, refuse those names. `Dir` holds the
+    // `:dir()` identifier as written, `Unmatched` its serialization;
+    // neither has element state, and they match only what the embedder
+    // matches.
     // https://drafts.csswg.org/selectors-4/#the-dir-pseudo
     Dir(Box<str>),
     Unmatched(Box<str>),
@@ -759,17 +757,6 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             {
                 return owned;
             }
-        } else {
-            // VIPER-PATCH(chrome-selector-names): Chrome's names first, and
-            // outside user-agent sheets none of the names Chrome refuses.
-            if !self.in_user_agent_stylesheet()
-                && chrome_names::refused_outside_user_agent_sheets(&name, false)
-            {
-                return Err(ParseError::custom(SelectorParseErrorKind::UnexpectedIdent));
-            }
-            if let Some(chrome) = chrome_names::pseudo_class(&name) {
-                return Ok(chrome);
-            }
         }
         let pseudo_class = match_ignore_ascii_case! { &name,
             "active" => NonTSPseudoClass::Active,
@@ -826,26 +813,14 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         after_part: bool,
     ) -> Result<NonTSPseudoClass, ParseError> {
         // VIPER-PATCH(selector-names-hook): the embedder's names first.
-        let names = self.parse_options.selector_names;
-        if let Some(names) = names {
+        if let Some(names) = self.parse_options.selector_names {
             let owned =
                 self.embedder_name(names, &name, |n| n.pseudo_class(self, &name, Some(parser)));
             if let Some(owned) = owned {
                 return owned;
             }
-        // VIPER-PATCH(chrome-selector-names): Chrome's names first.
-        } else if let Some(chrome) = chrome_names::functional_pseudo_class(self, &name, parser) {
-            // VIPER-PATCH(selector-names-hook)
-            return chrome;
         }
         let pseudo_class = match_ignore_ascii_case! { &name,
-            // VIPER-PATCH(chrome-selector-names): Chrome 154 takes only an
-            // identifier, so `:lang("en")` is refused outside user-agent
-            // sheets. https://drafts.csswg.org/selectors-4/#the-lang-pseudo
-            // VIPER-PATCH(selector-names-hook): only by the default tables.
-            "lang" if !after_part && !self.in_user_agent_stylesheet() && names.is_none() => {
-                NonTSPseudoClass::Lang(parser.expect_ident()?.as_ref().into())
-            },
             "lang" if !after_part => {
                 NonTSPseudoClass::Lang(parser.expect_ident_or_string()?.as_ref().into())
             },
@@ -867,16 +842,6 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
                 self.embedder_name(names, &name, |n| n.pseudo_element(self, &name, None))
             {
                 return owned;
-            }
-        } else {
-            // VIPER-PATCH(chrome-selector-names): as for pseudo-classes.
-            if !self.in_user_agent_stylesheet()
-                && chrome_names::refused_outside_user_agent_sheets(&name, true)
-            {
-                return Err(ParseError::custom(SelectorParseErrorKind::UnexpectedIdent));
-            }
-            if let Some(chrome) = chrome_names::pseudo_element(&name) {
-                return Ok(chrome);
             }
         }
         let pseudo_element = match_ignore_ascii_case! { &name,
@@ -952,20 +917,18 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         Ok(pseudo_element)
     }
 
-    // VIPER-PATCH(chrome-selector-names): `::cue(b)`, `::highlight(x)`,
-    // `::scroll-button(up)` and the view-transition parts; servo has none.
+    // VIPER-PATCH(selector-names-hook): an embedder's functional
+    // pseudo-elements; servo has none, so without a hook upstream's error.
     fn parse_functional_pseudo_element(
         &self,
         name: CowRcStr<'i>,
         arguments: &mut CssParser<'i>,
     ) -> Result<PseudoElement, ParseError> {
-        // VIPER-PATCH(selector-names-hook): the embedder's names, if any.
-        let owned = match self.parse_options.selector_names {
-            Some(names) => self.embedder_name(names, &name, |n| {
+        let owned = self.parse_options.selector_names.and_then(|names| {
+            self.embedder_name(names, &name, |n| {
                 n.pseudo_element(self, &name, Some(arguments))
-            }),
-            None => chrome_names::functional_pseudo_element(self, &name, arguments),
-        };
+            })
+        });
         owned.unwrap_or_else(|| {
             Err(ParseError::custom(
                 SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
@@ -973,35 +936,32 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         })
     }
 
-    // VIPER-PATCH(chrome-selector-names): Chrome's legacy `:-webkit-any()`.
-    // VIPER-PATCH(selector-names-hook): or the embedder's aliases.
+    // VIPER-PATCH(selector-names-hook): the embedder's aliases of `:is()`
+    // over compound selectors; without a hook none, as upstream.
     fn parse_compound_is_alias(&self, name: &str) -> bool {
-        match self.parse_options.selector_names {
-            Some(names) => names.compound_is_alias(name),
-            None => name.eq_ignore_ascii_case("-webkit-any"),
-        }
+        self.parse_options
+            .selector_names
+            .is_some_and(|names| names.compound_is_alias(name))
     }
 
-    // VIPER-PATCH(chrome-after-pseudo-element): Chrome's table.
-    // VIPER-PATCH(selector-names-hook): or the embedder's answer, and
-    // without one upstream's rule.
+    // VIPER-PATCH(selector-names-hook): the embedder's answer, and without
+    // a hook or an answer upstream's rule: a user-action pseudo-class after
+    // a pseudo-element that accepts state pseudo-classes (servo's are in
+    // no pseudo-element tree).
     fn valid_after_pseudo_element(
         &self,
         pseudo_element: &PseudoElement,
         simple: &selectors::parser::Component<SelectorImpl>,
     ) -> bool {
-        let Some(names) = self.parse_options.selector_names else {
-            // VIPER-PATCH(selector-names-hook)
-            return chrome_after::valid_after(pseudo_element, simple);
-        };
-        names
-            .valid_after(pseudo_element, simple)
-            .unwrap_or_else(|| {
-                // VIPER-PATCH(selector-names-hook)
-                use selectors::parser::{NonTSPseudoClass as _, PseudoElement as _};
-                matches!(simple, selectors::parser::Component::NonTSPseudoClass(class)
-                if pseudo_element.accepts_state_pseudo_classes() && class.is_user_action_state())
-            })
+        let answer = self
+            .parse_options
+            .selector_names
+            .and_then(|names| names.valid_after(pseudo_element, simple));
+        answer.unwrap_or_else(|| {
+            use selectors::parser::{NonTSPseudoClass as _, PseudoElement as _};
+            matches!(simple, selectors::parser::Component::NonTSPseudoClass(class)
+            if pseudo_element.accepts_state_pseudo_classes() && class.is_user_action_state())
+        })
     }
 
     fn default_namespace(&self) -> Option<Namespace> {
@@ -1313,10 +1273,10 @@ mod chrome_dom_api_pseudos_tests {
         assert!(!PseudoElement::Before.accepts_state_pseudo_classes());
     }
 
-    // VIPER-PATCH(chrome-after-pseudo-element): the indices without
-    // `as usize` keep the eager ones first and every one distinct.
+    // VIPER-PATCH(selector-names-hook): the indices without `as usize`
+    // keep the eager ones first and every one distinct.
     #[test]
-    fn chrome_after_pseudo_element_indices_stay_distinct() {
+    fn selector_names_hook_indices_stay_distinct() {
         use super::EAGER_PSEUDO_COUNT;
         for i in 0..EAGER_PSEUDO_COUNT {
             assert_eq!(PseudoElement::from_eager_index(i).eager_index(), i);
@@ -1353,13 +1313,16 @@ mod chrome_dom_api_pseudos_tests {
         assert_eq!(indices, (0..PSEUDO_COUNT).collect::<Vec<_>>());
     }
 
-    // VIPER-PATCH(chrome-selector-names): servo's parser builds the
-    // variants since that patch (its tests are in `chrome_names.rs`); the
+    // VIPER-PATCH(selector-names-hook): only an embedder's names build the
+    // variants (its tests are in `stylesheets/parse_options.rs`), so
+    // without a hook servo's parser refuses them, as upstream does; the
     // pseudo-element's serialization stays a name no sheet can use.
     #[test]
     fn chrome_dom_api_pseudos_internal_name_stays_unparsed() {
         assert!(!parses("::-internal-unmatched"));
-        assert!(parses(":dir(ltr)") && parses("::-webkit-scrollbar"));
+        assert!(!parses(":dir(ltr)") && !parses("::-webkit-scrollbar"));
+        assert!(!parses(":-webkit-any(p)") && !parses("::cue(b)"));
+        assert!(parses(":lang(\"en\")") && parses("::slider-thumb"));
     }
 }
 

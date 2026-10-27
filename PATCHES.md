@@ -89,7 +89,10 @@ now sits beside the `atom!("scripting")`); Viper's STY-FORK-3a adds
 methods the enclosing selector parser; Viper's STY-FORK-DEVICE-1 adds
 `servo-device-media-features` to `stylo` and `stylo_atoms` (its five atoms,
 whose marker sits beside the `atom!(...)` entries that use them); Viper's
-STY-FORK-VA-1 adds `vertical-align-longhand` to `stylo`.
+STY-FORK-VA-1 adds `vertical-align-longhand` to `stylo`; Viper's
+STY-FORK-3b retires `chrome-selector-names` and
+`chrome-after-pseudo-element` (section "Retired patches"), whose two
+`selectors` hooks stay as `selectors-after-pseudo-element-hook`.
 The other five directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -117,24 +120,23 @@ apart from the packaging files.
 | `thread-cache-miri-root` | `stylo`: `bloom.rs`, `sharing/mod.rs` | Test tooling: Stylo leaks its bloom-filter and style-sharing thread-local caches by design, once per thread that styles, and Miri's leak check reported them whenever a test thread that restyled exited, so a Miri run that restyles needed `-Zmiri-ignore-leaks`, which hides every other leak too. Under `cfg(miri)` only, each of the two allocations is registered with Miri as a static root (`miri_static_root`) when it is made: this exempts exactly those two allocations from Miri's leak report and nothing else. What is leaked, and when, is unchanged, and builds outside Miri are upstream's code | `miri` (Viper's restyling library tests pass Miri's leak check) | Candidate; draft to the owner first | Viper V10b part 1 | 24 / 0 |
 | `matches-simple-selector-inline` | `selectors`: `matching.rs` | Performance: `matches_simple_selector` is `#[inline(always)]`. It has two callers, the loops over a compound's simple selectors in `matches_compound_selector` (selector matching) and in `matches_compound_selector_from` (Stylo's invalidation). The optimizer merges it into its caller only while one of the two is reachable for an element type; once an embedder uses both (Viper's incremental restyle makes the invalidation reachable for its element), the function stays out of line and every simple selector costs a call: measured against Viper's build before on a Linux bench host, `querySelectorAll` of 20 selectors over 10,000 elements ran 3.86% more instructions and took 1.034 to 1.037 times as long, and a restyle from scratch of 10,000 elements with 50 rules ran 2.85% more and took 1.033. With the attribute the function is part of both callers again: the queries run 1.58% fewer instructions than before the invalidation was reachable and take 0.990 to 0.994, the restyle runs the same instructions within 0.02% and takes 1.007 to 1.022 (40 pairs each, two builds). An `#[inline]` hint is not enough (the build is unchanged). No behaviour changes | `viper-style::selector_goldens selector_suite_matches_chrome_goldens` (behaviour kept); the paired measurement in Viper's `viper-style` README (the effect) | Candidate; draft to the owner first | Viper V10b part 3 | 8 / 0 |
 | `selectors-compound-is-alias` | `selectors`: `parser.rs` | Chrome match: a `Parser` hook, `parse_compound_is_alias`, names an alias of `:is()` whose argument is a non-empty, non-forgiving, comma-separated list of compound selectors, as Chrome 154's legacy `:-webkit-any()` takes (Viper's selector goldens `names-webkit-any-list`, `names-webkit-any-complex`, `names-webkit-any-empty`, `names-webkit-any-invalid-item`, `names-webkit-any-in-not`); the existing `is_is_alias` parses the forgiving complex-selector list of `:is()` instead, and upstream has no `:-webkit-any()` | `viper-style::api fork_patches::compound_is_alias_parses_webkit_any` | Candidate; draft to the owner first | Viper V10b part 4a | 45 / 39 |
-| `chrome-dom-api-pseudos` | `stylo`: `servo/selector_parser.rs` | Chrome match: three variants for the names Chrome 154's DOM selector APIs accept and servo's parser refuses, which only an embedder's DOM-API parser built until `chrome-selector-names` made servo's parser build them in stylesheets too: `NonTSPseudoClass::Dir` (the `:dir()` identifier as written), `NonTSPseudoClass::Unmatched` (any other such pseudo-class, holding its serialization) and `PseudoElement::Unmatched`, appended last (`PSEUDO_COUNT` follows it; it serializes as `::-internal-unmatched`, cascades lazily and accepts user-action pseudo-classes after it; since `selector-names-hook` it holds its name, from which what may follow it is decided). Neither pseudo-class has element state | `viper-style::api fork_patches::chrome_dom_api_pseudos_parse_and_match_nothing` | Chrome-specific; not offered | Viper V10b part 4a | 35 / 42 |
+| `chrome-dom-api-pseudos` | `stylo`: `servo/selector_parser.rs` | Chrome match: three variants for the names Chrome 154's DOM selector APIs accept and servo's parser refuses, which servo's parser builds only for an embedder's `SelectorNames` (`selector-names-hook`; from Viper V10b-4c1 to STY-FORK-3b the retired `chrome-selector-names` built them without a hook): `NonTSPseudoClass::Dir` (the `:dir()` identifier as written), `NonTSPseudoClass::Unmatched` (any other such pseudo-class, holding its serialization) and `PseudoElement::Unmatched`, appended last (`PSEUDO_COUNT` follows it; it serializes as `::-internal-unmatched`, cascades lazily and accepts user-action pseudo-classes after it; since `selector-names-hook` it holds its name, from which what may follow it is decided). Neither pseudo-class has element state | `viper-style::api fork_patches::chrome_dom_api_pseudos_parse_and_match_nothing` | Chrome-specific; not offered | Viper V10b part 4a | 35 / 42 |
 | `servo-first-line` | `stylo`: `servo/selector_parser.rs`, `data.rs`, `properties/data.py` | Chrome match: servo mode had no ::first-line; Chrome 154 styles it. `PseudoElement::FirstLine`, the fifth eager pseudo-element (after `FirstLetter`; `EAGER_PSEUDO_COUNT` 5, and `data.rs`'s empty eager array is sized by the count instead of four `None`s), parsed as `::first-line` and the CSS 2 `:first-line`, serialized as `::first-line`, with `is_first_line()` true and the `APPLIES_TO_FIRST_LINE` property restriction. Servo builds also apply `visibility` to the first line, as Blink 154 does (`valid_for_first_line` in `css_properties.json5`) and Gecko does not. The cascade's first-line reparenting was already shared code. Servo has no first-line layout, which is why upstream lacks it (register entry `adr:layout-first-line`) | `viper-style::api fork_patches::servo_first_line_parses_and_restricts`, and the computed-value golden suite (`first-line.html`) | Candidate; draft to the owner first | Viper V10b part 4b2 | 32 / 43 |
 | `stack-limit-miri` | `stylo`: `context.rs` | Test tooling: Stylo's stack-depth sanity check assumes a contiguous stack, which Miri does not model. `StackLimitChecker` records the address of a local variable when a thread-local style context is made, and `limit_exceeded`, which Stylo's invalidation calls (`TreeStyleInvalidator`), checks in debug builds that a later local lies within the style thread's stack size of it; under Miri every local is its own allocation at an address of Miri's allocator, so the check failed Viper's incremental-restyle tests under Miri (`distance_to_stack_bottom <= max_allowable_distance`), and `new`'s subtraction could overflow. Under `cfg(miri)` only, `limit_exceeded` returns `false` before its checks and `new` saturates; builds outside Miri are upstream's code | `miri` (Viper's slow Miri run requires its two incremental-restyle tests by name, under both models) | Candidate; draft to the owner first | Viper V13b part 2f1 | 22 / 0 |
 | `chrome-layout-properties` | `stylo`: `properties/longhands.toml`, `properties/helpers/animated_properties.mako.rs`, `values/specified/transform.rs`, `values/specified/box.rs` (its test) | Chrome match: servo builds parse `contain`, `backdrop-filter` and `offset-path` (upstream: behind `layout.unimplemented`), `content-visibility` and `transform-box` (upstream: Gecko only; with `content-visibility`'s animation impls, and all five boxes), as Chrome 154 does; their names in `will-change` follow. Viper's layout corpus loses no value with them | `viper-style::api fork_patches::chrome_layout_properties_parse_and_compute`, and viper-layout's `contained_floats_stay_inside_their_box` | Chrome-specific; not offered | Viper V10b-6 | 16 / 24 |
-| `chrome-selector-names` | `stylo`: `servo/chrome_names.rs` (new), `servo/mod.rs`, `servo/selector_parser.rs` | Chrome match: servo's `SelectorParser` accepts the pseudo-class and pseudo-element names Chrome 154 accepts, with their argument grammars, in every origin, mapped to `chrome-dom-api-pseudos`' variants (`:dir()`, `:horizontal`, the `-internal-` names, `:host-context()`, `::cue`, `::highlight()`, every `::-webkit-*` name and the others of Viper's probe) or to aliases (`:-webkit-any-link`, `:-webkit-autofill`, `:-webkit-full-screen`), and `:-webkit-any()` through `selectors-compound-is-alias`; outside user-agent sheets it refuses what Chrome refuses and upstream parses: `-moz-*` and `-servo-*` names, `:lang()` with a string, `::color-swatch` and the `::slider-*` parts. Chrome's stylesheets and DOM selector APIs use one parser, so the tables moved here from Viper's DOM-API parser, one owner for both (Viper's computed goldens `sheet-names-*`: Chrome 154 keeps every rule naming one of these, `-internal-` names included); upstream refuses the names | `viper-style::api fork_patches::chrome_selector_names_in_stylesheets`, the computed-value golden suite (`sheet-names.html`) and the selector golden suite (`names-*`) | Chrome-specific; not offered | Viper V10b-4c1 | 370 / 115 |
-| `chrome-after-pseudo-element` | `selectors`: `parser.rs`; `stylo`: `servo/chrome_after.rs` (new), `servo/chrome_names.rs`, `servo/mod.rs`, `servo/selector_parser.rs` | Chrome match: Chrome 154 decides per pseudo-element which pseudo-classes may follow it in its compound (`IsPseudoClassValidAfterPseudoElement`: the scrollbar pseudo-classes after the scrollbar parts, `:window-inactive` after `::selection`, the user actions after a `-webkit-` name and `::file-selector-button`, `:only-child` after the view-transition parts, ...), and `:is()`, `:where()` and `:not()` there contain only what may follow it; upstream accepts only a user-action pseudo-class after a pseudo-element that accepts state pseudo-classes. Two `Parser` hooks, `valid_after_pseudo_element` (its default is upstream's rule) and `parse_non_ts_pseudo_class_after_pseudo_element`, and servo's implementation of the first from Chrome's table, which reads from the name `PseudoElement::Unmatched` holds which of Chrome's pseudo-elements it is (since `selector-names-hook`; Viper's selector goldens `names-after-*`, its computed goldens `sheet-after-pseudo-*`) | `viper-style::cascade fork_patches::chrome_pseudo_classes_after_pseudo_elements`, the selector golden suite (`names-after-*`) and the computed-value golden suite (`sheet-after-pseudo.html`) | Chrome-specific; not offered | Viper V10b-4c2 | 426 / 201 |
+| `selectors-after-pseudo-element-hook` | `selectors`: `parser.rs` | Embedder control: two `Parser` hooks decide what may follow a pseudo-element that is not element-backed in its compound: `valid_after_pseudo_element` (Selectors 4 section 3.6.3 lets each pseudo-element's specification allow pseudo-classes after it beyond the user actions; the default is upstream's rule, a user-action pseudo-class after a pseudo-element that accepts state pseudo-classes, and the tree-structural ones in a pseudo-element tree) and `parse_non_ts_pseudo_class_after_pseudo_element` (a name a parser takes only there; by default `parse_non_ts_pseudo_class`); under the parsing state `CHECK_AFTER_PSEUDO_ELEMENT` what follows parses without upstream's checks and the compound asks the first hook about each simple selector, and about what `:is()`, `:where()` (forgivingly) and `:not()` contain; an `:is()` alias of `selectors-compound-is-alias` is refused there. Servo's `SelectorParser` answers through `selector-names-hook`; upstream has no such hooks | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` (Basic's `valid_after` through the hook) | Candidate; draft to the owner first | Viper V10b-4c2 (as part of `chrome-after-pseudo-element`); its own row since Viper STY-FORK-3b | 135 / 73 |
 | `servo-display-contents-unboxing` | `stylo`: `style_adjuster.rs` | Chrome match: servo builds apply CSS Display 3 Appendix B, by which `display: contents` computes to `none` on br, wbr, meter, progress, canvas, embed, object, audio, iframe, img, video, frame, frameset, input, textarea and select, on an `svg` whose parent is not an SVG element (or is a `foreignObject`), on SVG elements other than `svg`, `a`, `g`, `use`, `tspan` and `textPath`, and on MathML elements, as Chrome 154 reports (Viper's computed-value golden `display-contents-unboxing-display`); upstream applies the rule in Gecko builds only. The element names come from the local names, which servo's atom set lacks; pseudo-elements keep `contents` | `viper-style::cascade fork_patches::servo_display_contents_unboxing` | Candidate; draft to the owner first | Viper V10b-8 | 67 / 0 |
 | `chrome-frames-and-textarea` | `stylo`: `style_adjuster.rs` | Chrome match: servo builds compute `display: block`, `position: static` and `float: none` for every HTML `frame` and `frameset` whatever the author asks, and a `textarea`'s `visible` overflow as `auto` on each axis, as Chrome 154 reports (Viper's computed-value goldens `frameset-display-*`, `overflow-controls-*`); upstream has neither rule | `viper-style::cascade fork_patches::chrome_frames_and_textarea` | Chrome-specific; not offered | Viper V10b-8 | 46 / 0 |
 | `line-height-whole-percent` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds compute a percentage `line-height` as the font size times the percentage truncated toward zero to a whole percent, divided by 100 once (`130.5%` of 20px is 26px, `0.5%` is 0px; Viper's computed-value golden `line-height-percent-line-height`); upstream computes the exact percentage | `viper-style::cascade fork_patches::line_height_whole_percent` | Chrome-specific; not offered | Viper V10b-8 | 38 / 23 |
 | `line-height-calc-layout-unit` | `stylo`: `values/specified/font.rs` | Chrome match: servo builds resolve a line-height `calc()` that mixes a percentage and a length in 1/64 px, the percentage of the font size truncated to 1/64 px and the result truncated to 1/64 px (`calc(130.5% + 0px)` of 10px is 13.046875px); a `calc()` of lengths only stays exact and one of percentages only is that percentage, as Chrome 154 reports (Viper's computed-value goldens `line-height-calc-line-height`, `line-height-percent-line-height`); upstream keeps the exact value | `viper-style::cascade fork_patches::line_height_calc_layout_unit` | Chrome-specific; not offered | Viper V10b-8 | 55 / 16 |
-| `stylesheet-parse-options` | `stylo`: `stylesheets/parse_options.rs` (new), `stylesheets/mod.rs`, `parser.rs`, `selector_parser.rs`, `servo/selector_parser.rs`, `stylesheets/stylesheet.rs`, `properties/declaration_block.rs`, `stylesheets/rule_parser.rs`, `stylesheets/supports_rule.rs`, `stylesheets/scope_rule.rs`; the struct literals of the tests in `servo/chrome_names.rs` and `servo/chrome_after.rs` | Embedder control: `ParseOptions`, a non-exhaustive set of options whose default is upstream's behaviour, is carried by `ParserContext` and by `SelectorParser` (from the context wherever one exists), and set through new `_with_options` forms of `StylesheetContents::from_str`, `Stylesheet::from_str` and `parse_style_attribute`. Its first field, `attribute_s_flag` (default `true`, Selectors 4 section 6.3), is what servo's `SelectorParser` answers to `selectors-attr-flag-hook`'s hook, so an embedder decides per sheet whether the `s` attribute flag parses; upstream always accepts it and has no per-parse options | `viper-style::cascade fork_patches::stylesheet_parse_options_decide_the_s_flag` | Candidate; draft to the owner first | Viper STY-FORK-1 | 167 / 97 |
+| `stylesheet-parse-options` | `stylo`: `stylesheets/parse_options.rs` (new), `stylesheets/mod.rs`, `parser.rs`, `selector_parser.rs`, `servo/selector_parser.rs`, `stylesheets/stylesheet.rs`, `properties/declaration_block.rs`, `stylesheets/rule_parser.rs`, `stylesheets/supports_rule.rs`, `stylesheets/scope_rule.rs` (until STY-FORK-3b, also the struct literals of the tests in `servo/chrome_names.rs` and `servo/chrome_after.rs`) | Embedder control: `ParseOptions`, a non-exhaustive set of options whose default is upstream's behaviour, is carried by `ParserContext` and by `SelectorParser` (from the context wherever one exists), and set through new `_with_options` forms of `StylesheetContents::from_str`, `Stylesheet::from_str` and `parse_style_attribute`. Its first field, `attribute_s_flag` (default `true`, Selectors 4 section 6.3), is what servo's `SelectorParser` answers to `selectors-attr-flag-hook`'s hook, so an embedder decides per sheet whether the `s` attribute flag parses; upstream always accepts it and has no per-parse options | `viper-style::cascade fork_patches::stylesheet_parse_options_decide_the_s_flag` | Candidate; draft to the owner first | Viper STY-FORK-1 | 167 / 97 |
 | `value-grammar-options` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/supports_rule.rs`, `stylesheets/mod.rs`, `properties/mod.rs`, `values/specified/text.rs`, `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`; the test import of `values/specified/box.rs` | Embedder control and standard grammars: `ParseOptions` gains `value_aliases` (`(property, spelling, keyword)`: every whole identifier of a declared value equal to a listed spelling is replaced by its keyword before the grammar parses) and `refused_values` (`(property, keyword or function)`: a declared value holding a listed identifier or function name at any depth is invalid; an unquoted `url(…)` token names the function `url`), both ASCII case-insensitive, in every origin, empty by default, applied in `PropertyDeclaration::parse_into` (style rules, `style` attributes, `@supports` and `CSS.supports`), and `unsupported_values` (the same shape), which only a supports condition reads (`@supports` and `CSS.supports`). Servo builds also parse the standard grammars upstream builds for Gecko or behind `layout.unimplemented`: `text-decoration-line`'s `spelling-error` and `grammar-error` (CSS Text Decoration 4 section 2.1), `text-indent`'s `hanging` and `each-line` (CSS Text 3 and 4 section 9.1), `text-wrap-style` with `pretty` and the `text-wrap` shorthand (CSS Text 4 sections 5.4 and 5.5), and `counter-reset`, `counter-increment` and `counter-set` (CSS Lists 3 section 4) | `viper-style::api value_grammar::value_grammar_options_take_a_test_list` (and `value_grammar_basic_answers`, Viper's Basic lists) | Options: candidate, draft to the owner first; grammars: candidate | Viper STY-FORK-2; unquoted `url(…)`: Viper STY-FORK-URL-1 | 197 / 182 |
 | `servo-scripting-media-feature` | `stylo`: `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5 section 9.1's `scripting` feature (`none`, `initial-only` or `enabled`), which upstream's servo list lacks; it evaluates to `enabled`, because the embedder runs scripts | `viper-style::api value_grammar::servo_scripting_media_feature_is_enabled` | Candidate; draft to the owner first | Viper STY-FORK-2 (from `chrome-value-parsing`, V10b-6) | 22 / 44 |
 | `to-arc-provenance` | `stylo`: `stylesheets/container_rule.rs`, `values/computed/mod.rs`, `properties/properties.mako.rs` | Soundness: the container lookup rebuilt an `Arc` from `&ComputedValues` with `ComputedValues::to_arc` (`Arc::from_raw_addrefed`), a reference that grants no access to the reference count, undefined behaviour under both of Miri's aliasing models; the lookup now keeps the style it has (the caller's reference, or a clone of the element data's `Arc`), and servo builds drop `to_arc` | `viper-style::api containers::a_container_query_matches_under_miri` (the gate, named; Miri under both models in the PR's pool Miri job and the nightly slow run) | Candidate; draft to the owner first | Viper V10b-10a | 58 / 0 |
 | `servo-container-queries` | `stylo`: `stylesheets/rule_parser.rs`, `values/specified/length.rs`, `stylesheets/container_rule.rs` (its tests), `properties/computed_value_flags.rs`, `properties/shorthands.toml`, `properties/shorthands.rs`; `stylo_static_prefs`: `preferences.toml`, `src/lib.rs` (its test) | Standard: servo builds parse CSS Conditional 5's `@container` rules (section 5.4), container relative lengths (section 7), `style()` queries (section 6.2) and the `container` shorthand (section 5.3), which upstream leaves out of servo builds (behind its other build feature) or turns off, and a new computed-value flag `DEPENDS_ON_CONTAINER_QUERY` marks every style whose matching evaluated a container condition | `viper-style::api containers::servo_container_queries_evaluate` | Candidate; draft to the owner first | Viper V10b-10a | 40 / 106 |
 | `container-size-px` | `stylo`: `dom.rs`, `stylesheets/container_rule.rs`, `values/specified/length.rs`, `queries/values.rs`, `gecko/wrapper.rs` | Precision: `TElement::query_container_size` answers in CSS px instead of app units (1/60 px), so an embedder's sizes in finer units (1/64 px) compare and compute exactly in size queries and container relative lengths | `viper-style::api containers::container_size_px_compares_exactly` | Candidate; draft to the owner first | Viper V10b-10a | 52 / 27 |
 | `line-height-number-f64` | `stylo`: `values/specified/font.rs`, `values/computed/font.rs`, `device/servo.rs`, `properties/longhands.toml`, `properties/shorthands.rs` | Precision: a unitless `line-height` keeps its number as written: in servo builds the computed number is `f64`, read from the number token's text or from a math function of numbers evaluated in `f64`, so the used line height (CSS Inline 3 section 5.1) is the exact number times the font size (`calc(20 / 12)` of 12px is 20px, where the `f32` number makes it a little less); the specified number keeps the parsed one for serialization, and the declaration is boxed for the extra `f64` | `viper-style::cascade fork_patches::line_height_number_f64` | Candidate; draft to the owner first | Viper V10b-8b | 252 / 51 |
-| `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `servo/chrome_names.rs`, `servo/chrome_after.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; its name methods receive the enclosing `SelectorParser`, so the selectors an embedder parses in a functional name's arguments keep the sheet's declared namespaces, origin, supports-condition mode and options as the enclosing selector does; without a hook the parser keeps this branch's default name tables (recorded in their own rows), and with one it answers upstream's names and rule where the hook does not. `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy`, and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a; extended by Viper STY-FORK-3a2 | 281 / 335 |
+| `selector-names-hook` | `stylo`: `stylesheets/parse_options.rs`, `stylesheets/mod.rs`, `servo/selector_parser.rs`, `matching.rs`, `properties/properties.mako.rs` | Embedder control: `ParseOptions` gains `selector_names`, an embedder's `SelectorNames` (default `None`), which servo's `SelectorParser` asks before its own names: the pseudo-classes and pseudo-elements beyond servo's (Selectors 4 section 3.9 makes any other name invalid), the names servo parses that sheets other than user-agent sheets refuse, what may follow a pseudo-element in its compound (Selectors 4 section 3.6.3 and each pseudo-element's own specification), and the aliases of `:is()` over compound selectors; its name methods receive the enclosing `SelectorParser`, so the selectors an embedder parses in a functional name's arguments keep the sheet's declared namespaces, origin, supports-condition mode and options as the enclosing selector does; without a hook, or where the hook does not answer, the parser gives upstream's names and rule (since Viper STY-FORK-3b, which retired this branch's default name tables). `PseudoElement::Unmatched` holds its name in ASCII lowercase (with `()` when functional) instead of a kind, so `PseudoElement` is `Clone` and no longer `Copy` (`index()` and `from_eager_index` match the variants instead of `as usize` and a transmute), and servo's `ComputedValues` grows from 232 to 248 bytes; upstream has no such hook | `viper-style::api fork_patches::selector_names_hook_in_stylesheets_and_queries` | Candidate; draft to the owner first | Viper STY-FORK-3a; extended by Viper STY-FORK-3a2 and STY-FORK-3b | about 320 / 380 |
 | `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 142 / 52 |
 | `servo-device-media-features` | `stylo`: `servo/media_features.rs`, `device/servo.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5's `color-gamut` (section 6.4), `dynamic-range` (6.5), `prefers-reduced-motion` (12.1), `prefers-contrast` (12.3) and `forced-colors` (12.4), which upstream's servo list lacks, so a query on one was unknown; each reads the embedder's setting from the `Device` (`DeviceMediaFeatures`, defaulting to `srgb`, `standard`, `no-preference`, `no-preference`, `none`), and `Device::forced_colors` returns its setting instead of a fixed `none` | `viper-style::cascade device::servo_device_media_features_take_the_config` | Candidate; draft to the owner first | Viper STY-FORK-DEVICE-1 | 190 / 118 |
 | `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own; the box's `baseline_source` is then always `auto`, and a layout reads `-x-baseline-source` where it is | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 121 / 91 |
@@ -637,12 +639,13 @@ Problem, change, every spot, the Miri commands and the before/after results:
   as `::-internal-unmatched`, its `cascade_type` is `Lazy`, and it is the
   one pseudo-element whose `accepts_state_pseudo_classes` is `true` (Chrome
   accepts `::-webkit-scrollbar:hover` and `::cue:hover`). Servo's parser
-  built none of the three until `chrome-selector-names`, which moved the
-  names into it, so stylesheets keep those rules since then; what the
+  builds the three only for an embedder's `SelectorNames`
+  (`selector-names-hook`; from V10b-4c1 to STY-FORK-3b the retired
+  `chrome-selector-names` built them without a hook); what the
   embedder matches is its own decision (Viper: `:dir()` by directionality, Chrome's
   `:-internal-text-field` on text fields, everything else on nothing).
-  Since `chrome-after-pseudo-element` the pseudo-element carried an
-  `UnmatchedKind`; since `selector-names-hook` it holds its name, and
+  From `chrome-after-pseudo-element` (retired) the pseudo-element carried
+  an `UnmatchedKind`; since `selector-names-hook` it holds its name, and
   `PSEUDO_COUNT` is its `index()` plus one, written out.
   The payloads are boxed strings, as `Lang`'s, so the enum keeps its size
   (24 bytes on 64-bit targets).
@@ -655,10 +658,11 @@ Problem, change, every spot, the Miri commands and the before/after results:
   rule and the last index) and
   `chrome_dom_api_pseudos_stay_out_of_servo_parsing` (servo's author parser
   still refuses `:dir(ltr)`, `:horizontal`, `::cue`, `::-webkit-scrollbar`
-  and `::-internal-unmatched`). All 16 `stylo` library tests pass. Since
-  `chrome-selector-names` the second is
-  `chrome_dom_api_pseudos_internal_name_stays_unparsed`: only
-  `::-internal-unmatched` stays refused.
+  and `::-internal-unmatched`). All 16 `stylo` library tests pass. The
+  second is now `chrome_dom_api_pseudos_internal_name_stays_unparsed`:
+  without a hook servo's parser refuses those names and
+  `::-internal-unmatched`, as upstream (since STY-FORK-3b; between
+  V10b-4c1 and it only `::-internal-unmatched` stayed refused).
 - **Viper proof.** `chrome_dom_api_pseudos_parse_and_match_nothing`
   (`viper-style`'s `api` test binary) and the selector goldens `names-*`.
 - **Commands.** `cargo test -p stylo --lib`.
@@ -781,131 +785,56 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --lib`.
 - **Upstream.** Chrome-specific, so not offered.
 
-## Patch `chrome-selector-names`
+## Patch `selectors-after-pseudo-element-hook`
 
-- **Problem.** Chrome 154 parses the selectors of its stylesheets and of
-  its DOM selector APIs with one parser, so both accept the same
-  pseudo-class and pseudo-element names. Viper's DOM-API parser accepted
-  Chrome's names (`chrome-dom-api-pseudos`), but stylesheets parse with
-  servo's `SelectorParser`, which refused them: a rule whose selector list
-  named `:dir()`, `:-webkit-any()`, `::-webkit-scrollbar` or another of them
-  was dropped where Chrome keeps it. Servo also parses names Chrome refuses
-  (`:-moz-meter-optimum`, `:lang("en")`, `::color-swatch`,
-  `::slider-thumb`), so such rules were kept where Chrome drops them.
-- **Change.** The names, their tables and their argument grammars move from
-  Viper's DOM-API parser into `style/servo/chrome_names.rs`, which servo's
-  `SelectorParser` consults before its own names, in every origin:
-  `parse_non_ts_pseudo_class` (the 36 plain pseudo-classes of Viper's probe
-  as `NonTSPseudoClass::Unmatched` with their serialization, and the three
-  aliases), `parse_non_ts_functional_pseudo_class` (`:dir(<ident>)` as
-  `NonTSPseudoClass::Dir`, `:host-context(<compound-selector>)` and
-  `:active-view-transition-type(<ident>#)` as `Unmatched`),
-  `parse_pseudo_element` (every `-webkit-` name and the 14 plain
-  pseudo-elements as `PseudoElement::Unmatched`), the new
-  `parse_functional_pseudo_element` (`::highlight(<ident>)`,
-  `::cue(<compound-selector-list>)`, `::scroll-button(* | <direction>)` and
-  the five `::view-transition-*(<pt-name-and-class-selector>)` parts) and
-  `parse_compound_is_alias` (`-webkit-any`). Outside user-agent sheets the
-  parser refuses `-moz-*` and `-servo-*` names (a pseudo-class or a
-  pseudo-element), a string in `:lang()` (an identifier only) and
-  `::color-swatch`, `::slider-fill`, `::slider-thumb` and `::slider-track`;
-  user-agent sheets keep servo's own names. Viper's DOM-API parser now
-  delegates every name to this parser and keeps only its own refusal of
-  form state it cannot match yet. Viper's goldens of Chrome 154
-  (`sheet-names.html`) decided the `-internal-` names: Chrome's stylesheets
-  keep `:-internal-text-field`, `:-internal-autofill-selected` and
-  `:-internal-dialog-in-top-layer` as its DOM APIs do, so no name is
-  accepted by the DOM APIs alone.
-- **Spots.** `style/servo/chrome_names.rs` (the tables, the grammars, the
-  author-sheet refusals and the tests), `style/servo/mod.rs` (the module),
-  `style/servo/selector_parser.rs` (the five parser methods, and the
-  `chrome-dom-api-pseudos` comments and test that said servo never builds
-  its variants).
-- **Fork tests.** `chrome_selector_names_parse_in_every_origin`,
-  `chrome_selector_names_refuse_bad_arguments` and
-  `chrome_selector_names_refused_outside_user_agent_sheets`, and
-  `chrome_dom_api_pseudos_internal_name_stays_unparsed`; all 23 `stylo`
-  library tests and the 18 `selectors` tests pass.
-- **Viper proofs.** `chrome_selector_names_in_stylesheets` in the gate's
-  patch proofs, the computed-value golden suite (`sheet-names.html`, 51
-  cases) and the selector golden suite (`names-*`, every result unchanged).
-- **Commands.** `cargo test -p stylo --lib`, `cargo test -p selectors`.
-- **Upstream.** Chrome-specific, so not offered.
-
-## Patch `chrome-after-pseudo-element`
-
-- **Problem.** Chrome 154 accepts after each pseudo-element the
-  pseudo-classes its parser's table names for it, in stylesheets and in its
-  DOM selector APIs alike (Chromium's `IsPseudoClassValidAfterPseudoElement`
-  and `IsSimpleSelectorValidAfterPseudoElement`, BSD,
-  `third_party/blink/renderer/core/css/parser/css_selector_parser.cc` at
-  154.0.8037.57): `::-webkit-scrollbar:horizontal`,
-  `::-webkit-scrollbar-button:decrement`, `::-webkit-scrollbar:disabled`,
-  `::selection:window-inactive`, `::-webkit-foo:focus-visible`,
-  `::view-transition-old(*):only-child`, `::search-text:current`,
-  `::scroll-marker:target-current`, `::scroll-button(up):focus`, and it
-  refuses others that upstream takes (`::-webkit-scrollbar:focus`,
-  `::view-transition-group(*):hover`, `::highlight(x):hover`,
-  `::-webkit-scrollbar:-webkit-any(:hover)`). `:is()`, `:where()` and
-  `:not()` are always valid there, and what they contain is checked against
-  the same pseudo-element: forgivingly in the first two. Upstream accepts
-  only a user-action pseudo-class (`:hover`, `:active`, `:focus`), and only
-  after a pseudo-element that accepts state pseudo-classes.
-- **Change.** `selectors`: the parsing state `CHECK_AFTER_PSEUDO_ELEMENT`,
-  set after a pseudo-element that is not element-backed (and not after
-  `::slotted()`), under which the pseudo-classes that follow it, and those
-  inside its `:is()`, `:where()` and `:not()`, parse without upstream's
-  checks; the compound then hands each simple selector to the new `Parser`
-  hook `valid_after_pseudo_element` (`check_after_pseudo_element`, which
+- **Problem.** Selectors 4 section 3.6.3 lets each pseudo-element's
+  specification allow pseudo-classes after it beyond the user actions
+  (`:only-child` after the view-transition parts, CSS View Transitions 1),
+  and an embedder may take names after a pseudo-element that it refuses on
+  elements. Upstream fixes the rule in the parsing state: only a
+  user-action pseudo-class, and only after a pseudo-element that accepts
+  state pseudo-classes (tree-structural ones only in a pseudo-element
+  tree), so a parser cannot decide it per pseudo-element.
+- **Change.** The parsing state `CHECK_AFTER_PSEUDO_ELEMENT`, set after a
+  pseudo-element that is not element-backed (and not after `::slotted()`),
+  under which the pseudo-classes that follow it, and those inside its
+  `:is()`, `:where()` and `:not()`, parse without upstream's checks; the
+  compound then hands each simple selector to the `Parser` hook
+  `valid_after_pseudo_element` (`check_after_pseudo_element`, which
   forgives an invalid item of `:is()` or `:where()` as written and fails a
   `:not()` with one). The hook's default is upstream's rule, so upstream's
-  tests and every other `Parser` are unchanged. `:-webkit-any()`
-  (`selectors-compound-is-alias`) is refused after a pseudo-element, as
-  Chrome refuses it. A second hook,
+  tests and every other `Parser` are unchanged. An `:is()` alias
+  (`selectors-compound-is-alias`) is refused after such a pseudo-element,
+  as upstream refuses a functional pseudo-class there. A second hook,
   `parse_non_ts_pseudo_class_after_pseudo_element` (by default
-  `parse_non_ts_pseudo_class`), lets an embedder parse a name there that it
-  refuses elsewhere (Viper refuses form state it cannot match yet, but
-  `::-webkit-scrollbar:disabled` matches no element). The hooks are on
-  `Parser`, not on the `PseudoElement` trait, which has no `SelectorImpl`
-  to name the pseudo-classes. `stylo`: `chrome_after.rs` reads an
-  `UnmatchedKind` (`ScrollbarPart`, `WebkitCustom`, `ViewTransitionPart`,
-  `SearchText`, `ScrollMarker`, `ScrollMarkerGroup`, `ScrollButton`, `Cue`,
-  `Column`, `Other`) from the name `PseudoElement::Unmatched` holds (since
-  `selector-names-hook`; before, the variant carried the kind, set by
-  `chrome_names.rs`); every name serializes, cascades and is indexed as
-  before. `index()` and
-  `from_eager_index` match the variants instead of `as usize` and a
-  transmute, which need an enum without fields. `style/servo/chrome_after.rs`
-  is servo's hook: Chrome's table for the kinds, `::selection`
-  (`:window-inactive`), `::file-selector-button` (the user actions) and,
-  for the other servo pseudo-elements, nothing (`::before`, `::after` and
-  `::marker` take `:hover` only behind a runtime flag Chrome 154 leaves
-  off). Chrome's user-action set adds `:focus-visible` and `:focus-within`.
-- **The goldens decide.** Where Viper's goldens of Chrome 154 differ from a
-  reading of the table they win: the plain `::cue` takes the user actions
-  (`names-after-cue-hover`) and `::cue(b)` nothing; `::view-transition`
-  itself takes no `:only-child` (`names-after-view-transition-only-child`);
-  `::placeholder` takes no user action (`names-after-placeholder-hover`).
+  `parse_non_ts_pseudo_class`), lets a parser take a name there that it
+  refuses elsewhere. The hooks are on `Parser`, not on the `PseudoElement`
+  trait, which has no `SelectorImpl` to name the pseudo-classes. Servo's
+  `SelectorParser` answers the first through `selector-names-hook`: the
+  embedder's `valid_after`, and without a hook or an answer upstream's
+  rule.
+- **History.** Added by Viper's V10b-4c2 as the `selectors` half of
+  `chrome-after-pseudo-element`, whose `stylo` half (a fixed table in
+  `servo/chrome_after.rs`) Viper's STY-FORK-3b retired; the hooks and their
+  tests are unchanged, under this id.
 - **Spots.** `selectors/parser.rs`: the state flag and the three
   `SelectorParsingState` checks, the two `Parser` hooks, the compound loop,
   `check_after_pseudo_element` and `valid_after`, the refusals of a
-  functional pseudo-class and of a non-user-action one, `:-webkit-any()`,
-  and the test parser's switch. `style/servo/`: `chrome_after.rs` (new),
-  `chrome_names.rs` (the kinds), `mod.rs`, `selector_parser.rs`
-  (`Unmatched`'s kind, `index`, `from_eager_index`, `PSEUDO_COUNT`, the
-  hook, the tests).
+  functional pseudo-class and of a non-user-action one, the alias refusal,
+  and the test parser's switch.
 - **Fork tests.** `after_pseudo_element_default_keeps_upstream_rule` and
   `after_pseudo_element_parses_its_own_names` (`selectors`; every input of
-  the first but `::before:-webkit-any(:hover)` gives the same result on the
-  parser before the patch), `chrome_pseudo_classes_after_pseudo_elements`
-  and `chrome_after_pseudo_element_indices_stay_distinct` (`stylo`); all 20
-  `selectors` tests and 25 `stylo` library tests pass.
-- **Viper proofs.** `chrome_pseudo_classes_after_pseudo_elements` (the
-  `cascade` test binary) in the gate's patch proofs, the selector golden
-  suite (`names-after-*`, 53 cases) and the computed-value golden suite
-  (`sheet-after-pseudo.html`, 51 cases).
-- **Commands.** `cargo test -p selectors`, `cargo test -p stylo --lib`.
-- **Upstream.** Chrome-specific, so not offered.
+  the first but `::before:-webkit-any(:hover)`, the test parser's alias,
+  gives the same result on the parser before the patch);
+  `selector_names_hook_decides_what_follows_a_pseudo_element` and
+  `selector_names_hook_absent_gives_upstream_answers` (`stylo`, through
+  servo's parser).
+- **Viper proof.** `selector_names_hook_in_stylesheets_and_queries`:
+  Basic's `valid_after` decides what follows a pseudo-element in its
+  sheets and its DOM selector APIs alike.
+- **Commands.** `cargo test -p selectors`, `cargo test -p stylo --features
+  servo --lib`.
+- **Upstream.** Generic; a candidate, drafted to the owner first.
 
 ## Patch `servo-display-contents-unboxing`
 
@@ -1058,9 +987,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `style/stylesheets/stylesheet.rs` (the two `from_str_with_options` and
   `parse_rules`), `style/properties/declaration_block.rs`
   (`parse_style_attribute_with_options`), `style/stylesheets/rule_parser.rs`,
-  `supports_rule.rs` and `scope_rule.rs` (the options copied), and the
-  test-only struct literals in `style/servo/chrome_names.rs` and
-  `chrome_after.rs` (the default).
+  `supports_rule.rs` and `scope_rule.rs` (the options copied), and, until
+  STY-FORK-3b removed those files, the test-only struct literals in
+  `style/servo/chrome_names.rs` and `chrome_after.rs` (the default).
 - **Fork tests.** `stylesheet_parse_options_default_accepts_the_s_flag`,
   `stylesheet_parse_options_refuse_the_s_flag` and
   `stylesheet_parse_options_style_attribute`; all 29 `stylo` library
@@ -1286,9 +1215,10 @@ Problem, change, every spot, the Miri commands and the before/after results:
 
 - **Problem.** Which pseudo-class and pseudo-element names a sheet
   accepts, with which arguments, and what may follow a pseudo-element, is
-  fixed in servo's parser: upstream's names and rule, or this branch's
-  default tables. An embedder whose DOM selector APIs follow a table of
-  its own cannot make its stylesheets agree with them.
+  fixed in servo's parser: upstream's names and rule (until Viper's
+  STY-FORK-3b, this branch's default tables). An embedder whose DOM
+  selector APIs follow a table of its own cannot make its stylesheets
+  agree with them.
 - **Change.** `ParseOptions::selector_names` holds an embedder's
   `SelectorNames` (`stylesheets/parse_options.rs`, exported from
   `stylesheets`), default `None`. When it is set, servo's `SelectorParser`
@@ -1303,19 +1233,21 @@ Problem, change, every spot, the Miri commands and the before/after results:
   embedder parses the selectors nested in arguments, such as a compound
   selector, with the parser it is given, so they keep its declared
   namespaces, origin, supports-condition mode and options (the hook
-  included), as the default tables' nested selectors do. Without a
-  hook nothing changes: the default tables answer, and `:lang()` with a
-  string stays refused outside user-agent sheets only then.
-  `PseudoElement::Unmatched` holds its name instead of the default
-  table's kind, which the default tables' module now reads from the name; so
-  `PseudoElement` is no longer `Copy` (two clones in `matching.rs`, one in
-  `ComputedValues::pseudo`) and servo's `ComputedValues` is 248 bytes.
+  included), as the enclosing selector does. Without a hook servo's
+  parser gives upstream's answers: its own names (`:lang()` takes a
+  string), none beyond them, and upstream's rule after a pseudo-element;
+  until STY-FORK-3b this branch's default tables answered then.
+  `PseudoElement::Unmatched` holds its name, so `PseudoElement` is no
+  longer `Copy` (two clones in `matching.rs`, one in
+  `ComputedValues::pseudo`), `index()` and `from_eager_index` match the
+  variants instead of `as usize` and a transmute, and servo's
+  `ComputedValues` is 248 bytes.
 - **Spots.** `style/stylesheets/parse_options.rs` (the field, the trait,
   `PartialEq` by hook identity and `Debug` by hand, the test module),
   `style/stylesheets/mod.rs`, `style/servo/selector_parser.rs` (the
-  variant, `PSEUDO_COUNT`, `embedder_name` and the five `Parser` methods),
-  `style/servo/chrome_names.rs`, `style/servo/chrome_after.rs`,
-  `style/matching.rs`, `style/properties/properties.mako.rs`.
+  variant, `PSEUDO_COUNT`, `index`, `from_eager_index`, `embedder_name`
+  and the five `Parser` methods), `style/matching.rs`,
+  `style/properties/properties.mako.rs`.
 - **Fork tests.** `selector_names_hook_decides_the_names`,
   `selector_names_hook_refuses_outside_user_agent_sheets`,
   `selector_names_hook_decides_what_follows_a_pseudo_element`,
@@ -1323,8 +1255,13 @@ Problem, change, every spot, the Miri commands and the before/after results:
   under a hook; distinct zero-sized hooks compare unequal),
   `selector_names_hook_nests_with_the_enclosing_parser` (the test hook's
   `:host-context()` keeps a declared `svg` namespace in `svg|a` and refuses
-  an unknown name in `:is()` in a supports condition, as the default tables
-  do), with two test implementations.
+  an unknown name in `:is()` in a supports condition; without a hook
+  servo's parser has no `:host-context()`),
+  `selector_names_hook_absent_gives_upstream_answers` (without a hook, in
+  every origin: none of the names the retired tables took, every servo
+  name they refused, nothing after `::before`) and
+  `selector_names_hook_indices_stay_distinct`, with two test
+  implementations.
 - **Viper proof.** `selector_names_hook_in_stylesheets_and_queries`:
   Viper's Basic names in its sheets and its DOM selector APIs alike.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
@@ -1648,6 +1585,8 @@ the commits that carried them stay, as every pinned commit does.
 | --- | --- | --- | --- | --- |
 | `chrome-attr-s-flag` | STY-FORK-1 | It made servo's `SelectorParser` refuse the `s` attribute flag in every sheet; whether a sheet accepts the flag is now the embedder's choice, per parse | `c4343e2a` | `stylesheet-parse-options` (`attribute_s_flag: false` gives its answer) |
 | `chrome-value-parsing` | STY-FORK-2 | It hard-coded Chrome 154's extra spellings and refusals in servo builds through the derives; they are now the embedder's lists, per parse, and the standard parts are their own patches | `36cc25a7` | `value-grammar-options` (the lists; Chrome's are the Chrome 154 provider's) and `servo-scripting-media-feature` |
+| `chrome-selector-names` | STY-FORK-3b | It hard-coded Chrome 154's pseudo-class and pseudo-element names, argument grammars and author-sheet refusals as servo's answers without a hook; they are now an embedder's `SelectorNames`, per parse | `592db556` | `selector-names-hook` (Viper's Basic table, or Chrome 154's in the Chrome 154 provider) |
+| `chrome-after-pseudo-element` | STY-FORK-3b | Its `stylo` half hard-coded Chrome 154's table of what may follow each pseudo-element as servo's answer without a hook; its generic `selectors` half stays | `592db556` | `selectors-after-pseudo-element-hook` (the two `Parser` hooks) and `selector-names-hook` (`valid_after`) |
 
 ## Rebase procedure (fork side)
 

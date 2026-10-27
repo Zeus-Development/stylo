@@ -845,12 +845,53 @@ mod selector_names_tests {
         ] {
             assert!(!author(selectors), "{selectors}");
         }
-        // Without a hook, the default tables keep their answers.
+        // Without a hook, upstream's answers: servo's names alone, in
+        // every origin.
         let default = |s| parse(Origin::Author, ParseOptions::default(), s).is_some();
-        assert!(default(":horizontal") && default(":-webkit-any(p)"));
+        assert!(!default(":horizontal") && !default(":-webkit-any(p)"));
         assert!(!default(":made-up") && !default("::made-up"));
-        // Under a hook `:lang()` takes a string again, as upstream does.
-        assert!(author(":lang(\"en\")") && !default(":lang(\"en\")"));
+        assert!(author(":lang(\"en\")") && default(":lang(\"en\")"));
+    }
+
+    // VIPER-PATCH(selector-names-hook): without a hook servo's parser
+    // gives upstream's answers in every origin: none of the names beyond
+    // servo's, every name servo parses, and after a pseudo-element only
+    // upstream's rule (nothing after servo's own).
+    #[test]
+    fn selector_names_hook_absent_gives_upstream_answers() {
+        let default = |origin, s| parse(origin, ParseOptions::default(), s).is_some();
+        for origin in [Origin::Author, Origin::User, Origin::UserAgent] {
+            for selectors in [
+                ":-webkit-any(p, div)",
+                ":-webkit-any-link",
+                ":host-context(div)",
+                ":horizontal",
+                ":dir(rtl)",
+                ":-internal-text-field",
+                "::-webkit-scrollbar",
+                "::-webkit-made-up",
+                "::cue",
+                "::cue(b)",
+                "::highlight(x)",
+                "::view-transition-old(*)",
+                "::selection:window-inactive",
+                "::before:hover",
+                "::before:not(:hover)",
+            ] {
+                assert!(!default(origin, selectors), "{selectors}");
+            }
+            for selectors in [
+                ":-moz-meter-optimum",
+                ":lang(\"en\")",
+                ":lang(en)",
+                "::color-swatch",
+                "::slider-thumb",
+                "::-moz-progress-bar",
+                "::before:is(:hover)",
+            ] {
+                assert!(default(origin, selectors), "{selectors}");
+            }
+        }
     }
 
     // VIPER-PATCH(selector-names-hook): nested selectors parse with the
@@ -874,10 +915,11 @@ mod selector_names_tests {
                 parse_in(Origin::Author, default, namespaces, supports, selectors),
             )
         };
-        // The sheet's namespaces carry into the argument.
+        // The sheet's namespaces carry into the argument. Without a hook,
+        // servo's parser has no `:host-context()`, as upstream.
         let (hook, default) = both(&svg, false, ":host-context(svg|a)");
         assert_eq!(hook.as_deref(), Some(":host-context(svg|a)"));
-        assert_eq!(hook, default);
+        assert_eq!(default, None);
         assert_eq!(
             both(&Namespaces::default(), false, ":host-context(svg|a)"),
             (None, None)
@@ -886,8 +928,7 @@ mod selector_names_tests {
         // unknown name is forgiven, kept as written and matching nothing.
         let unknown = ":host-context(:is(:not-a-name))";
         let (hook, default) = both(&Namespaces::default(), false, unknown);
-        assert_eq!(hook.as_deref(), Some(unknown));
-        assert_eq!(hook, default);
+        assert_eq!((hook.as_deref(), default), (Some(unknown), None));
         assert_eq!(both(&Namespaces::default(), true, unknown), (None, None));
         // And the hook itself: `:made-up` is its name, nested too.
         let made_up = ":host-context(:is(:made-up))";
@@ -954,7 +995,8 @@ mod selector_names_tests {
             count
         };
         assert_eq!(rules(with_names()), 3);
-        assert_eq!(rules(ParseOptions::default()), 3);
+        // Without a hook, upstream's answer: only `p {}`.
+        assert_eq!(rules(ParseOptions::default()), 1);
         assert_eq!(with_names(), with_names());
         assert_ne!(with_names(), ParseOptions::default());
         // Distinct zero-sized hooks may share an address; they differ.
