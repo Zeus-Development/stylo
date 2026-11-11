@@ -92,7 +92,11 @@ whose marker sits beside the `atom!(...)` entries that use them); Viper's
 STY-FORK-VA-1 adds `vertical-align-longhand` to `stylo`; Viper's
 STY-FORK-3b retires `chrome-selector-names` and
 `chrome-after-pseudo-element` (section "Retired patches"), whose two
-`selectors` hooks stay as `selectors-after-pseudo-element-hook`.
+`selectors` hooks stay as `selectors-after-pseudo-element-hook`; Viper's
+STYLO-PIN-B adds `minimum-logical-font-size`, `servo-content-language` (a
+proof of upstream's servo behaviour, with no code), `text-autospace-initial`
+and `servo-standard-pseudo-elements` to `stylo`, and a third group to
+`engine-gates`.
 The other five directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -140,11 +144,15 @@ apart from the packaging files.
 | `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 142 / 52 |
 | `servo-device-media-features` | `stylo`: `servo/media_features.rs`, `device/servo.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5's `color-gamut` (section 6.4), `dynamic-range` (6.5), `prefers-reduced-motion` (12.1), `prefers-contrast` (12.3) and `forced-colors` (12.4), which upstream's servo list lacks, so a query on one was unknown; each reads the embedder's setting from the `Device` (`DeviceMediaFeatures`, defaulting to `srgb`, `standard`, `no-preference`, `no-preference`, `none`), and `Device::forced_colors` returns its setting instead of a fixed `none` | `viper-style::cascade device::servo_device_media_features_take_the_config` | Candidate; draft to the owner first | Viper STY-FORK-DEVICE-1 | 190 / 118 |
 | `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own; the box's `baseline_source` is then always `auto`, and a layout reads `-x-baseline-source` where it is | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 121 / 91 |
-| `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `values/specified/font.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built only for upstream's other engine, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds. Likewise, second group: 48 longhands of CSS UI 4, CSS Fonts 4, CSS Text 3 and 4, CSS Text Decoration 3 and 4, CSS Inline 3, CSS Ruby 1, CSS Writing Modes 3, CSS Images 3, CSS Color Adjustment 1, Scroll-driven Animations 1, Filter Effects 1, CSS Masking 1, SVG 2, MathML Core and the Compatibility Standard, with the serde derives two of their value types lacked | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f; second group: Viper STYLO-PIN-A | 128 / 160 |
+| `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `values/specified/font.rs`, `values/specified/text.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built only for upstream's other engine, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds. Likewise, second group: 48 longhands of CSS UI 4, CSS Fonts 4, CSS Text 3 and 4, CSS Text Decoration 3 and 4, CSS Inline 3, CSS Ruby 1, CSS Writing Modes 3, CSS Images 3, CSS Color Adjustment 1, Scroll-driven Animations 1, Filter Effects 1, CSS Masking 1, SVG 2, MathML Core and the Compatibility Standard, with the serde derives two of their value types lacked. Third group: `word-break`'s `break-word` keyword, which CSS Text 3 section 5.2 keeps for compatibility | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f; second group: Viper STYLO-PIN-A; third: Viper STYLO-PIN-B | 133 / 183 |
 | `normal-color-scheme-option` | `stylo`: `device/servo.rs` | Embedder control: CSS Color Adjustment 1 section 2.1 renders an element whose `color-scheme` is `normal` (it lists no scheme) in the user agent's default scheme, and upstream's servo `Device` always uses the user's preferred one for its system colours and `light-dark()`; the `Device` gains `NormalColorScheme` (`Preferred`, upstream's answer and the default, `Light` or `Dark`), read only for `normal`, so a listed scheme (`light`, `dark`, `light dark`) still follows the author and the preference | `viper-style::cascade device::normal_color_scheme_takes_the_config` | Candidate; draft to the owner first | Viper STY-FORK-SCHEME-1 | 53 / 82 |
 | `animation-names-continue` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 3 runs one animation for each name of `animation-name`, and upstream's servo `maybe_start_animations` returned from its loop over the names after updating the first name that matches a running animation, so every later name was neither started (a name added after a running one) nor updated (a later name's changed `animation-*` values, such as a pause); the loop now goes on with the next name | `viper-style::animation css_animation_cases` (cases `name-added`, `later-name-paused`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 7 / 0 |
 | `pseudo-animation-rule` | `stylo`: `dom.rs`, `style_resolver.rs`, `matching.rs` | Standard: CSS Transitions 1 section 3 compares a style change against the after-change style, which includes the running animations, and upstream matched a `::before` or `::after` with no animation declarations, so a base value changed under the pseudo-element's running animation started a transition; `TElement` gains `pseudo_animation_rule` (default none, upstream's answer), which matching the pseudo-element adds at the animations level, and servo's `process_animations_for_pseudo` no longer returns early on an empty set, so that level leaves the rule node when the pseudo-element's last animation is cancelled | `viper-style::animation css_animation_cases` (cases `pseudo-transition-under-animation`, `pseudo-animation-removed`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 27 / 0 |
 | `animation-name-entries` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 2 runs one animation for each entry of `animation-name`, a name listed twice running twice, and matches a changed list against the running animations from its last entry to its first, each entry taking the last running animation of its name; upstream's servo `maybe_start_animations` matched a running animation by its name alone, so a repeated name ran one animation with the later entry's values, and `is_cancelled_in_new_style` read the name's first entry. An `Animation` now records its entry among the entries of its name, counted from the last (`name_index`), and both spots match on it | `viper-style::animation css_animation_cases` (cases `name-repeated`, `name-repeated-added`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-2 | 44 / 0 |
+| `minimum-logical-font-size` | `stylo`: `values/specified/font.rs`, `device/servo.rs` | Embedder control: CSS Fonts 4 leaves a minimum font size to the user agent, and a minimum that applies only to sizes following the default font size needs to know which those are; upstream keeps that only for sizes derived from a keyword through `em`, percentages, `smaller` and `larger`. In servo builds each computed font size carries `follows_default` (a size keyword; `smaller`, `larger`, a percentage or a font-relative length other than `rem` of a parent size that follows it), and the `Device` gains a minimum logical font size (default none, upstream's answer) that clamps the used size of those sizes only, the computed size staying as computed | `viper-style::cascade stylo_pin_b::minimum_logical_font_size_flags_and_no_minimum` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 80 / 116 |
+| `servo-content-language` | `stylo`: `device/servo.rs` (its test) | Standard, no code: HTML sections 3.2.6.2 and 15.3 give an element the language of its nearest inclusive ancestor with `lang`, which font selection and metrics read. Servo builds already compute the content language (`-x-lang`, a prioritary, inherited font longhand) from a presentational hint an embedder gives, and the font metrics provider receives it with the font; no stylesheet can set it, and with no hint it is empty. The fork test pins that behaviour, so that a rebase that loses it fails | `viper-style::cascade stylo_pin_b::servo_content_language_is_empty_without_a_hint` | Nothing to offer (upstream's behaviour) | Viper STYLO-PIN-B | 0 / 115 |
+| `text-autospace-initial` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its test) | Standard: CSS Text 4 gives `text-autospace` the initial value `normal`, and upstream had `no-autospace` | `viper-style::cascade stylo_pin_b::text_autospace_initial_is_normal` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 5 / 13 |
+| `servo-standard-pseudo-elements` | `stylo`: `servo/selector_parser.rs` | Embedder control and standard pseudo-elements: CSS Pseudo-Elements 4's `::target-text`, `::spelling-error`, `::grammar-error` and `::search-text`, the CSS Custom Highlight API's `::highlight()`, CSS Overflow 5's `::scroll-marker`, `::scroll-marker-group`, `::scroll-button()` and `::column`, CSS View Transitions 1's `::view-transition`, and HTML's `::picker()`, `::picker-icon` and `::checkmark` had no variant in servo builds, so an embedder's `SelectorNames` could build them only as `Unmatched`, all in one rule bucket. Each gains its own `PseudoElement` variant and index, so its rules are in a bucket of their own; they cascade lazily, accept the user-action pseudo-classes (Selectors 4 section 3.6.3), and the functional ones hold their argument (`has_argument`, so their bucket's rules are matched against it). Servo's own parser does not build them: without a hook it refuses the names, as upstream does | `viper-style::cascade stylo_pin_b::servo_standard_pseudo_elements_have_their_own_variants` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 123 / 95 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1444,6 +1452,11 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `vector-effect` (SVG 2); `math-shift` (MathML Core); and
   `-webkit-text-fill-color`, `-webkit-text-stroke-color` and
   `-webkit-text-stroke-width` (the Compatibility Standard).
+- **Problem, third group.** `word-break`'s `break-word` keyword, which CSS
+  Text 3 section 5.2 keeps for compatibility (`normal` with
+  `overflow-wrap: anywhere`, whatever `overflow-wrap` is), was a variant
+  of `WordBreak` for Gecko only, so servo builds dropped
+  `word-break: break-word`.
 - **Change.** The `engine = "gecko"` line of each goes (the Gecko
   preference and FFI names stay, which servo builds ignore), and the
   `offset` and `column_rule` modules of `shorthands.rs` lose their
@@ -1457,6 +1470,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   (as `FontSynthesis` and `CustomIdent` already do); their shorthands
   (`marker`, `text-emphasis`, `-webkit-text-stroke`, `font-synthesis`,
   `text-box`, `scroll-timeline` and `view-timeline`) keep their gates.
+  In the third group `WordBreak::BreakWord` loses its
+  `#[cfg(feature = "gecko")]`; it computes and serializes as itself, and
+  laying it out is the embedder's.
 - **Known difference (not patched).** Stylo's `BreakBetween` has no
   `column`, `avoid-page`, `avoid-column`, `recto` or `verso` in either
   build, though CSS Fragmentation 3 section 3.1 defines them, so
@@ -1472,15 +1488,19 @@ Problem, change, every spot, the Miri commands and the before/after results:
   entries), `style/properties/shorthands.rs` (two module gates) and
   `style/properties/declaration_block.rs` (the test module); second group:
   `style/properties/longhands.toml` (48 entries, the reason in full at
-  `accent-color`) and `style/values/specified/font.rs` (two derives).
+  `accent-color`) and `style/values/specified/font.rs` (two derives);
+  third group: `style/values/specified/text.rs` (`WordBreak`) and the
+  test module.
 - **Fork tests.** `engine_gates_parse_the_standard_longhands`,
-  `engine_gates_parse_the_shorthands` and, for the second group,
-  `engine_gates_parse_the_paint_and_text_longhands`; all 51 `stylo`
-  library tests pass.
+  `engine_gates_parse_the_shorthands`, for the second group
+  `engine_gates_parse_the_paint_and_text_longhands` and for the third
+  `engine_gates_parse_word_break_break_word`; all 58 `stylo` library
+  tests pass.
 - **Viper proof.** `engine_gates`, which computes values of the
-  longhands through Viper's cascade and `computed_value`. For the second
-  group, Viper's parse and properties case suites, through
-  `CSS.supports`, until its computed values are reported.
+  longhands through Viper's cascade and `computed_value`, `word-break:
+  break-word` included. For the second group, Viper's parse and
+  properties case suites, through `CSS.supports`, until its computed
+  values are reported.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
@@ -1613,6 +1633,132 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
+
+## Patch `minimum-logical-font-size`
+
+- **Problem.** CSS Fonts 4 leaves a minimum font size to the user agent.
+  A minimum that keeps a page's own small sizes, and raises only the
+  sizes the page derived from the user's default font size (a size
+  keyword, or a size relative to one), needs to know which sizes follow
+  the default. Upstream keeps the keyword a size derives from
+  (`KeywordInfo`) through `em`, percentages, `smaller` and `larger` only,
+  for recomputing keyword sizes, and loses it through `ex`, `ch` and the
+  other font-relative units; the servo `Device` has no minimum.
+- **Change.** In servo builds `KeywordInfo` gains `follows_default`: true
+  for a size keyword; for `smaller`, `larger`, a percentage and a
+  font-relative length other than `rem`, the parent's flag; false for an
+  absolute, viewport or container length, `rem` and a math function. The
+  `Device` gains `set_minimum_logical_font_size` and
+  `minimum_logical_font_size` (default `None`, upstream's answer). When a
+  minimum is set, `FontSize::to_computed_value_against` clamps the used
+  size of a size that follows the default to it; the computed size, which
+  children's percentages and em lengths use, stays as computed. The flag
+  is `#[animation(constant)]` and skipped in serialization. Like the
+  other `Device` settings, a change applies to the sizes computed after
+  it, so the embedder restyles.
+- **Known differences (not patched).** An animated or transitioned font
+  size, and one from a resolved value, follows nothing, so it is not
+  clamped; the clamp ignores zoom (it compares the zoomed computed size);
+  and the root's inherited initial size is the embedder's (it builds the
+  initial font).
+- **Spots.** `style/values/specified/font.rs` (`KeywordInfo`'s field,
+  `new`, `compose`, the end of `to_computed_value_against` and
+  `FontSize::follows_default`); `style/device/servo.rs` (the field, its
+  default, the accessors and the test module).
+- **Fork tests.** `minimum_logical_font_size_clamps_sizes_that_follow_the_default`:
+  18 sizes under a parent that follows the default or not, with and
+  without a minimum, each with its computed size, used size and flag.
+- **Viper proof.** `stylo_pin_b::minimum_logical_font_size_flags_and_no_minimum`
+  (the cascade test binary): the flags through Viper's cascade, and with
+  no minimum, Viper's configuration at this pin, the used size equal to
+  the computed size.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Embedder control, so a candidate; a draft goes to the
+  Viper owner first.
+
+## Patch `servo-content-language`
+
+- **Problem.** None in code. HTML sections 3.2.6.2 and 15.3 give an
+  element the language of its nearest inclusive ancestor with `lang`, and
+  font selection and font metrics read it. Servo builds already compute
+  it: `-x-lang` is a prioritary, inherited font longhand in both builds;
+  an embedder gives it as a presentational hint (no stylesheet can set
+  it, since it is enabled nowhere), every descendant inherits it, and the
+  font metrics provider receives it in the `Font` it measures. With no
+  hint it is empty.
+- **Change.** None; the fork test pins the behaviour, so that a rebase
+  that loses it fails.
+- **Spots.** `style/device/servo.rs` (the test module).
+- **Fork tests.** `servo_content_language_is_a_hint_inherited_and_measured`:
+  the hint, its inheritance, a nearer hint winning, `1ex` measured in the
+  hinted language's font by a provider that reads it, and a stylesheet
+  that cannot set it.
+- **Viper proof.** `stylo_pin_b::servo_content_language_is_empty_without_a_hint`:
+  Viper gives no hint at this pin, so every element's language is empty;
+  Viper's task B21a gives `lang` as the hint, with its own tests.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Nothing to offer: the test pins upstream's behaviour.
+
+## Patch `text-autospace-initial`
+
+- **Problem.** CSS Text 4 defines `text-autospace` with the initial value
+  `normal`; upstream's is `no-autospace`, so an element no rule styles
+  computed the wrong value.
+- **Change.** The longhand's `initial` is `TextAutospace::NORMAL`.
+- **Spots.** `style/properties/longhands.toml` (one entry) and
+  `style/properties/declaration_block.rs` (the test module).
+- **Fork tests.** `text_autospace_initial_is_normal`.
+- **Viper proof.** `stylo_pin_b::text_autospace_initial_is_normal`: an
+  unstyled element's computed `text-autospace` through Viper's cascade.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-standard-pseudo-elements`
+
+- **Problem.** Servo builds have no variant for 13 standard
+  pseudo-elements: CSS Pseudo-Elements 4's `::target-text`,
+  `::spelling-error`, `::grammar-error` and `::search-text`, the CSS
+  Custom Highlight API's `::highlight()`, CSS Overflow 5's
+  `::scroll-marker`, `::scroll-marker-group`, `::scroll-button()` and
+  `::column`, CSS View Transitions 1's `::view-transition`, and HTML's
+  `::picker()`, `::picker-icon` and `::checkmark`. An embedder's
+  `SelectorNames` (`selector-names-hook`) could admit them only as
+  `Unmatched`, whose names share one index, so all their rules were in
+  one bucket and none could be cascaded as its own pseudo-element.
+- **Change.** A variant for each, before `Unmatched` (indices 23 to 35;
+  `Unmatched` is 36 and `PSEUDO_COUNT` 37), cascading lazily. The three
+  functional ones hold their argument as serialized (`Highlight`,
+  `ScrollButton`, `Picker`), serialize as `::name(argument)` and answer
+  `has_argument`, so their bucket's rules are matched again against the
+  argument. `::highlight()` answers `is_highlight` and `::target-text`
+  `is_target_text`, so both are lazily painted highlight pseudo-elements
+  in invalidation. They accept the user-action pseudo-classes (Selectors 4
+  section 3.6.3: allowed unless a pseudo-element's specification says
+  otherwise); none is element-backed or restricts properties. A new
+  `is_servo_standard` names them. Servo's own parser does not build them:
+  without a hook the names are refused, as upstream does; an embedder's
+  `SelectorNames` builds them. `pseudo_none_array` builds its array with
+  `std::array::from_fn`, since an array of more than 32 items has no
+  `Default`.
+- **Spots.** `style/servo/selector_parser.rs`: the enum, `PSEUDO_COUNT`,
+  `ToCss`, `accepts_state_pseudo_classes`, `index`, `pseudo_none_array`,
+  `cascade_type`, `is_highlight`, `has_argument`, `is_target_text`,
+  `is_servo_standard`, the index test's list and the test module.
+- **Fork tests.** `servo_standard_pseudo_elements_serialize_and_cascade_lazily`,
+  `servo_standard_pseudo_elements_have_their_own_buckets` (a
+  `PerPseudoElementMap` holds each apart from `Unmatched`, a functional
+  one's arguments sharing one) and
+  `servo_standard_pseudo_elements_stay_unparsed_without_names`; and
+  `selector_names_hook_indices_stay_distinct` lists them.
+- **Size.** 123 code lines, over the patch rules' target of 100: each
+  of the 13 variants is listed in the enum, `ToCss`, `index`,
+  `cascade_type` and `is_servo_standard`.
+- **Viper proof.** `stylo_pin_b::servo_standard_pseudo_elements_have_their_own_variants`.
+  Viper's Basic names still build `Unmatched` at this pin; Viper's task
+  B18d builds the variants and computes each.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Candidate; a draft goes to the Viper owner first.
 
 ## Retired patches
 
