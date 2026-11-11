@@ -852,7 +852,11 @@ pub enum WordBreak {
     ///
     /// Specifying `word-break: break-word` makes `overflow-wrap` behave as
     /// `anywhere`, and `word-break` behave like `normal`.
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(engine-gates): in servo builds too. CSS Text 3 section
+    // 5.2 defines the deprecated `break-word` keyword for compatibility
+    // (`normal` with `overflow-wrap: anywhere`, whatever `overflow-wrap`
+    // is), so a servo build's parser no longer drops the declaration.
+    // https://drafts.csswg.org/css-text-3/#valdef-word-break-break-word
     BreakWord,
 }
 

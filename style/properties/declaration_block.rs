@@ -1971,4 +1971,25 @@ mod engine_gates_tests {
             assert_eq!(declared(&block, name), value, "{name}");
         }
     }
+
+    /// The third group: `word-break`'s `break-word` keyword, which CSS Text
+    /// 3 section 5.2 keeps for compatibility (PATCHES.md, `engine-gates`).
+    #[test]
+    fn engine_gates_parse_word_break_break_word() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        for value in ["normal", "break-all", "keep-all", "break-word"] {
+            let css = format!("word-break: {value}");
+            let block =
+                parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+            assert_eq!(declared(&block, "word-break"), value);
+        }
+        let block = parse_style_attribute(
+            "word-break: BREAK-WORD",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
+        assert_eq!(declared(&block, "word-break"), "break-word");
+    }
 }
