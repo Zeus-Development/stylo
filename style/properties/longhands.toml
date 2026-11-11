@@ -169,7 +169,13 @@ affects = "layout"
 type = "ColorOrAuto"
 initial = "generics::color::ColorOrAuto::Auto"
 struct = "inherited_ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): parsed and computed in servo builds too, a
+# standard longhand (CSS UI 4) that upstream builds only behind its other
+# build feature; likewise the longhands of CSS UI 4, CSS Fonts 4, CSS Text 3
+# and 4, CSS Text Decoration 3 and 4, CSS Inline 3, CSS Ruby 1, CSS Writing
+# Modes 3, CSS Images 3, CSS Color Adjustment 1, Scroll-driven Animations 1,
+# Filter Effects 1, CSS Masking 1, SVG 2, MathML Core and the Compatibility
+# Standard that PATCHES.md lists in its second group.
 spec = "https://drafts.csswg.org/css-ui-4/#widget-accent"
 ignored_when_colors_disabled = true
 affects = "paint"
@@ -585,7 +591,7 @@ servo_restyle_damage = "rebuild_stacking_context"
 type = "FillRule"
 initial = "Default::default()"
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://svgwg.org/svg2-draft/masking.html#ClipRuleProperty"
 affects = "paint"
@@ -889,7 +895,7 @@ affects = "layout"
 type = "Color"
 initial = "computed::Color::BLACK"
 struct = "svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.fxtf.org/filter-effects-1/#FloodColorProperty"
 affects = "paint"
 
@@ -897,7 +903,7 @@ affects = "paint"
 type = "Opacity"
 initial = "1.0"
 struct = "svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.fxtf.org/filter-effects-1/#FloodOpacityProperty"
 affects = "paint"
 
@@ -934,7 +940,7 @@ affects = "layout"
 type = "FontPalette"
 initial = "computed::FontPalette::normal()"
 struct = "font"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-fonts/#font-palette-prop"
 affects = "layout"
@@ -992,7 +998,7 @@ affects = "layout"
 type = "FontSynthesis"
 initial = "computed::FontSynthesis::Auto"
 struct = "font"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 gecko_ffi_name = "mFont.synthesisSmallCaps"
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-fonts-4/#font-synthesis-small-caps"
@@ -1002,7 +1008,7 @@ affects = "layout"
 type = "FontSynthesisStyle"
 initial = "computed::FontSynthesisStyle::Auto"
 struct = "font"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 gecko_ffi_name = "mFont.synthesisStyle"
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-fonts-4/#font-synthesis-style"
@@ -1297,7 +1303,7 @@ affects = "layout"
 type = "Color"
 initial = "computed::Color::WHITE"
 struct = "svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.fxtf.org/filter-effects-1#LightingColorProperty"
 affects = "paint"
 
@@ -1344,7 +1350,7 @@ affects = "layout"
 type = "url::UrlOrNone"
 initial = "computed::url::UrlOrNone::none()"
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://svgwg.org/svg2-draft/painting.html#VertexMarkerProperties"
 affects = "layout"
@@ -1353,7 +1359,7 @@ affects = "layout"
 type = "url::UrlOrNone"
 initial = "computed::url::UrlOrNone::none()"
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://svgwg.org/svg2-draft/painting.html#VertexMarkerProperties"
 affects = "layout"
@@ -1362,7 +1368,7 @@ affects = "layout"
 type = "url::UrlOrNone"
 initial = "computed::url::UrlOrNone::none()"
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://svgwg.org/svg2-draft/painting.html#VertexMarkerProperties"
 affects = "layout"
@@ -1720,7 +1726,7 @@ affects = "layout"
 type = "SVGPaintOrder"
 initial = "computed::SVGPaintOrder::normal()"
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://svgwg.org/svg2-draft/painting.html#PaintOrder"
 affects = "paint"
@@ -1826,7 +1832,7 @@ affects = "layout"
 type = "PrintColorAdjust"
 initial = "computed::PrintColorAdjust::Economy"
 struct = "inherited_box"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 aliases = ["color-adjust"]
 spec = "https://drafts.csswg.org/css-color-adjust/#print-color-adjust"
 animation_type = "discrete"
@@ -2024,7 +2030,7 @@ affects = "layout"
 type = "Color"
 initial = "computed::Color::BLACK"
 struct = "svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://svgwg.org/svg2-draft/pservers.html#StopColorProperties"
 affects = "paint"
 
@@ -2032,7 +2038,7 @@ affects = "paint"
 type = "Opacity"
 initial = "1.0"
 struct = "svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://svgwg.org/svg2-draft/pservers.html#StopOpacityProperty"
 affects = "paint"
 
@@ -2321,7 +2327,7 @@ affects = ""
 type = "ScrollAxis"
 initial = "computed::ScrollAxis::default()"
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 vector = { need_index = true }
 animation_type = "none"
 gecko_pref = "layout.css.scroll-driven-animations.enabled"
@@ -2333,7 +2339,7 @@ affects = ""
 type = "TimelineName"
 initial = "computed::TimelineName::none()"
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 vector = { need_index = true }
 animation_type = "none"
 gecko_pref = "layout.css.scroll-driven-animations.enabled"
@@ -2345,7 +2351,7 @@ affects = ""
 type = "ScrollAxis"
 initial = "computed::ScrollAxis::default()"
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 vector = { need_index = true }
 animation_type = "none"
 gecko_pref = "layout.css.scroll-driven-animations.enabled"
@@ -2357,7 +2363,7 @@ affects = ""
 type = "ViewTimelineInset"
 initial = "computed::ViewTimelineInset::default()"
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 vector = { need_index = true }
 animation_type = "none"
 gecko_pref = "layout.css.scroll-driven-animations.enabled"
@@ -2369,7 +2375,7 @@ affects = ""
 type = "TimelineName"
 initial = "computed::TimelineName::none()"
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 vector = { need_index = true }
 animation_type = "none"
 gecko_pref = "layout.css.scroll-driven-animations.enabled"
@@ -2399,7 +2405,7 @@ affects = ""
 type = "VectorEffect"
 initial = "computed::VectorEffect::none()"
 struct = "svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://svgwg.org/svg2-draft/coords.html#VectorEffects"
 affects = "layout"
@@ -2560,7 +2566,7 @@ affects = "layout"
 type = "Color"
 initial = "computed_value::T::currentcolor()"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 ignored_when_colors_disabled = true
 spec = "https://compat.spec.whatwg.org/#the-webkit-text-fill-color"
 affects = "paint"
@@ -2569,7 +2575,7 @@ affects = "paint"
 type = "Color"
 initial = "computed_value::T::currentcolor()"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 ignored_when_colors_disabled = true
 spec = "https://compat.spec.whatwg.org/#the-webkit-text-stroke-color"
 affects = "paint"
@@ -2578,7 +2584,7 @@ affects = "paint"
 type = "LineWidth"
 initial = "app_units::Au(0)"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://compat.spec.whatwg.org/#the-webkit-text-stroke-width"
 animation_type = "discrete"
 affects = "overflow"
@@ -2596,7 +2602,7 @@ affects = "paint"
 type = "HyphenateCharacter"
 initial = "computed::HyphenateCharacter::Auto"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://www.w3.org/TR/css-text-4/#hyphenate-character"
 affects = "layout"
@@ -2605,7 +2611,7 @@ affects = "layout"
 type = "HyphenateLimitChars"
 initial = "computed::HyphenateLimitChars::auto()"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-text-4/#hyphenate-char-limits"
 affects = "layout"
 boxed = true
@@ -2623,7 +2629,7 @@ servo_restyle_damage = "rebuild_box"
 type = "RubyPosition"
 initial = "computed::RubyPosition::AlternateOver"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-ruby/#ruby-position-property"
 animation_type = "discrete"
 affects = "layout"
@@ -2640,7 +2646,7 @@ affects = "layout"
 type = "TextAutospace"
 initial = "computed::text::TextAutospace::NO_AUTOSPACE"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 gecko_pref = "layout.css.text-autospace.enabled"
 has_effect_on_gecko_scrollbars = false
@@ -2651,7 +2657,7 @@ affects = "layout"
 type = "TextBoxEdge"
 initial = "computed::TextBoxEdge::Auto"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 gecko_pref = "layout.css.text-box.enabled"
 has_effect_on_gecko_scrollbars = false
@@ -2662,7 +2668,7 @@ affects = "layout"
 type = "TextBoxTrim"
 initial = "computed::TextBoxTrim::none()"
 struct = "text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 gecko_pref = "layout.css.text-box.enabled"
 has_effect_on_gecko_scrollbars = false
@@ -2673,7 +2679,7 @@ affects = "layout"
 type = "TextDecorationSkipInk"
 initial = "computed::TextDecorationSkipInk::Auto"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-text-decor-4/#text-decoration-skip-ink-property"
 affects = "overflow"
@@ -2682,7 +2688,7 @@ affects = "overflow"
 type = "Color"
 initial = "computed_value::T::currentcolor()"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 ignored_when_colors_disabled = true
 spec = "https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-color"
 affects = "paint"
@@ -2691,7 +2697,7 @@ affects = "paint"
 type = "TextEmphasisPosition"
 initial = "computed::TextEmphasisPosition::AUTO"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-position"
 affects = "layout"
@@ -2700,7 +2706,7 @@ affects = "layout"
 type = "TextEmphasisStyle"
 initial = "computed::TextEmphasisStyle::None"
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-style"
 affects = "overflow"
@@ -2842,7 +2848,7 @@ affects = "overflow"
 type = "InitialLetter"
 initial = "computed::InitialLetter::normal()"
 struct = "text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 gecko_pref = "layout.css.initial-letter.enabled"
 spec = "https://drafts.csswg.org/css-inline/#sizing-drop-initials"
@@ -3842,7 +3848,7 @@ keyword = { values = ["auto", "none", "normal"], gecko_constant_prefix = "NS_FON
 
 [font-variant-emoji]
 struct = "font"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-fonts/#propdef-font-variant-emoji"
 animation_type = "discrete"
 affects = "layout"
@@ -3876,7 +3882,7 @@ keyword = { values = ["normal", "compact"] }
 
 [math-shift]
 struct = "font"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://w3c.github.io/mathml-core/#the-math-shift"
 animation_type = "discrete"
 affects = "layout"
@@ -3928,7 +3934,7 @@ keyword = { values = ["mixed", "upright", "sideways"], gecko_aliases = ["sideway
 
 [image-orientation]
 struct = "inherited_box"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-images/#propdef-image-orientation"
 animation_type = "discrete"
 affects = "layout"
@@ -3936,7 +3942,7 @@ keyword = { values = ["from-image", "none"] }
 
 [text-anchor]
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://svgwg.org/svg2-draft/text.html#TextAnchorProperty"
 animation_type = "discrete"
 affects = "layout"
@@ -3944,7 +3950,7 @@ keyword = { values = ["start", "middle", "end"] }
 
 [color-interpolation]
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://svgwg.org/svg2-draft/painting.html#ColorInterpolationProperty"
 animation_type = "discrete"
 affects = "paint"
@@ -3952,7 +3958,7 @@ keyword = { values = ["srgb", "auto", "linearrgb"] }
 
 [color-interpolation-filters]
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://svgwg.org/svg2-draft/painting.html#ColorInterpolationFiltersProperty"
 animation_type = "discrete"
 affects = "paint"
@@ -3960,7 +3966,7 @@ keyword = { values = ["linearrgb", "auto", "srgb"], gecko_enum_prefix = "StyleCo
 
 [shape-rendering]
 struct = "inherited_svg"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://svgwg.org/svg2-draft/painting.html#ShapeRenderingProperty"
 animation_type = "discrete"
 affects = "paint"
@@ -3998,7 +4004,7 @@ keyword = { values = ["show", "hide"] }
 
 [hyphens]
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-text/#propdef-hyphens"
 animation_type = "discrete"
 affects = "layout"
@@ -4017,7 +4023,7 @@ keyword = { values = ["auto", "none"] }
 
 [ruby-align]
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-ruby/#ruby-align-property"
 animation_type = "discrete"
 affects = "layout"
@@ -4025,7 +4031,7 @@ keyword = { values = ["space-around", "start", "center", "space-between"] }
 
 [text-combine-upright]
 struct = "inherited_text"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-writing-modes-3/#text-combine-upright"
 animation_type = "none"
 affects = "layout"
@@ -4244,7 +4250,7 @@ keyword = { values = ["auto", "none"] }
 
 [field-sizing]
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 spec = "https://drafts.csswg.org/css-ui/#field-sizing"
 animation_type = "discrete"
 affects = "layout"
@@ -4303,7 +4309,7 @@ keyword = { values = ["normal", "multiply", "screen", "overlay", "darken", "ligh
 type = "DominantBaseline"
 initial = "computed::DominantBaseline::Auto"
 struct = "inherited_box"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"
 spec = "https://drafts.csswg.org/css-inline-3/#dominant-baseline-property"
 affects = "layout"
@@ -4331,7 +4337,7 @@ keyword = { values = ["collapse", "preserve", "preserve-breaks", "break-spaces"]
 type = "ScopedName"
 initial = "computed::ScopedName::none()"
 struct = "ui"
-engine = "gecko"
+# VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "none"
 gecko_pref = "layout.css.scroll-driven-animations.enabled"
 spec = "https://drafts.csswg.org/scroll-animations-1/#timeline-scope"

@@ -1907,4 +1907,68 @@ mod engine_gates_tests {
         assert_eq!(declared(&block, "page-break-before"), "always");
         assert_eq!(declared(&block, "break-inside"), "avoid");
     }
+
+    /// The second group: standard longhands of paint, text, fonts, SVG,
+    /// ruby and scroll-driven timelines (PATCHES.md, `engine-gates`).
+    #[test]
+    fn engine_gates_parse_the_paint_and_text_longhands() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let cases = [
+            ("-webkit-text-fill-color", "red"),
+            ("-webkit-text-stroke-color", "blue"),
+            ("-webkit-text-stroke-width", "2px"),
+            ("accent-color", "red"),
+            ("clip-rule", "evenodd"),
+            ("color-interpolation", "linearrgb"),
+            ("color-interpolation-filters", "srgb"),
+            ("dominant-baseline", "middle"),
+            ("field-sizing", "content"),
+            ("flood-color", "blue"),
+            ("flood-opacity", "0.5"),
+            ("font-palette", "dark"),
+            ("font-synthesis-small-caps", "none"),
+            ("font-synthesis-style", "none"),
+            ("font-variant-emoji", "emoji"),
+            ("hyphenate-character", "\"-\""),
+            ("hyphenate-limit-chars", "6 2 3"),
+            ("hyphens", "auto"),
+            ("image-orientation", "none"),
+            ("initial-letter", "3 2"),
+            ("lighting-color", "green"),
+            ("marker-end", "url(\"#m\")"),
+            ("marker-mid", "none"),
+            ("marker-start", "url(\"#m\")"),
+            ("math-shift", "compact"),
+            ("paint-order", "stroke"),
+            ("print-color-adjust", "exact"),
+            ("ruby-align", "center"),
+            ("ruby-position", "under"),
+            ("scroll-timeline-axis", "inline"),
+            ("scroll-timeline-name", "--t"),
+            ("shape-rendering", "crispedges"),
+            ("stop-color", "red"),
+            ("stop-opacity", "0.25"),
+            ("text-anchor", "middle"),
+            ("text-autospace", "normal"),
+            ("text-box-edge", "cap alphabetic"),
+            ("text-box-trim", "trim-both"),
+            ("text-combine-upright", "all"),
+            ("text-decoration-skip-ink", "none"),
+            ("text-emphasis-color", "red"),
+            ("text-emphasis-position", "under left"),
+            ("text-emphasis-style", "open dot"),
+            ("timeline-scope", "--t"),
+            ("vector-effect", "non-scaling-stroke"),
+            ("view-timeline-axis", "x"),
+            ("view-timeline-inset", "10px auto"),
+            ("view-timeline-name", "--v"),
+        ];
+        let css: String = cases.iter().map(|(n, v)| format!("{n}: {v}; ")).collect();
+        let block =
+            parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        assert_eq!(block.len(), cases.len());
+        for (name, value) in cases {
+            assert_eq!(declared(&block, name), value, "{name}");
+        }
+    }
 }

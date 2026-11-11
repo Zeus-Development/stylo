@@ -1616,15 +1616,19 @@ pub enum FontSynthesis {
 }
 
 /// A value for the font-synthesis-style property.
+// VIPER-PATCH(engine-gates): `Deserialize` and `Serialize`, which servo
+// builds need of a longhand's specified value, as for `FontSynthesis`.
 #[repr(u8)]
 #[derive(
     Clone,
     Copy,
     Debug,
+    Deserialize,
     Eq,
     MallocSizeOf,
     Parse,
     PartialEq,
+    Serialize,
     SpecifiedValueInfo,
     ToComputedValue,
     ToCss,
@@ -1641,12 +1645,16 @@ pub enum FontSynthesisStyle {
     ObliqueOnly,
 }
 
+// VIPER-PATCH(engine-gates): `Deserialize` and `Serialize`, which servo
+// builds need of a longhand's specified value, as for `CustomIdent`.
 #[derive(
     Clone,
     Debug,
+    Deserialize,
     Eq,
     MallocSizeOf,
     PartialEq,
+    Serialize,
     SpecifiedValueInfo,
     ToComputedValue,
     ToResolvedValue,
