@@ -818,3 +818,118 @@ mod minimum_logical_font_size_tests {
     }
 }
 
+// VIPER-PATCH(servo-content-language): servo builds compute the content
+// language (`-x-lang`) from an embedder's presentational hint, inherit it,
+// and hand it to the font metrics provider with the font; no stylesheet can
+// set it, and with no hint it is empty.
+#[cfg(test)]
+mod servo_content_language_tests {
+    use super::*;
+    use crate::context::TreeCountingCaches;
+    use crate::dom::DummyElementContext;
+    use crate::properties::{longhands, parse_style_attribute, PropertyDeclaration, StyleBuilder};
+    use crate::rule_cache::RuleCacheConditions;
+    use crate::rule_tree::RuleCascadeFlags;
+    use crate::stylesheets::container_rule::ContainerSizeQuery;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use crate::values::computed::{Context, ToComputedValue};
+    use crate::values::specified;
+    use crate::values::specified::font::XLang;
+    use crate::Atom;
+
+    /// A provider whose fonts have an x-height of 10px in Japanese only.
+    #[derive(Debug)]
+    struct JapaneseMetrics;
+
+    impl FontMetricsProvider for JapaneseMetrics {
+        fn query_font_metrics(
+            &self,
+            _: bool,
+            font: &Font,
+            _: CSSPixelLength,
+            _: QueryFontMetricsFlags,
+        ) -> FontMetrics {
+            let japanese = font.clone__x_lang().0 == Atom::from("ja");
+            FontMetrics {
+                x_height: japanese.then(|| Length::new(10.)),
+                ..FontMetrics::default()
+            }
+        }
+
+        fn base_size_for_generic(&self, _: GenericFontFamily) -> Length {
+            Length::new(16.)
+        }
+    }
+
+    fn device() -> Device {
+        Device::new(
+            MediaType::screen(),
+            QuirksMode::NoQuirks,
+            Size2D::new(800., 600.),
+            Size2D::new(800., 600.),
+            Scale::new(1.),
+            Box::new(JapaneseMetrics),
+            ComputedValues::initial_values_with_font_override(Font::initial_values()),
+            PrefersColorScheme::Light,
+            PointerCapabilities::default(),
+            PointerCapabilities::default(),
+        )
+    }
+
+    /// The style a child of `parent` gets with the declarations `hints`
+    /// cascaded, as an embedder's presentational hints are, and the size
+    /// `font-size: 1ex` computes to in it.
+    fn styled(device: &Device, parent: Option<&ComputedValues>, hints: &[PropertyDeclaration]) -> (Arc<ComputedValues>, f32) {
+        let mut conditions = RuleCacheConditions::default();
+        let mut caches = TreeCountingCaches::default();
+        let builder = StyleBuilder::for_inheritance(device, None, parent, None);
+        let mut context = Context::new(
+            builder,
+            QuirksMode::NoQuirks,
+            &mut conditions,
+            ContainerSizeQuery::none(),
+            RuleCascadeFlags::empty(),
+            &DummyElementContext,
+            &mut caches,
+        );
+        for hint in hints {
+            // SAFETY: each hint declares `-x-lang`.
+            unsafe { longhands::_x_lang::cascade_property(hint, &mut context) };
+        }
+        let ex = specified::FontSize::Length(specified::LengthPercentage::Length(
+            specified::NoCalcLength::new(specified::length::LengthUnit::Ex, 1.),
+        ));
+        let size = ex.to_computed_value(&context).computed_size().px();
+        (context.builder.build(), size)
+    }
+
+    fn lang(style: &ComputedValues) -> Atom {
+        style.get_font().clone__x_lang().0
+    }
+
+    #[test]
+    fn servo_content_language_is_a_hint_inherited_and_measured() {
+        let device = device();
+        let (root, _) = styled(&device, None, &[]);
+        assert_eq!(lang(&root), Atom::from(""));
+        let hint = PropertyDeclaration::XLang(XLang(Atom::from("ja")));
+        let (japanese, _) = styled(&device, Some(&root), &[hint]);
+        assert_eq!(lang(&japanese), Atom::from("ja"));
+        // A child inherits it, and its font metrics are the language's:
+        // `1ex` of the parent's font is 10px in Japanese, and 0.5em (8px)
+        // where the provider has no x-height.
+        let (child, ex) = styled(&device, Some(&japanese), &[]);
+        assert_eq!(lang(&child), Atom::from("ja"));
+        assert_eq!(ex, 10.);
+        let (_, ex) = styled(&device, Some(&root), &[]);
+        assert_eq!(ex, 8.);
+        // A nearer hint wins.
+        let hint = PropertyDeclaration::XLang(XLang(Atom::from("en")));
+        let (english, _) = styled(&device, Some(&japanese), &[hint]);
+        assert_eq!(lang(&english), Atom::from("en"));
+        // No stylesheet sets it.
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let block = parse_style_attribute("-x-lang: ja", &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        assert_eq!(block.len(), 0);
+    }
+}
