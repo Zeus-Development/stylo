@@ -574,6 +574,16 @@ pub struct KeywordInfo {
     /// `calc()`.
     #[css(skip)]
     pub offset: CSSPixelLength,
+    // VIPER-PATCH(minimum-logical-font-size): the flag of a size that
+    // follows the default font size, which the minimum clamps.
+    /// Whether the size follows the default font size: a size keyword, or
+    /// `smaller`, `larger`, a percentage or a font-relative length other
+    /// than `rem` of a parent size that follows it. Upstream keeps no such
+    /// flag; the keyword above is lost through units other than `em`.
+    #[cfg(feature = "servo")]
+    #[css(skip)]
+    #[animation(constant)]
+    pub follows_default: bool,
 }
 
 impl KeywordInfo {
@@ -592,6 +602,9 @@ impl KeywordInfo {
             kw,
             factor: 1.,
             offset: CSSPixelLength::new(0.),
+            // VIPER-PATCH(minimum-logical-font-size): a keyword follows it.
+            #[cfg(feature = "servo")]
+            follows_default: kw != FontSizeKeyword::None,
         }
     }
 
@@ -617,6 +630,8 @@ impl KeywordInfo {
             kw: self.kw,
             factor: self.factor * factor,
             offset: self.offset * factor,
+            #[cfg(feature = "servo")]
+            follows_default: self.follows_default,
         }
     }
 }
@@ -1006,10 +1021,47 @@ impl FontSize {
         let size = NonNegative(size);
         #[cfg(not(feature = "servo"))]
         let size = NonNegative(Self::quantize_font_size(size));
+        // VIPER-PATCH(minimum-logical-font-size): the flag, and the used
+        // size of a size that follows the default clamped to the device's
+        // minimum; the computed size, which children's percentages and em
+        // lengths use, stays as computed.
+        #[cfg(feature = "servo")]
+        let used_size = {
+            info.follows_default = self.follows_default(context);
+            match context.device().minimum_logical_font_size() {
+                Some(minimum) if info.follows_default && size.0 < minimum => NonNegative(minimum),
+                _ => size,
+            }
+        };
+        #[cfg(not(feature = "servo"))]
+        let used_size = size;
         computed::FontSize {
             computed_size: size,
-            used_size: size,
+            used_size,
             keyword_info: info,
+        }
+    }
+
+    // VIPER-PATCH(minimum-logical-font-size): which sizes follow the
+    // default font size. A size keyword does; `smaller`, `larger`, a
+    // percentage and a font-relative length other than `rem` follow it when
+    // the parent's size does; an absolute or viewport length, `rem` and a
+    // math function do not.
+    #[cfg(feature = "servo")]
+    fn follows_default(&self, context: &Context) -> bool {
+        let parent = || {
+            let parent_size = context.style().get_parent_font().clone_font_size();
+            parent_size.keyword_info.follows_default
+        };
+        match *self {
+            FontSize::Keyword(..) => true,
+            FontSize::Smaller | FontSize::Larger => parent(),
+            FontSize::Length(LengthPercentage::Percentage(_)) => parent(),
+            FontSize::Length(LengthPercentage::Length(ref l)) => {
+                let unit = l.length_unit();
+                unit.is_font_relative() && unit != LengthUnit::Rem && parent()
+            },
+            FontSize::Length(LengthPercentage::Calc(_)) | FontSize::System(_) => false,
         }
     }
 

@@ -106,6 +106,11 @@ pub(super) struct ExtraDeviceData {
     /// The colour scheme an element whose `color-scheme` is `normal` uses.
     #[ignore_malloc_size_of = "Pure stack type"]
     normal_color_scheme: NormalColorScheme,
+    // VIPER-PATCH(minimum-logical-font-size): the embedder's minimum.
+    /// The minimum used size of a font size that follows the default font
+    /// size; `None`, the default, clamps nothing.
+    #[ignore_malloc_size_of = "Pure stack type"]
+    minimum_logical_font_size: Option<Length>,
     /// An implementation of a trait which implements support for querying font metrics.
     #[ignore_malloc_size_of = "Owned by embedder"]
     font_metrics_provider: Box<dyn FontMetricsProvider>,
@@ -156,6 +161,8 @@ impl Device {
                 device_media_features: DeviceMediaFeatures::default(),
                 // VIPER-PATCH(normal-color-scheme-option): upstream's answer.
                 normal_color_scheme: NormalColorScheme::default(),
+                // VIPER-PATCH(minimum-logical-font-size): no minimum.
+                minimum_logical_font_size: None,
                 font_metrics_provider,
             },
         }
@@ -408,6 +415,25 @@ impl Device {
     /// `normal` uses.
     pub fn normal_color_scheme(&self) -> NormalColorScheme {
         self.extra.normal_color_scheme
+    }
+
+    // VIPER-PATCH(minimum-logical-font-size): the accessors.
+    /// Set the minimum logical font size on this [`Device`]: the used size
+    /// of a font size that follows the default font size (a size keyword,
+    /// or a size relative to its parent's that follows it) is at least
+    /// this size; `None` clamps nothing. CSS Fonts 4 section 2.4 leaves a
+    /// minimum font size to the user agent.
+    /// <https://drafts.csswg.org/css-fonts-4/#font-size-prop>
+    ///
+    /// Note that this does not restyle anything: the sizes computed after
+    /// the call use it.
+    pub fn set_minimum_logical_font_size(&mut self, size: Option<Length>) {
+        self.extra.minimum_logical_font_size = size;
+    }
+
+    /// Returns the minimum logical font size, if any.
+    pub fn minimum_logical_font_size(&self) -> Option<Length> {
+        self.extra.minimum_logical_font_size
     }
 
     pub(crate) fn is_dark_color_scheme(&self, color_scheme_flags: ColorSchemeFlags) -> bool {
@@ -675,3 +701,120 @@ mod normal_color_scheme_tests {
         assert_ne!(text(both), AbsoluteColor::BLACK);
     }
 }
+
+// VIPER-PATCH(minimum-logical-font-size): the flag of each kind of size, and
+// the minimum clamping the used size of the sizes that follow the default
+// font size only.
+#[cfg(test)]
+mod minimum_logical_font_size_tests {
+    use super::*;
+    use crate::properties::{parse_style_attribute, PropertyDeclaration};
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use crate::values::computed::font::FontSize;
+    use crate::values::computed::{Context, ToComputedValue};
+    use crate::values::generics::NonNegative;
+    use crate::values::specified;
+    use crate::values::specified::font::KeywordInfo;
+
+    #[derive(Debug)]
+    struct NoMetrics;
+
+    impl FontMetricsProvider for NoMetrics {
+        fn query_font_metrics(
+            &self,
+            _: bool,
+            _: &Font,
+            _: CSSPixelLength,
+            _: QueryFontMetricsFlags,
+        ) -> FontMetrics {
+            FontMetrics::default()
+        }
+
+        fn base_size_for_generic(&self, _: GenericFontFamily) -> Length {
+            Length::new(16.)
+        }
+    }
+
+    /// The specified value of `font-size: <css>`.
+    fn specified(css: &str) -> specified::FontSize {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let css = format!("font-size: {css}");
+        let block = parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        match block.declarations() {
+            [PropertyDeclaration::FontSize(value)] => value.clone(),
+            other => panic!("{css}: {other:?}"),
+        }
+    }
+
+    /// `css` computed under a parent font size of `parent` px, which
+    /// follows the default font size or not, with the minimum `minimum`:
+    /// the computed and used sizes in px and the flag.
+    fn compute(parent: (f32, bool), minimum: Option<f32>, css: &str) -> (f32, f32, bool) {
+        let mut font = Font::initial_values();
+        let size = NonNegative(Length::new(parent.0));
+        font.font_size = FontSize {
+            computed_size: size,
+            used_size: size,
+            keyword_info: if parent.1 {
+                KeywordInfo::medium()
+            } else {
+                KeywordInfo::none()
+            },
+        };
+        let mut device = Device::new(
+            MediaType::screen(),
+            QuirksMode::NoQuirks,
+            Size2D::new(800., 600.),
+            Size2D::new(800., 600.),
+            Scale::new(1.),
+            Box::new(NoMetrics),
+            ComputedValues::initial_values_with_font_override(font),
+            PrefersColorScheme::Light,
+            PointerCapabilities::default(),
+            PointerCapabilities::default(),
+        );
+        assert_eq!(device.minimum_logical_font_size(), None);
+        device.set_minimum_logical_font_size(minimum.map(Length::new));
+        let value = specified(css);
+        Context::for_media_query_evaluation(&device, QuirksMode::NoQuirks, |cx| {
+            let size = value.to_computed_value(cx);
+            let follows = size.keyword_info.follows_default;
+            (size.computed_size().px(), size.used_size().px(), follows)
+        })
+    }
+
+    #[test]
+    fn minimum_logical_font_size_clamps_sizes_that_follow_the_default() {
+        let follows = (16., true);
+        let absolute = (16., false);
+        let cases = [
+            // (parent, minimum, value, computed, used, follows)
+            (follows, Some(12.), "x-small", 10., 12., true),
+            (follows, Some(12.), "small", 13., 13., true),
+            (follows, None, "x-small", 10., 10., true),
+            (absolute, Some(12.), "xx-small", 9., 12., true),
+            (follows, Some(12.), "50%", 8., 12., true),
+            (follows, Some(12.), "0.5em", 8., 12., true),
+            (follows, Some(12.), "1ex", 8., 12., true),
+            (follows, Some(12.), "0.5ch", 4., 12., true),
+            ((10., true), Some(12.), "smaller", 10. / 1.2, 12., true),
+            ((8., true), Some(12.), "larger", 9.6, 12., true),
+            (absolute, Some(12.), "50%", 8., 8., false),
+            (absolute, Some(12.), "0.5em", 8., 8., false),
+            (absolute, Some(12.), "smaller", 16. / 1.2, 16. / 1.2, false),
+            (follows, Some(12.), "8px", 8., 8., false),
+            (follows, Some(12.), "0.5rem", 8., 8., false),
+            (follows, Some(12.), "1vw", 8., 8., false),
+            (follows, Some(12.), "calc(4px + 25%)", 8., 8., false),
+            (follows, Some(12.), "20px", 20., 20., false),
+        ];
+        for (parent, minimum, css, computed, used, flag) in cases {
+            let case = format!("{css} of {parent:?} with {minimum:?}");
+            let (c, u, f) = compute(parent, minimum, css);
+            assert!((c - computed).abs() < 1e-4, "{case}: computed {c}");
+            assert!((u - used).abs() < 1e-4, "{case}: used {u}");
+            assert_eq!(f, flag, "{case}");
+        }
+    }
+}
+
