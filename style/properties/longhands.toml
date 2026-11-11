@@ -2644,7 +2644,11 @@ affects = "layout"
 
 [text-autospace]
 type = "TextAutospace"
-initial = "computed::text::TextAutospace::NO_AUTOSPACE"
+# VIPER-PATCH(text-autospace-initial): CSS Text 4's `text-autospace`
+# property definition gives `normal` as the initial value; upstream had
+# `no-autospace`.
+# https://drafts.csswg.org/css-text-4/#text-autospace-property
+initial = "computed::text::TextAutospace::NORMAL"
 struct = "inherited_text"
 # VIPER-PATCH(engine-gates): see accent-color.
 animation_type = "discrete"

@@ -1993,3 +1993,18 @@ mod engine_gates_tests {
         assert_eq!(declared(&block, "word-break"), "break-word");
     }
 }
+
+// VIPER-PATCH(text-autospace-initial): a fork test of the initial value.
+#[cfg(test)]
+mod text_autospace_initial_tests {
+    use crate::properties::longhands::text_autospace;
+    use crate::values::computed::text::TextAutospace;
+    use style_traits::ToCss;
+
+    #[test]
+    fn text_autospace_initial_is_normal() {
+        let initial = text_autospace::get_initial_value();
+        assert_eq!(initial, TextAutospace::NORMAL);
+        assert_eq!(initial.to_css_string(), "normal");
+    }
+}
