@@ -90,6 +90,32 @@ pub enum PseudoElement {
     ServoTableGrid,
     ServoTableWrapper,
 
+    // VIPER-PATCH(servo-standard-pseudo-elements): standard pseudo-elements
+    // that servo builds had no variant for, so an embedder could only build
+    // them as `Unmatched`, where every name shares one rule bucket. Each has
+    // its own variant and index, so its rules are in a bucket of their own,
+    // and cascades lazily; a functional one holds its argument, serialized,
+    // and its bucket holds the rules of every argument. Servo's own parser
+    // does not build them; an embedder's `SelectorNames` may.
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-pseudos
+    TargetText,
+    SpellingError,
+    GrammarError,
+    SearchText,
+    // https://drafts.csswg.org/css-highlight-api-1/#custom-highlight-pseudo
+    Highlight(Box<str>),
+    // https://drafts.csswg.org/css-overflow-5/
+    ScrollMarker,
+    ScrollMarkerGroup,
+    ScrollButton(Box<str>),
+    Column,
+    // https://drafts.csswg.org/css-view-transitions-1/#view-transition
+    ViewTransition,
+    // https://html.spec.whatwg.org/multipage/form-elements.html#the-select-element-2
+    Picker(Box<str>),
+    PickerIcon,
+    Checkmark,
+
     // VIPER-PATCH(chrome-dom-api-pseudos): see PATCHES.md.
     // VIPER-PATCH(selector-names-hook): a pseudo-element an embedder's
     // `SelectorNames` admits beyond servo's names; upstream Servo, and
@@ -105,7 +131,8 @@ pub enum PseudoElement {
 /// The count of all pseudo-elements.
 // VIPER-PATCH(chrome-dom-api-pseudos): `Unmatched` is the last variant.
 // VIPER-PATCH(selector-names-hook): its index, as no constant holds a name.
-pub const PSEUDO_COUNT: usize = 24;
+// VIPER-PATCH(servo-standard-pseudo-elements): 13 more before it.
+pub const PSEUDO_COUNT: usize = 37;
 
 impl ToCss for PseudoElement {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
@@ -138,10 +165,34 @@ impl ToCss for PseudoElement {
             ServoAnonymousTableRow => "::-servo-anonymous-table-row",
             ServoTableGrid => "::-servo-table-grid",
             ServoTableWrapper => "::-servo-table-wrapper",
+            // VIPER-PATCH(servo-standard-pseudo-elements): the standard names.
+            TargetText => "::target-text",
+            SpellingError => "::spelling-error",
+            GrammarError => "::grammar-error",
+            SearchText => "::search-text",
+            Highlight(_) => "::highlight",
+            ScrollMarker => "::scroll-marker",
+            ScrollMarkerGroup => "::scroll-marker-group",
+            ScrollButton(_) => "::scroll-button",
+            Column => "::column",
+            ViewTransition => "::view-transition",
+            Picker(_) => "::picker",
+            PickerIcon => "::picker-icon",
+            Checkmark => "::checkmark",
             // VIPER-PATCH(chrome-dom-api-pseudos): a name no stylesheet uses.
             // VIPER-PATCH(selector-names-hook): every name.
             Unmatched(_) => "::-internal-unmatched",
-        })
+        })?;
+        // VIPER-PATCH(servo-standard-pseudo-elements): a functional one's
+        // argument, as serialized.
+        match *self {
+            Highlight(ref argument) | ScrollButton(ref argument) | Picker(ref argument) => {
+                dest.write_char('(')?;
+                dest.write_str(argument)?;
+                dest.write_char(')')
+            },
+            _ => Ok(()),
+        }
     }
 }
 
@@ -154,7 +205,10 @@ impl ::selectors::parser::PseudoElement for PseudoElement {
     // pseudo-class after these names, as in `::-webkit-scrollbar:hover`.
     fn accepts_state_pseudo_classes(&self) -> bool {
         // VIPER-PATCH(selector-names-hook): every name.
-        matches!(self, Self::Unmatched(_))
+        // VIPER-PATCH(servo-standard-pseudo-elements): and the standard ones,
+        // as Selectors 4 section 3.6.3 allows unless a pseudo-element's
+        // specification says otherwise.
+        matches!(self, Self::Unmatched(_)) || self.is_servo_standard()
     }
 }
 
@@ -200,13 +254,29 @@ impl PseudoElement {
             ServoAnonymousTableRow => 20,
             ServoTableGrid => 21,
             ServoTableWrapper => 22,
-            Unmatched(_) => 23,
+            // VIPER-PATCH(servo-standard-pseudo-elements): their indices.
+            TargetText => 23,
+            SpellingError => 24,
+            GrammarError => 25,
+            SearchText => 26,
+            Highlight(_) => 27,
+            ScrollMarker => 28,
+            ScrollMarkerGroup => 29,
+            ScrollButton(_) => 30,
+            Column => 31,
+            ViewTransition => 32,
+            Picker(_) => 33,
+            PickerIcon => 34,
+            Checkmark => 35,
+            Unmatched(_) => 36,
         }
     }
 
     /// An array of `None`, one per pseudo-element.
     pub fn pseudo_none_array<T>() -> [Option<T>; PSEUDO_COUNT] {
-        Default::default()
+        // VIPER-PATCH(servo-standard-pseudo-elements): arrays of more than
+        // 32 items have no `Default`.
+        std::array::from_fn(|_| None)
     }
 
     /// Creates a pseudo-element from an eager index.
@@ -344,6 +414,20 @@ impl PseudoElement {
             // VIPER-PATCH(chrome-dom-api-pseudos): computed only on request.
             // VIPER-PATCH(selector-names-hook): every name.
             PseudoElement::Unmatched(_) => PseudoElementCascadeType::Lazy,
+            // VIPER-PATCH(servo-standard-pseudo-elements): on request too.
+            PseudoElement::TargetText
+            | PseudoElement::SpellingError
+            | PseudoElement::GrammarError
+            | PseudoElement::SearchText
+            | PseudoElement::Highlight(_)
+            | PseudoElement::ScrollMarker
+            | PseudoElement::ScrollMarkerGroup
+            | PseudoElement::ScrollButton(_)
+            | PseudoElement::Column
+            | PseudoElement::ViewTransition
+            | PseudoElement::Picker(_)
+            | PseudoElement::PickerIcon
+            | PseudoElement::Checkmark => PseudoElementCascadeType::Lazy,
             PseudoElement::ServoAnonymousBox
             | PseudoElement::ServoAnonymousTable
             | PseudoElement::ServoAnonymousTableCell
@@ -396,19 +480,50 @@ impl PseudoElement {
 
     /// Whether this pseudo-element is the ::highlight pseudo.
     pub fn is_highlight(&self) -> bool {
-        false
+        // VIPER-PATCH(servo-standard-pseudo-elements): its variant.
+        matches!(self, Self::Highlight(_))
     }
 
     /// Whether this pseudo-element takes an argument.
     #[inline]
     pub fn has_argument(&self) -> bool {
-        false
+        // VIPER-PATCH(servo-standard-pseudo-elements): the functional ones,
+        // whose bucket holds the rules of every argument.
+        matches!(self, Self::Highlight(_) | Self::ScrollButton(_) | Self::Picker(_))
     }
 
     /// Whether this pseudo-element is the ::target-text pseudo.
     #[inline]
     pub fn is_target_text(&self) -> bool {
-        false
+        // VIPER-PATCH(servo-standard-pseudo-elements): its variant.
+        matches!(self, Self::TargetText)
+    }
+
+    // VIPER-PATCH(servo-standard-pseudo-elements): the standard variants.
+    /// Whether this is one of the standard pseudo-elements that servo's own
+    /// parser does not build: `::target-text`, `::spelling-error`,
+    /// `::grammar-error`, `::search-text`, `::highlight()`,
+    /// `::scroll-marker`, `::scroll-marker-group`, `::scroll-button()`,
+    /// `::column`, `::view-transition`, `::picker()`, `::picker-icon` and
+    /// `::checkmark`.
+    #[inline]
+    pub fn is_servo_standard(&self) -> bool {
+        matches!(
+            self,
+            Self::TargetText
+                | Self::SpellingError
+                | Self::GrammarError
+                | Self::SearchText
+                | Self::Highlight(_)
+                | Self::ScrollMarker
+                | Self::ScrollMarkerGroup
+                | Self::ScrollButton(_)
+                | Self::Column
+                | Self::ViewTransition
+                | Self::Picker(_)
+                | Self::PickerIcon
+                | Self::Checkmark
+        )
     }
 
     /// Whether this is a highlight pseudo-element that is styled lazily during
@@ -1306,6 +1421,20 @@ mod chrome_dom_api_pseudos_tests {
             ServoAnonymousTableRow,
             ServoTableGrid,
             ServoTableWrapper,
+            // VIPER-PATCH(servo-standard-pseudo-elements): the standard ones.
+            TargetText,
+            SpellingError,
+            GrammarError,
+            SearchText,
+            Highlight("a".into()),
+            ScrollMarker,
+            ScrollMarkerGroup,
+            ScrollButton("*".into()),
+            Column,
+            ViewTransition,
+            Picker("select".into()),
+            PickerIcon,
+            Checkmark,
             // VIPER-PATCH(selector-names-hook): a name.
             Unmatched("column".into()),
         ];
@@ -1367,5 +1496,86 @@ mod servo_first_line_tests {
         let applies = |id: LonghandId| id.flags().contains(PropertyFlags::APPLIES_TO_FIRST_LINE);
         assert!(applies(LonghandId::Color) && applies(LonghandId::Visibility));
         assert!(!applies(LonghandId::MarginTop) && !applies(LonghandId::Display));
+    }
+}
+
+// VIPER-PATCH(servo-standard-pseudo-elements): the variants' tests.
+#[cfg(test)]
+mod servo_standard_pseudo_elements_tests {
+    use super::{PseudoElement, SelectorParser};
+    use crate::selector_parser::PerPseudoElementMap;
+    use crate::stylesheets::UrlExtraData;
+    use cssparser::ToCss;
+    use selectors::parser::PseudoElement as _;
+
+    fn parses(selectors: &str) -> bool {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        SelectorParser::parse_author_origin_no_namespace(selectors, &url).is_ok()
+    }
+
+    fn standard() -> Vec<(PseudoElement, &'static str)> {
+        use PseudoElement::*;
+        vec![
+            (TargetText, "::target-text"),
+            (SpellingError, "::spelling-error"),
+            (GrammarError, "::grammar-error"),
+            (SearchText, "::search-text"),
+            (Highlight("--h\\.1".into()), "::highlight(--h\\.1)"),
+            (ScrollMarker, "::scroll-marker"),
+            (ScrollMarkerGroup, "::scroll-marker-group"),
+            (ScrollButton("inline-start".into()), "::scroll-button(inline-start)"),
+            (Column, "::column"),
+            (ViewTransition, "::view-transition"),
+            (Picker("select".into()), "::picker(select)"),
+            (PickerIcon, "::picker-icon"),
+            (Checkmark, "::checkmark"),
+        ]
+    }
+
+    #[test]
+    fn servo_standard_pseudo_elements_serialize_and_cascade_lazily() {
+        for (pseudo, css) in standard() {
+            assert_eq!(pseudo.to_css_string(), css);
+            assert!(pseudo.is_servo_standard() && pseudo.is_lazy(), "{css}");
+            assert!(pseudo.accepts_state_pseudo_classes(), "{css}");
+            assert!(!pseudo.is_element_backed() && pseudo.property_restriction().is_none());
+            assert_eq!(pseudo.has_argument(), css.ends_with(')'), "{css}");
+            assert_eq!(pseudo.is_highlight(), css.starts_with("::highlight("));
+            assert_eq!(pseudo.is_target_text(), css == "::target-text");
+        }
+        assert!(PseudoElement::Selection.is_lazy_painted_highlight_pseudo());
+        assert!(PseudoElement::TargetText.is_lazy_painted_highlight_pseudo());
+        assert!(PseudoElement::Highlight("h".into()).is_lazy_painted_highlight_pseudo());
+        assert!(!PseudoElement::SpellingError.is_lazy_painted_highlight_pseudo());
+        assert!(!PseudoElement::Unmatched("column".into()).is_servo_standard());
+        assert!(!PseudoElement::Marker.is_servo_standard());
+    }
+
+    /// Each has a rule bucket of its own, apart from `Unmatched`'s; a
+    /// functional one's bucket is shared by its arguments.
+    #[test]
+    fn servo_standard_pseudo_elements_have_their_own_buckets() {
+        let mut map = PerPseudoElementMap::<String>::default();
+        map.set(&PseudoElement::Unmatched("target-text".into()), "unmatched".into());
+        for (pseudo, css) in standard() {
+            map.set(&pseudo, css.into());
+        }
+        for (pseudo, css) in standard() {
+            assert_eq!(map.get(&pseudo).map(String::as_str), Some(css));
+        }
+        let unmatched = PseudoElement::Unmatched("column".into());
+        assert_eq!(map.get(&unmatched).map(String::as_str), Some("unmatched"));
+        let other = PseudoElement::Highlight("other".into());
+        assert_eq!(map.get(&other).map(String::as_str), Some("::highlight(--h\\.1)"));
+        assert_eq!(map.iter().count(), 14);
+    }
+
+    /// Servo's own parser does not build them: without an embedder's names
+    /// it refuses them, as upstream does.
+    #[test]
+    fn servo_standard_pseudo_elements_stay_unparsed_without_names() {
+        for (_, css) in standard() {
+            assert!(!parses(&format!("p{css}")), "{css}");
+        }
     }
 }
