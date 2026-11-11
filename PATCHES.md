@@ -140,7 +140,7 @@ apart from the packaging files.
 | `percentage-number-f64` | `stylo`: `values/specified/percentage.rs`, `values/specified/length.rs`, `values/computed/length_percentage.rs` | Precision: a `<length-percentage>` written as a percentage keeps the number written: in servo builds the specified `NoCalcPercentage` and the computed `LengthPercentage` keep the fraction in `f64` (the percentage token's text over 100, when that rounds to the token's `f32` fraction), so a layout can resolve the percentage from the number written for any number of significant digits (CSS Values 4 section 5.1.3; `66.666667%` is not the `f32` fraction's `66.66667`); every value servo computes and serializes still comes from the `f32` fraction, and the computed `LengthPercentage` is 16 bytes instead of 8 | `viper-style::cascade fork_patches::percentage_number_f64` | Candidate; draft to the owner first | Viper V10b-8c | 142 / 52 |
 | `servo-device-media-features` | `stylo`: `servo/media_features.rs`, `device/servo.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: Media Queries 5's `color-gamut` (section 6.4), `dynamic-range` (6.5), `prefers-reduced-motion` (12.1), `prefers-contrast` (12.3) and `forced-colors` (12.4), which upstream's servo list lacks, so a query on one was unknown; each reads the embedder's setting from the `Device` (`DeviceMediaFeatures`, defaulting to `srgb`, `standard`, `no-preference`, `no-preference`, `none`), and `Device::forced_colors` returns its setting instead of a fixed `none` | `viper-style::cascade device::servo_device_media_features_take_the_config` | Candidate; draft to the owner first | Viper STY-FORK-DEVICE-1 | 190 / 118 |
 | `vertical-align-longhand` | `stylo`: `stylesheets/parse_options.rs`, `properties/mod.rs`, `properties/shorthands.rs`, `properties/longhands.toml` | Embedder control: `ParseOptions` gains `vertical_align_longhand` (default `false`, upstream's CSS Inline 3 shorthand). When set, `vertical-align` takes CSS 2.1 section 10.8.1's grammar (one value) and still declares the box's three parts, which then hold its value alone, while declarations of `alignment-baseline`, `baseline-shift` and `baseline-source` go to the internal longhands `-x-alignment-baseline` (SVG 1.1 section 10.9.2's initial `auto`), `-x-baseline-shift` and `-x-baseline-source`, so they cascade on their own; the box's `baseline_source` is then always `auto`, and a layout reads `-x-baseline-source` where it is | `viper-style::cascade resolved::vertical_align_longhand_parts_cascade_apart` | Candidate; draft to the owner first | Viper STY-FORK-VA-1 | 121 / 91 |
-| `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built only for upstream's other engine, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f | 66 / 96 |
+| `engine-gates` | `stylo`: `properties/longhands.toml`, `properties/shorthands.toml`, `properties/shorthands.rs`, `values/specified/font.rs`, `properties/declaration_block.rs` (tests) | Standard: 46 longhands and 13 shorthands of CSS Scroll Snap 1, CSS Fragmentation 3, CSS Multi-column 1, CSS Box Sizing 4, CSS Motion Path 1, CSS Scroll Anchoring 1, CSS Anchor Positioning 1, CSS UI 4, CSS Overflow 3 and 4 and CSS Shapes 1 are built only for upstream's other engine, so servo builds dropped their declarations; their engine gates go, and they parse and compute in servo builds. Likewise, second group: 48 longhands of CSS UI 4, CSS Fonts 4, CSS Text 3 and 4, CSS Text Decoration 3 and 4, CSS Inline 3, CSS Ruby 1, CSS Writing Modes 3, CSS Images 3, CSS Color Adjustment 1, Scroll-driven Animations 1, Filter Effects 1, CSS Masking 1, SVG 2, MathML Core and the Compatibility Standard, with the serde derives two of their value types lacked | `viper-style::cascade fork_patches::engine_gates` | Candidate; draft to the owner first | Viper V10b-7f; second group: Viper STYLO-PIN-A | 128 / 160 |
 | `normal-color-scheme-option` | `stylo`: `device/servo.rs` | Embedder control: CSS Color Adjustment 1 section 2.1 renders an element whose `color-scheme` is `normal` (it lists no scheme) in the user agent's default scheme, and upstream's servo `Device` always uses the user's preferred one for its system colours and `light-dark()`; the `Device` gains `NormalColorScheme` (`Preferred`, upstream's answer and the default, `Light` or `Dark`), read only for `normal`, so a listed scheme (`light`, `dark`, `light dark`) still follows the author and the preference | `viper-style::cascade device::normal_color_scheme_takes_the_config` | Candidate; draft to the owner first | Viper STY-FORK-SCHEME-1 | 53 / 82 |
 | `animation-names-continue` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 section 3 runs one animation for each name of `animation-name`, and upstream's servo `maybe_start_animations` returned from its loop over the names after updating the first name that matches a running animation, so every later name was neither started (a name added after a running one) nor updated (a later name's changed `animation-*` values, such as a pause); the loop now goes on with the next name | `viper-style::animation css_animation_cases` (cases `name-added`, `later-name-paused`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 7 / 0 |
 | `pseudo-animation-rule` | `stylo`: `dom.rs`, `style_resolver.rs`, `matching.rs` | Standard: CSS Transitions 1 section 3 compares a style change against the after-change style, which includes the running animations, and upstream matched a `::before` or `::after` with no animation declarations, so a base value changed under the pseudo-element's running animation started a transition; `TElement` gains `pseudo_animation_rule` (default none, upstream's answer), which matching the pseudo-element adds at the animations level, and servo's `process_animations_for_pseudo` no longer returns early on an empty set, so that level leaves the rule node when the pseudo-element's last animation is cancelled | `viper-style::animation css_animation_cases` (cases `pseudo-transition-under-animation`, `pseudo-animation-removed`) | Candidate; draft to the owner first | Viper STY-FORK-ANIM-1 | 27 / 0 |
@@ -1422,27 +1422,65 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `scroll-padding-block`, `scroll-padding-inline`, `page-break-before`,
   `page-break-after`, `page-break-inside`, `offset`,
   `contain-intrinsic-size`, `column-rule` and `-webkit-line-clamp`.
+- **Problem, second group.** Likewise 48 standard longhands of paint,
+  text, fonts, SVG, ruby and scroll-driven timelines: `accent-color` and
+  `field-sizing` (CSS UI 4); `font-palette`, `font-synthesis-small-caps`,
+  `font-synthesis-style` and `font-variant-emoji` (CSS Fonts 4); `hyphens`
+  (CSS Text 3), `hyphenate-character`, `hyphenate-limit-chars` and
+  `text-autospace` (CSS Text 4); `text-emphasis-color`,
+  `text-emphasis-position` and `text-emphasis-style` (CSS Text Decoration
+  3) and `text-decoration-skip-ink` (CSS Text Decoration 4);
+  `dominant-baseline`, `initial-letter`, `text-box-edge` and
+  `text-box-trim` (CSS Inline 3); `ruby-align` and `ruby-position` (CSS
+  Ruby 1); `text-combine-upright` (CSS Writing Modes 3);
+  `image-orientation` (CSS Images 3); `print-color-adjust` (CSS Color
+  Adjustment 1); `scroll-timeline-axis`, `scroll-timeline-name`,
+  `view-timeline-axis`, `view-timeline-inset`, `view-timeline-name` and
+  `timeline-scope` (Scroll-driven Animations 1); `flood-color`,
+  `flood-opacity` and `lighting-color` (Filter Effects 1); `clip-rule`
+  (CSS Masking 1); `color-interpolation`, `color-interpolation-filters`,
+  `marker-start`, `marker-mid`, `marker-end`, `paint-order`,
+  `shape-rendering`, `stop-color`, `stop-opacity`, `text-anchor` and
+  `vector-effect` (SVG 2); `math-shift` (MathML Core); and
+  `-webkit-text-fill-color`, `-webkit-text-stroke-color` and
+  `-webkit-text-stroke-width` (the Compatibility Standard).
 - **Change.** The `engine = "gecko"` line of each goes (the Gecko
   preference and FFI names stay, which servo builds ignore), and the
   `offset` and `column_rule` modules of `shorthands.rs` lose their
   `#[cfg(feature = "gecko")]`. Nothing else changes: the value types were
   already built for both engines, and a servo layout that does not use a
   value ignores it. The longhands keep upstream's `affects` (layout,
-  overflow, paint or none), so their restyle damage is upstream's.
+  overflow, paint or none), so their restyle damage is upstream's. The
+  second group's 48 longhands lose their `engine = "gecko"` line the same
+  way, and `FontSynthesisStyle` and `FontPalette` derive `Deserialize` and
+  `Serialize`, which servo builds need of every longhand's specified value
+  (as `FontSynthesis` and `CustomIdent` already do); their shorthands
+  (`marker`, `text-emphasis`, `-webkit-text-stroke`, `font-synthesis`,
+  `text-box`, `scroll-timeline` and `view-timeline`) keep their gates.
 - **Known difference (not patched).** Stylo's `BreakBetween` has no
   `column`, `avoid-page`, `avoid-column`, `recto` or `verso` in either
   build, though CSS Fragmentation 3 section 3.1 defines them, so
   `break-before: column` is still dropped; `BreakWithin` has all four of
   its values. Viper registers the gap; a later patch of the grammar is its
-  own row.
+  own row. In the second group, servo builds' `font` and `font-variant`
+  shorthands still leave out `font-variant-emoji` (upstream's
+  `extra_gecko_sub_properties`), so they do not reset it, though CSS Fonts
+  4 makes it a sub-property of both; and its seven shorthands above are
+  still dropped. A later patch of the shorthands would be its own change.
 - **Spots.** `style/properties/longhands.toml` (46 entries, the reason in
   full at `scroll-snap-type`), `style/properties/shorthands.toml` (13
   entries), `style/properties/shorthands.rs` (two module gates) and
-  `style/properties/declaration_block.rs` (the test module).
-- **Fork tests.** `engine_gates_parse_the_standard_longhands` and
-  `engine_gates_parse_the_shorthands`; all 51 `stylo` library tests pass.
+  `style/properties/declaration_block.rs` (the test module); second group:
+  `style/properties/longhands.toml` (48 entries, the reason in full at
+  `accent-color`) and `style/values/specified/font.rs` (two derives).
+- **Fork tests.** `engine_gates_parse_the_standard_longhands`,
+  `engine_gates_parse_the_shorthands` and, for the second group,
+  `engine_gates_parse_the_paint_and_text_longhands`; all 51 `stylo`
+  library tests pass.
 - **Viper proof.** `engine_gates`, which computes values of the
-  longhands through Viper's cascade and `computed_value`.
+  longhands through Viper's cascade and `computed_value`. For the second
+  group, Viper's parse and properties case suites, through
+  `CSS.supports`, until its computed values are reported.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
