@@ -489,7 +489,10 @@ impl PseudoElement {
     pub fn has_argument(&self) -> bool {
         // VIPER-PATCH(servo-standard-pseudo-elements): the functional ones,
         // whose bucket holds the rules of every argument.
-        matches!(self, Self::Highlight(_) | Self::ScrollButton(_) | Self::Picker(_))
+        matches!(
+            self,
+            Self::Highlight(_) | Self::ScrollButton(_) | Self::Picker(_)
+        )
     }
 
     /// Whether this pseudo-element is the ::target-text pseudo.
@@ -1523,7 +1526,10 @@ mod servo_standard_pseudo_elements_tests {
             (Highlight("--h\\.1".into()), "::highlight(--h\\.1)"),
             (ScrollMarker, "::scroll-marker"),
             (ScrollMarkerGroup, "::scroll-marker-group"),
-            (ScrollButton("inline-start".into()), "::scroll-button(inline-start)"),
+            (
+                ScrollButton("inline-start".into()),
+                "::scroll-button(inline-start)",
+            ),
             (Column, "::column"),
             (ViewTransition, "::view-transition"),
             (Picker("select".into()), "::picker(select)"),
@@ -1556,7 +1562,10 @@ mod servo_standard_pseudo_elements_tests {
     #[test]
     fn servo_standard_pseudo_elements_have_their_own_buckets() {
         let mut map = PerPseudoElementMap::<String>::default();
-        map.set(&PseudoElement::Unmatched("target-text".into()), "unmatched".into());
+        map.set(
+            &PseudoElement::Unmatched("target-text".into()),
+            "unmatched".into(),
+        );
         for (pseudo, css) in standard() {
             map.set(&pseudo, css.into());
         }
@@ -1566,7 +1575,10 @@ mod servo_standard_pseudo_elements_tests {
         let unmatched = PseudoElement::Unmatched("column".into());
         assert_eq!(map.get(&unmatched).map(String::as_str), Some("unmatched"));
         let other = PseudoElement::Highlight("other".into());
-        assert_eq!(map.get(&other).map(String::as_str), Some("::highlight(--h\\.1)"));
+        assert_eq!(
+            map.get(&other).map(String::as_str),
+            Some("::highlight(--h\\.1)")
+        );
         assert_eq!(map.iter().count(), 14);
     }
 

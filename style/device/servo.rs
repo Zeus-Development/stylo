@@ -739,7 +739,8 @@ mod minimum_logical_font_size_tests {
     fn specified(css: &str) -> specified::FontSize {
         let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
         let css = format!("font-size: {css}");
-        let block = parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let block =
+            parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
         match block.declarations() {
             [PropertyDeclaration::FontSize(value)] => value.clone(),
             other => panic!("{css}: {other:?}"),
@@ -879,7 +880,11 @@ mod servo_content_language_tests {
     /// The style a child of `parent` gets with the declarations `hints`
     /// cascaded, as an embedder's presentational hints are, and the size
     /// `font-size: 1ex` computes to in it.
-    fn styled(device: &Device, parent: Option<&ComputedValues>, hints: &[PropertyDeclaration]) -> (Arc<ComputedValues>, f32) {
+    fn styled(
+        device: &Device,
+        parent: Option<&ComputedValues>,
+        hints: &[PropertyDeclaration],
+    ) -> (Arc<ComputedValues>, f32) {
         let mut conditions = RuleCacheConditions::default();
         let mut caches = TreeCountingCaches::default();
         let builder = StyleBuilder::for_inheritance(device, None, parent, None);
@@ -929,7 +934,13 @@ mod servo_content_language_tests {
         assert_eq!(lang(&english), Atom::from("en"));
         // No stylesheet sets it.
         let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
-        let block = parse_style_attribute("-x-lang: ja", &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let block = parse_style_attribute(
+            "-x-lang: ja",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
         assert_eq!(block.len(), 0);
     }
 }
