@@ -337,6 +337,15 @@ where
                     flags.insert(selector.flags());
                 }
             },
+            // VIPER-PATCH(selectors-host-context): CSS Scoping 1 section 3.2.3
+            // gives `:host-context()` a pseudo-class's specificity plus its
+            // argument's, as `:host()`.
+            Component::HostContext(ref selector) => {
+                flags.insert(SelectorFlags::HAS_HOST);
+                specificity.class_like_selectors += 1;
+                *specificity += Specificity::from(selector.specificity());
+                flags.insert(selector.flags());
+            },
             Component::ID(..) => {
                 specificity.id_selectors += 1;
             },

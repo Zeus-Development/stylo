@@ -649,6 +649,9 @@ mod selector_names_tests {
 
     /// Names no specification has: `:made-up`, `:made-up-fn(<ident>)`,
     /// `::made-up`, `::made-up-fn(<ident>)` and the alias `:made-up-any()`;
+    // VIPER-PATCH(selectors-host-context): and `:made-up-context()`, which
+    // took the place of `:host-context()` once servo's parser had its own.
+    /// `:made-up-context(<compound-selector>)`;
     /// refuses `:focus` and `::slider-thumb`; `:focus` may follow
     /// `::made-up` and `:only-child` `::made-up-fn()`.
     struct TestNames;
@@ -672,9 +675,9 @@ mod selector_names_tests {
                     Some(ident(args).map(|a| class(format!(":made-up-fn({a})"))))
                 },
                 // VIPER-PATCH(selector-names-hook): also
-                // `:host-context(<compound-selector>)`, parsed with the
+                // `:made-up-context(<compound-selector>)`, parsed with the
                 // enclosing parser.
-                ("host-context", Some(args)) => {
+                ("made-up-context", Some(args)) => {
                     use selectors::parser::SelectorParseErrorKind::UnexpectedIdent;
                     let list = SelectorList::parse(parser, args, ParseRelative::No);
                     // One selector, no combinator and no pseudo-element.
@@ -687,7 +690,7 @@ mod selector_names_tests {
                     };
                     Some(match list {
                         Ok(l) if compound(&l) => {
-                            Ok(class(format!(":host-context({})", l.to_css_string())))
+                            Ok(class(format!(":made-up-context({})", l.to_css_string())))
                         },
                         Ok(_) => Err(ParseError::custom(UnexpectedIdent)),
                         Err(e) => Err(e),
@@ -840,7 +843,7 @@ mod selector_names_tests {
             ":horizontal",
             "::-webkit-scrollbar",
             ":-webkit-any(p)",
-            // VIPER-PATCH(selector-names-hook): `:host-context()` is the
+            // VIPER-PATCH(selector-names-hook): `:made-up-context()` is the
             // test hook's own.
         ] {
             assert!(!author(selectors), "{selectors}");
@@ -864,7 +867,6 @@ mod selector_names_tests {
             for selectors in [
                 ":-webkit-any(p, div)",
                 ":-webkit-any-link",
-                ":host-context(div)",
                 ":horizontal",
                 ":dir(rtl)",
                 ":-internal-text-field",
@@ -882,6 +884,8 @@ mod selector_names_tests {
             }
             for selectors in [
                 ":-moz-meter-optimum",
+                // VIPER-PATCH(selectors-host-context): servo's parser's own.
+                ":host-context(div)",
                 ":lang(\"en\")",
                 ":lang(en)",
                 "::color-swatch",
@@ -916,22 +920,22 @@ mod selector_names_tests {
             )
         };
         // The sheet's namespaces carry into the argument. Without a hook,
-        // servo's parser has no `:host-context()`, as upstream.
-        let (hook, default) = both(&svg, false, ":host-context(svg|a)");
-        assert_eq!(hook.as_deref(), Some(":host-context(svg|a)"));
+        // servo's parser has no `:made-up-context()`.
+        let (hook, default) = both(&svg, false, ":made-up-context(svg|a)");
+        assert_eq!(hook.as_deref(), Some(":made-up-context(svg|a)"));
         assert_eq!(default, None);
         assert_eq!(
-            both(&Namespaces::default(), false, ":host-context(svg|a)"),
+            both(&Namespaces::default(), false, ":made-up-context(svg|a)"),
             (None, None)
         );
         // So does a supports condition's non-forgiving mode: elsewhere the
         // unknown name is forgiven, kept as written and matching nothing.
-        let unknown = ":host-context(:is(:not-a-name))";
+        let unknown = ":made-up-context(:is(:not-a-name))";
         let (hook, default) = both(&Namespaces::default(), false, unknown);
         assert_eq!((hook.as_deref(), default), (Some(unknown), None));
         assert_eq!(both(&Namespaces::default(), true, unknown), (None, None));
         // And the hook itself: `:made-up` is its name, nested too.
-        let made_up = ":host-context(:is(:made-up))";
+        let made_up = ":made-up-context(:is(:made-up))";
         let (hook, default) = both(&Namespaces::default(), true, made_up);
         assert_eq!((hook.as_deref(), default), (Some(made_up), None));
     }

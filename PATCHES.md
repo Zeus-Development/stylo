@@ -96,8 +96,9 @@ STY-FORK-3b retires `chrome-selector-names` and
 STYLO-PIN-B adds `minimum-logical-font-size`, `servo-content-language` (a
 proof of upstream's servo behaviour, with no code), `text-autospace-initial`
 and `servo-standard-pseudo-elements` to `stylo`, and a third group to
-`engine-gates`.
-The other five directories equal the base commit's. V10b part 4a pins no new
+`engine-gates`; Viper's S3-13e3 adds `selectors-host-context` to
+`selectors`, `stylo` and `stylo_malloc_size_of`.
+The other four directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
 the index `cksum`, both `.cargo_vcs_info.json` name `34d25f741…`, and the
@@ -152,6 +153,7 @@ apart from the packaging files.
 | `minimum-logical-font-size` | `stylo`: `values/specified/font.rs`, `device/servo.rs` | Embedder control: CSS Fonts 4 leaves a minimum font size to the user agent, and a minimum that applies only to sizes following the default font size needs to know which those are; upstream keeps that only for sizes derived from a keyword through `em`, percentages, `smaller` and `larger`. In servo builds each computed font size carries `follows_default` (a size keyword; `smaller`, `larger`, a percentage or a font-relative length other than `rem` of a parent size that follows it), and the `Device` gains a minimum logical font size (default none, upstream's answer) that clamps the used size of those sizes only, the computed size staying as computed | `viper-style::cascade stylo_pin_b::minimum_logical_font_size_flags_and_no_minimum` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 80 / 117 |
 | `servo-content-language` | `stylo`: `device/servo.rs` (its test) | Standard, no code: HTML sections 3.2.6.2 and 15.3 give an element the language of its nearest inclusive ancestor with `lang`, which font selection and metrics read. Servo builds already compute the content language (`-x-lang`, a prioritary, inherited font longhand) from a presentational hint an embedder gives, and the font metrics provider receives it with the font; no stylesheet can set it, and with no hint it is empty. The fork test pins that behaviour, so that a rebase that loses it fails | `viper-style::cascade stylo_pin_b::servo_content_language_is_empty_without_a_hint` | Nothing to offer (upstream's behaviour) | Viper STYLO-PIN-B | 0 / 125 |
 | `text-autospace-initial` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its test) | Standard: CSS Text 4 gives `text-autospace` the initial value `normal`, and upstream had `no-autospace` | `viper-style::cascade stylo_pin_b::text_autospace_initial_is_normal` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 5 / 13 |
+| `selectors-host-context` | `selectors`: `parser.rs`, `matching.rs`, `builder.rs`; `stylo`: `servo/selector_parser.rs`, `stylesheets/parse_options.rs` (its tests); `stylo_malloc_size_of`: `lib.rs` | Standard: CSS Scoping 1 section 3.2.3's `:host-context(<compound-selector>)`, which Chrome and WebKit parse and upstream lacks (Gecko never shipped it). A `Parser` hook, `parse_host_context` (default `false`), parses it as a new component, `Component::HostContext`, where `:host()` parses; in the context of a shadow tree it matches the featureless host when its compound selector matches the host or one of the host's shadow-including ancestors, and elsewhere nothing. Its specificity is a pseudo-class's plus its argument's, and `compound_matches_featureless_host` lets it match the featureless host, so Stylo files its rules with a shadow root's host rules. Servo's `SelectorParser` enables it | `viper-style::shadow_host_context host_context_matches_by_the_host_or_an_ancestor` | Candidate; draft to the owner first | Viper S3-13e3 | 112 / 87 |
 | `servo-standard-pseudo-elements` | `stylo`: `servo/selector_parser.rs` | Embedder control and standard pseudo-elements: CSS Pseudo-Elements 4's `::target-text`, `::spelling-error`, `::grammar-error` and `::search-text`, the CSS Custom Highlight API's `::highlight()`, CSS Overflow 5's `::scroll-marker`, `::scroll-marker-group`, `::scroll-button()` and `::column`, CSS View Transitions 1's `::view-transition`, and HTML's `::picker()`, `::picker-icon` and `::checkmark` had no variant in servo builds, so an embedder's `SelectorNames` could build them only as `Unmatched`, all in one rule bucket. Each gains its own `PseudoElement` variant and index, so its rules are in a bucket of their own; they cascade lazily, accept the user-action pseudo-classes (Selectors 4 section 3.6.3), and the functional ones hold their argument (`has_argument`, so their bucket's rules are matched against it). Servo's own parser does not build them: without a hook it refuses the names, as upstream does | `viper-style::cascade stylo_pin_b::servo_standard_pseudo_elements_have_their_own_variants` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 126 / 104 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
@@ -1758,6 +1760,65 @@ Problem, change, every spot, the Miri commands and the before/after results:
   Viper's Basic names still build `Unmatched` at this pin; Viper's task
   B18d builds the variants and computes each.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Candidate; a draft goes to the Viper owner first.
+
+## Patch `selectors-host-context`
+
+- **Problem.** CSS Scoping 1 section 3.2.3 defines
+  `:host-context(<compound-selector>)`: in the context of a shadow tree it
+  matches the shadow host when its argument matches the host or one of the
+  host's shadow-including ancestors. Chrome and WebKit support it; upstream
+  `selectors` has no component for it, since Gecko never shipped it, so
+  servo's parser refused the name, and `compound_matches_featureless_host`
+  lets only `:host`, `:host()`, `:is()`, `:where()`, `:not()`, `:scope` and
+  pseudo-elements match the featureless host, so no embedder name could
+  match it either.
+- **Change.** A `Parser` hook, `parse_host_context` (default `false`, so
+  every other parser keeps upstream's answer), and a component,
+  `Component::HostContext(Selector)`, parsed where `:host()` is (refused
+  after a pseudo-element; the argument one compound selector with no
+  pseudo-element), ignoring the default namespace as `:host` does, and
+  serialized as `:host-context(…)`. `matches_host_context` matches only the
+  context's shadow host, and then the compound against the host and each
+  shadow-including ancestor in turn (an element's parent, or at a shadow
+  root that root's host), nested and not featureless, as `:host()` matches
+  its own. Its specificity is a pseudo-class's plus its argument's (section
+  3.2.3), with `:host()`'s flags; `compound_matches_featureless_host`
+  accepts it, so `matches_featureless_host` files a rule whose subject is
+  `:host-context()` with a shadow root's host rules; `is_host` answers it;
+  the visitor, parent-selector replacement and `MallocSizeOf` handle its
+  compound. Rule buckets need nothing: `find_bucket`'s default puts it in
+  the universal bucket, unmatched by the bucket. Servo's `SelectorParser`
+  enables it. Invalidation is upstream's: a change of the host itself
+  invalidates through the host's shadow root's map, but a change of an
+  ancestor is not looked up in the maps of shadow roots below it, so an
+  embedder restyles those itself (Viper restyles the changed element's
+  subtree while a shadow root's sheet holds `:host-context()`).
+- **Spots.** `selectors/parser.rs`: the hook, the variant, `is_host`, the
+  visitor, `replace_parent_on_selector`, `ToCss`, the parse and the
+  default-namespace exception, and the test parser's switch;
+  `selectors/matching.rs`: `compound_matches_featureless_host`,
+  `matches_simple_selector` and `matches_host_context`;
+  `selectors/builder.rs`: the specificity; `style/servo/selector_parser.rs`:
+  the hook; `malloc_size_of/lib.rs`: the arm.
+  `style/stylesheets/parse_options.rs`: the `selector-names-hook` tests
+  whose test hook named `:host-context()` name `:made-up-context()` instead,
+  and servo's parser now accepts `:host-context(div)` without a hook.
+- **Fork tests.** `host_context_parses_a_compound_selector` and
+  `host_context_specificity_and_featureless_host` (`selectors`).
+- **Viper proof.** `shadow_host_context::host_context_matches_by_the_host_or_an_ancestor`
+  (the gate's), with the rest of `viper-style`'s
+  `tests/shadow_host_context.rs`: the cascade from a shadow root's own sheet by the host and by ancestors,
+  through nested hosts and a closed root, the specificity of WPT
+  `css/css-shadow/host-context-specificity-001.html`, the DOM selector APIs
+  and restyles after a change.
+- **Size.** 112 code lines, over the patch rules' target of 100: a new
+  component is handled in ten spots across three crates (parser,
+  serialization, specificity, matching, the featureless host, the
+  visitor, parent replacement, the default namespace, `is_host` and
+  `MallocSizeOf`), comments included.
+- **Commands.** `cargo test -p selectors`, `cargo test -p stylo --features
+  servo --lib`.
 - **Upstream.** Candidate; a draft goes to the Viper owner first.
 
 ## Retired patches

@@ -1094,6 +1094,11 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         true
     }
 
+    // VIPER-PATCH(selectors-host-context): servo builds parse it.
+    fn parse_host_context(&self) -> bool {
+        true
+    }
+
     fn parse_slotted(&self) -> bool {
         true
     }

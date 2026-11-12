@@ -1109,6 +1109,46 @@ where
     })
 }
 
+// VIPER-PATCH(selectors-host-context): CSS Scoping 1 section 3.2.3: in the
+// context of a shadow tree, `:host-context(S)` matches its host when S
+// matches the host or one of its shadow-including ancestors (an ancestor's
+// shadow root leading on to that root's host). Elsewhere it matches nothing.
+fn matches_host_context<E>(
+    element: &E,
+    selector: &Selector<E::Impl>,
+    context: &mut MatchingContext<E::Impl>,
+    rightmost: SubjectOrPseudoElement,
+) -> KleeneValue
+where
+    E: Element,
+{
+    if context.shadow_host() != Some(element.opaque()) {
+        return KleeneValue::False;
+    }
+    let mut result = KleeneValue::False;
+    let mut current = Some(element.clone());
+    let mut position = rightmost;
+    while let Some(candidate) = current {
+        let matches = context.nest(|context| {
+            context.with_featureless(false, |context| {
+                matches_complex_selector(selector.iter(), &candidate, context, position)
+            })
+        });
+        result |= matches;
+        if result == KleeneValue::True {
+            break;
+        }
+        position = SubjectOrPseudoElement::No;
+        current = candidate.parent_element().or_else(|| {
+            candidate
+                .parent_node_is_shadow_root()
+                .then(|| candidate.containing_shadow_host())
+                .flatten()
+        });
+    }
+    result
+}
+
 fn matches_slotted<E>(
     element: &E,
     selector: &Selector<E::Impl>,
@@ -1171,6 +1211,9 @@ pub(crate) fn compound_matches_featureless_host<Impl: SelectorImpl>(
             Component::Scope | Component::ImplicitScope if scope_matches_featureless_host => {},
             // :host only matches featureless elements.
             Component::Host(..) => {},
+            // VIPER-PATCH(selectors-host-context): CSS Scoping 1 section 3.2.3
+            // lets `:host-context()` match the featureless host as well.
+            Component::HostContext(..) => {},
             // Pseudo-elements are allowed to match as well.
             Component::PseudoElement(..) => {},
             // We allow logical pseudo-classes, but we'll fail matching of the inner selectors if
@@ -1336,6 +1379,10 @@ where
         },
         Component::Host(ref selector) => {
             return matches_host(element, selector.as_ref(), &mut context.shared, rightmost);
+        },
+        // VIPER-PATCH(selectors-host-context): see `matches_host_context`.
+        Component::HostContext(ref selector) => {
+            return matches_host_context(element, selector, &mut context.shared, rightmost);
         },
         Component::ParentSelector => match context.shared.scope_element {
             Some(ref scope_element) => element.opaque() == *scope_element,

@@ -343,6 +343,15 @@ pub trait Parser<'i> {
         false
     }
 
+    // VIPER-PATCH(selectors-host-context): CSS Scoping 1 section 3.2.3's
+    // `:host-context(<compound-selector>)`, which Chrome and WebKit parse.
+    // Upstream has no such component: Gecko never shipped it, so servo's
+    // parser refused the name. https://drafts.csswg.org/css-scoping/#host-selector
+    /// Whether to parse the `:host-context()` pseudo-class.
+    fn parse_host_context(&self) -> bool {
+        false
+    }
+
     /// Whether to allow forgiving selector-list parsing.
     fn allow_forgiving_selectors(&self) -> bool {
         true
@@ -1421,6 +1430,14 @@ impl<Impl: SelectorImpl> Selector<Impl> {
                     &mut flags,
                     forbidden_flags,
                 ))),
+                // VIPER-PATCH(selectors-host-context): as `:host()`.
+                HostContext(ref selector) => HostContext(replace_parent_on_selector(
+                    selector,
+                    parent,
+                    &mut specificity,
+                    &mut flags,
+                    forbidden_flags,
+                )),
                 NthOf(ref data) => {
                     let selectors = replace_parent_on_selector_list(
                         data.selectors(),
@@ -2233,6 +2250,13 @@ pub enum Component<Impl: SelectorImpl> {
     ///
     /// See https://github.com/w3c/csswg-drafts/issues/2158
     Host(Option<Selector<Impl>>),
+    // VIPER-PATCH(selectors-host-context): the component.
+    /// The `:host-context()` pseudo-class: the featureless shadow host, when
+    /// its compound selector matches the host or one of the host's
+    /// shadow-including ancestors.
+    ///
+    /// https://drafts.csswg.org/css-scoping/#host-selector
+    HostContext(Selector<Impl>),
     /// The `:where` pseudo-class.
     ///
     /// https://drafts.csswg.org/selectors/#zero-matches
@@ -2274,9 +2298,11 @@ impl<Impl: SelectorImpl> Component<Impl> {
     }
 
     /// Returns true if this is a :host() selector.
+    // VIPER-PATCH(selectors-host-context): or a `:host-context()` one, which
+    // matches the featureless host too.
     #[inline]
     pub fn is_host(&self) -> bool {
-        matches!(*self, Component::Host(..))
+        matches!(*self, Component::Host(..) | Component::HostContext(..))
     }
 
     /// Returns the value as a combinator if applicable, None otherwise.
@@ -2323,7 +2349,8 @@ impl<Impl: SelectorImpl> Component<Impl> {
                     return false;
                 }
             },
-            Host(Some(ref selector)) => {
+            // VIPER-PATCH(selectors-host-context): its compound, as `:host()`'s.
+            Host(Some(ref selector)) | HostContext(ref selector) => {
                 if !selector.visit(visitor) {
                     return false;
                 }
@@ -2755,6 +2782,12 @@ impl<Impl: SelectorImpl> ToCss for Component<Impl> {
                     dest.write_char(')')?;
                 }
                 Ok(())
+            },
+            // VIPER-PATCH(selectors-host-context): its serialization.
+            HostContext(ref selector) => {
+                dest.write_str(":host-context(")?;
+                selector.to_css(dest)?;
+                dest.write_char(')')
             },
             Nth(ref nth_data) => {
                 nth_data.write_start(dest)?;
@@ -3477,9 +3510,12 @@ where
                 //
                 let ignore_default_ns = state
                     .intersects(SelectorParsingState::SKIP_DEFAULT_NAMESPACE)
+                    // VIPER-PATCH(selectors-host-context): `:host-context()` too.
                     || matches!(
                         result,
-                        SimpleSelectorParseResult::SimpleSelector(Component::Host(..))
+                        SimpleSelectorParseResult::SimpleSelector(
+                            Component::Host(..) | Component::HostContext(..)
+                        )
                     );
                 if !ignore_default_ns {
                     builder.push_simple_selector(Component::DefaultNamespace(url));
@@ -3692,6 +3728,14 @@ where
                 return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
             }
             return Ok(Component::Host(Some(parse_inner_compound_selector(parser, input, state)?)));
+        },
+        // VIPER-PATCH(selectors-host-context): parsed where `:host()` is.
+        "host-context" if parser.parse_host_context() => {
+            if !state.allows_tree_structural_pseudo_classes() {
+                return Err(ParseError::custom(SelectorParseErrorKind::InvalidState));
+            }
+            let selector = parse_inner_compound_selector(parser, input, state)?;
+            return Ok(Component::HostContext(selector));
         },
         "not" => {
             return parse_negation(parser, input, state)
@@ -4122,6 +4166,8 @@ pub mod tests {
         // VIPER-PATCH(selectors-after-pseudo-element-hook): `:active` only after a
         // pseudo-element.
         active_only_after_pseudo_element: bool,
+        // VIPER-PATCH(selectors-host-context): refuse `:host-context()`.
+        refuse_host_context: bool,
     }
 
     impl DummyParser {
@@ -4228,6 +4274,11 @@ pub mod tests {
 
         fn parse_host(&self) -> bool {
             true
+        }
+
+        // VIPER-PATCH(selectors-host-context): the test parser's switch.
+        fn parse_host_context(&self) -> bool {
+            !self.refuse_host_context
         }
 
         // VIPER-PATCH(selectors-compound-is-alias): the test parser's alias.
@@ -5314,5 +5365,70 @@ pub mod tests {
         assert!(parse_ns("::before:not(:active)", &parser).is_ok());
         assert!(parse_ns(":is(:active, :hover)", &parser).is_ok());
         assert!(parse_ns(":not(:active)", &parser).is_err());
+    }
+
+    // VIPER-PATCH(selectors-host-context): a compound selector argument,
+    // parsed where `:host()` is and only by a parser that enables it.
+    #[test]
+    fn host_context_parses_a_compound_selector() {
+        for input in [
+            ":host-context(div)",
+            ":host-context(div.a#b[c])",
+            ":host-context(.a) p",
+            ":host-context(:is(.a, .b)) > p",
+            ":is(:host-context(.a), p)",
+        ] {
+            assert!(parse(input).is_ok(), "{input}");
+        }
+        for input in [
+            ":host-context",
+            ":host-context()",
+            ":host-context(div p)",
+            ":host-context(div, p)",
+            ":host-context(::before)",
+            "::before:host-context(div)",
+        ] {
+            assert!(parse(input).is_err(), "{input}");
+        }
+        let refusing = DummyParser {
+            refuse_host_context: true,
+            ..Default::default()
+        };
+        assert!(parse_ns(":host-context(div)", &refusing).is_err());
+        assert!(parse_ns(":host(div)", &refusing).is_ok());
+        // A featureless host ignores the default namespace.
+        let parser = DummyParser::default_with_namespace(DummyAtom::from("http://e.com/"));
+        let list = parse_ns(":host-context(div)", &parser).unwrap();
+        let mut outer = list.slice()[0].iter_raw_match_order();
+        assert!(matches!(outer.next(), Some(Component::HostContext(..))));
+        assert!(outer.next().is_none());
+    }
+
+    // VIPER-PATCH(selectors-host-context): CSS Scoping 1 section 3.2.3's
+    // specificity, and the compounds that may match the featureless host.
+    #[test]
+    fn host_context_specificity_and_featureless_host() {
+        let specificity_of = |input| parse(input).unwrap().slice()[0].specificity();
+        assert_eq!(specificity_of(":host-context(div)"), specificity(0, 1, 1));
+        assert_eq!(
+            specificity_of(":host-context(#a.b) .c"),
+            specificity(1, 3, 0)
+        );
+        assert_eq!(
+            specificity_of(":host(.a)"),
+            specificity_of(":host-context(.a)")
+        );
+        let featureless = |input| parse(input).unwrap().slice()[0].matches_featureless_host(true);
+        for (input, expected) in [
+            (":host-context(div)", MatchesFeaturelessHost::Only),
+            (":host-context(div):host(.a)", MatchesFeaturelessHost::Only),
+            (":is(:host-context(div), p)", MatchesFeaturelessHost::Yes),
+            (":host-context(div).a", MatchesFeaturelessHost::Never),
+            (":host-context(div) p", MatchesFeaturelessHost::Never),
+        ] {
+            assert_eq!(featureless(input), expected, "{input}");
+        }
+        let host_context = parse(":host-context(div)").unwrap();
+        assert!(host_context.slice()[0].iter().all(|c| c.is_host()));
     }
 }
