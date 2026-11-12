@@ -344,9 +344,9 @@ pub trait Parser<'i> {
     }
 
     // VIPER-PATCH(selectors-host-context): CSS Scoping 1 section 3.2.3's
-    // `:host-context(<compound-selector>)`, which Chrome and WebKit parse.
-    // Upstream has no such component: Gecko never shipped it, so servo's
-    // parser refused the name. https://drafts.csswg.org/css-scoping/#host-selector
+    // `:host-context(<compound-selector>)`. Upstream has no such component,
+    // so servo's parser refused the name.
+    // https://drafts.csswg.org/css-scoping/#host-selector
     /// Whether to parse the `:host-context()` pseudo-class.
     fn parse_host_context(&self) -> bool {
         false
