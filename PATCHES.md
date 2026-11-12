@@ -1792,8 +1792,8 @@ Problem, change, every spot, the Miri commands and the before/after results:
   enables it. Invalidation is upstream's: a change of the host itself
   invalidates through the host's shadow root's map, but a change of an
   ancestor is not looked up in the maps of shadow roots below it, so an
-  embedder restyles those itself (Viper restyles the changed element's
-  subtree while a shadow root's sheet holds `:host-context()`).
+  embedder restyles those itself (Viper restyles a document with shadow
+  roots from scratch after a mutation).
 - **Spots.** `selectors/parser.rs`: the hook, the variant, `is_host`, the
   visitor, `replace_parent_on_selector`, `ToCss`, the parse and the
   default-namespace exception, and the test parser's switch;
