@@ -155,6 +155,7 @@ apart from the packaging files.
 | `text-autospace-initial` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its test) | Standard: CSS Text 4 gives `text-autospace` the initial value `normal`, and upstream had `no-autospace` | `viper-style::cascade stylo_pin_b::text_autospace_initial_is_normal` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 5 / 13 |
 | `selectors-host-context` | `selectors`: `parser.rs`, `matching.rs`, `builder.rs`; `stylo`: `servo/selector_parser.rs`, `stylesheets/parse_options.rs` (its tests); `stylo_malloc_size_of`: `lib.rs` | Standard: CSS Scoping 1 section 3.2.3's `:host-context(<compound-selector>)`, which upstream's `selectors` has no component for. A `Parser` hook, `parse_host_context` (default `false`), parses it as a new component, `Component::HostContext`, where `:host()` parses; in the context of a shadow tree it matches the featureless host when its compound selector matches the host or one of the host's shadow-including ancestors, and elsewhere nothing. Its specificity is a pseudo-class's plus its argument's, and `compound_matches_featureless_host` lets it match the featureless host, so Stylo files its rules with a shadow root's host rules. Servo's `SelectorParser` enables it | `viper-style::shadow_host_context host_context_matches_by_the_host_or_an_ancestor` | Candidate; draft to the owner first | Viper S3-13e3 | 112 / 87 |
 | `servo-standard-pseudo-elements` | `stylo`: `servo/selector_parser.rs` | Embedder control and standard pseudo-elements: CSS Pseudo-Elements 4's `::target-text`, `::spelling-error`, `::grammar-error` and `::search-text`, the CSS Custom Highlight API's `::highlight()`, CSS Overflow 5's `::scroll-marker`, `::scroll-marker-group`, `::scroll-button()` and `::column`, CSS View Transitions 1's `::view-transition`, and HTML's `::picker()`, `::picker-icon` and `::checkmark` had no variant in servo builds, so an embedder's `SelectorNames` could build them only as `Unmatched`, all in one rule bucket. Each gains its own `PseudoElement` variant and index, so its rules are in a bucket of their own; they cascade lazily, accept the user-action pseudo-classes (Selectors 4 section 3.6.3), and the functional ones hold their argument (`has_argument`, so their bucket's rules are matched against it). Servo's own parser does not build them: without a hook it refuses the names, as upstream does | `viper-style::cascade stylo_pin_b::servo_standard_pseudo_elements_have_their_own_variants` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 126 / 104 |
+| `system-color-palette` | `stylo`: `device/system_colors.rs` (new), `device/mod.rs`, `device/servo.rs` | Embedder control: CSS Color 4 section 6.2 leaves the values of the system colours to the user agent and its platform, and upstream's servo `Device::system_color` fixes one light and one dark table, so an embedder cannot give a device's own colours; the `Device` gains `SystemColorPalette` (`set_system_colors`, `system_colors`), a light and a dark `SystemColors` table of the nineteen colours, read through the element's used scheme, the deprecated colours mapped as section 6.2.1 says, upstream's values the default | `viper-style::cascade system_colors::system_color_palette_reaches_the_cascade` | Candidate; draft to the owner first | Viper STY-SYSTEM-COLORS-1 | 209 / 153 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1819,6 +1820,41 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p selectors`, `cargo test -p stylo --features
   servo --lib`.
 - **Upstream.** Candidate; a draft goes to the Viper owner first.
+
+## Patch `system-color-palette`
+
+- **Problem.** CSS Color 4 section 6.2 defines nineteen system colours
+  (`Canvas`, `CanvasText`, `LinkText` and the others) whose values come
+  from the user agent and its platform, one set per colour scheme.
+  Upstream's servo `Device::system_color` fixes them in a match, one light
+  and one dark table, so an embedder cannot give a device's own colours.
+- **Change.** A new module, `device/system_colors.rs`: `SystemColors`, the
+  nineteen values of one scheme as named `AbsoluteColor` fields, with
+  `get`, which answers a deprecated colour (section 6.2.1) by the colour
+  that section maps it to, as upstream's match did; and
+  `SystemColorPalette`, a `light` and a `dark` table, whose `Default` is
+  upstream's values, moved from the match unchanged. The servo `Device`
+  keeps one (`set_system_colors`, `system_colors`), the default unless the
+  embedder sets another; `system_color` reads the table of the used scheme
+  (`is_dark_color_scheme`, unchanged). `Device::new` keeps its signature.
+  Like `set_color_scheme`, a change needs the embedder to restyle.
+- **Spots.** `style/device/system_colors.rs` (new: the types, the
+  default, the mapping and the tests); `style/device/mod.rs` (the module);
+  `style/device/servo.rs` (the import, the field, its default, the
+  accessors and `system_color`'s body).
+- **Fork tests.** `system_color_palette_defaults_to_upstreams_values` and
+  `system_color_palette_is_the_embedders_per_scheme` (every system colour,
+  deprecated ones included, under both schemes).
+- **Viper proof.** `system_color_palette_reaches_the_cascade`, which
+  computes system colours through Viper's cascade under a configured
+  palette in both schemes.
+- **Size.** 209 added code lines, over the patch rules' target of 100, and
+  102 removed: upstream's match moves into the module as the two tables of
+  the default (49 lines) and `get`'s mapping (48 lines), and the nineteen
+  fields each carry their documentation, comments included.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Embedder control, so a candidate; a draft goes to the
+  Viper owner first.
 
 ## Retired patches
 

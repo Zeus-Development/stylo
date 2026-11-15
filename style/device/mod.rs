@@ -25,6 +25,9 @@ use crate::device::servo::ExtraDeviceData;
 pub mod gecko;
 #[cfg(feature = "servo")]
 pub mod servo;
+// VIPER-PATCH(system-color-palette): the embedder's system colours.
+#[cfg(feature = "servo")]
+pub mod system_colors;
 
 /// A device is a structure that represents the current media a given document
 /// is displayed in.

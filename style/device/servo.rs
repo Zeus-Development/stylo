@@ -22,6 +22,8 @@ use crate::values::computed::{
     CSSPixelLength, Length, LineHeight, LinkParameters, NonNegativeLength,
 };
 use crate::values::specified::color::{ColorSchemeFlags, ForcedColors, SystemColor};
+// VIPER-PATCH(system-color-palette): the embedder's system colours.
+use crate::device::system_colors::SystemColorPalette;
 use crate::values::specified::font::{
     QueryFontMetricsFlags, FONT_MEDIUM_CAP_PX, FONT_MEDIUM_CH_PX, FONT_MEDIUM_EX_PX,
     FONT_MEDIUM_IC_PX, FONT_MEDIUM_LINE_HEIGHT_PX, FONT_MEDIUM_PX,
@@ -111,6 +113,10 @@ pub(super) struct ExtraDeviceData {
     /// size; `None`, the default, clamps nothing.
     #[ignore_malloc_size_of = "Pure stack type"]
     minimum_logical_font_size: Option<Length>,
+    // VIPER-PATCH(system-color-palette): the embedder's system colours.
+    /// The values of the system colours in each colour scheme.
+    #[ignore_malloc_size_of = "Pure stack type"]
+    system_colors: SystemColorPalette,
     /// An implementation of a trait which implements support for querying font metrics.
     #[ignore_malloc_size_of = "Owned by embedder"]
     font_metrics_provider: Box<dyn FontMetricsProvider>,
@@ -163,6 +169,8 @@ impl Device {
                 normal_color_scheme: NormalColorScheme::default(),
                 // VIPER-PATCH(minimum-logical-font-size): no minimum.
                 minimum_logical_font_size: None,
+                // VIPER-PATCH(system-color-palette): upstream's values.
+                system_colors: SystemColorPalette::default(),
                 font_metrics_provider,
             },
         }
@@ -417,6 +425,22 @@ impl Device {
         self.extra.normal_color_scheme
     }
 
+    // VIPER-PATCH(system-color-palette): the accessors.
+    /// Set the values of the system colours in each colour scheme on this
+    /// [`Device`].
+    ///
+    /// Note that this does not update any associated `Stylist`. For this you must call
+    /// `Stylist::media_features_change_changed_style` and
+    /// `Stylist::force_stylesheet_origins_dirty`.
+    pub fn set_system_colors(&mut self, palette: SystemColorPalette) {
+        self.extra.system_colors = palette;
+    }
+
+    /// Returns the values of the system colours in each colour scheme.
+    pub fn system_colors(&self) -> SystemColorPalette {
+        self.extra.system_colors
+    }
+
     // VIPER-PATCH(minimum-logical-font-size): the accessors.
     /// Set the minimum logical font size on this [`Device`]: the used size
     /// of a font size that follows the default font size (a size keyword,
@@ -468,112 +492,16 @@ impl Device {
         system_color: SystemColor,
         color_scheme_flags: ColorSchemeFlags,
     ) -> AbsoluteColor {
-        fn srgb(r: u8, g: u8, b: u8) -> AbsoluteColor {
-            AbsoluteColor::srgb_legacy(r, g, b, 1f32)
-        }
-
+        // VIPER-PATCH(system-color-palette): the embedder's table of the
+        // used scheme; upstream's values are the default palette
+        // (`device/system_colors.rs`).
         // Refer to spec
         // <https://www.w3.org/TR/css-color-4/#css-system-colors>
+        let palette = &self.extra.system_colors;
         if self.is_dark_color_scheme(color_scheme_flags) {
-            match system_color {
-                SystemColor::Accentcolor => srgb(10, 132, 255),
-                SystemColor::Accentcolortext => srgb(255, 255, 255),
-                SystemColor::Activetext => srgb(255, 0, 0),
-                SystemColor::Linktext => srgb(158, 158, 255),
-                SystemColor::Visitedtext => srgb(208, 173, 240),
-                SystemColor::Buttonborder
-                // Deprecated system colors (CSS Color 4) mapped to Buttonborder.
-                | SystemColor::Activeborder
-                | SystemColor::Inactiveborder
-                | SystemColor::Threeddarkshadow
-                | SystemColor::Threedshadow
-                | SystemColor::Windowframe => srgb(255, 255, 255),
-                SystemColor::Buttonface
-                // Deprecated system colors (CSS Color 4) mapped to Buttonface.
-                | SystemColor::Buttonhighlight
-                | SystemColor::Buttonshadow
-                | SystemColor::Threedface
-                | SystemColor::Threedhighlight
-                | SystemColor::Threedlightshadow => srgb(107, 107, 107),
-                SystemColor::Buttontext => srgb(245, 245, 245),
-                SystemColor::Canvas
-                // Deprecated system colors (CSS Color 4) mapped to Canvas.
-                | SystemColor::Activecaption
-                | SystemColor::Appworkspace
-                | SystemColor::Background
-                | SystemColor::Inactivecaption
-                | SystemColor::Infobackground
-                | SystemColor::Menu
-                | SystemColor::Scrollbar
-                | SystemColor::Window => srgb(30, 30, 30),
-                SystemColor::Canvastext
-                // Deprecated system colors (CSS Color 4) mapped to Canvastext.
-                | SystemColor::Captiontext
-                | SystemColor::Infotext
-                | SystemColor::Menutext
-                | SystemColor::Windowtext => srgb(232, 232, 232),
-                SystemColor::Field => srgb(45, 45, 45),
-                SystemColor::Fieldtext => srgb(240, 240, 240),
-                SystemColor::Graytext
-                // Deprecated system colors (CSS Color 4) mapped to Graytext.
-                | SystemColor::Inactivecaptiontext => srgb(155, 155, 155),
-                SystemColor::Highlight => srgb(38, 79, 120),
-                SystemColor::Highlighttext => srgb(255, 255, 255),
-                SystemColor::Mark => srgb(102, 92, 0),
-                SystemColor::Marktext => srgb(255, 255, 255),
-                SystemColor::Selecteditem => srgb(153, 200, 255),
-                SystemColor::Selecteditemtext => srgb(59, 59, 59),
-            }
+            palette.dark.get(system_color)
         } else {
-            match system_color {
-                SystemColor::Accentcolor => srgb(0, 102, 204),
-                SystemColor::Accentcolortext => srgb(255, 255, 255),
-                SystemColor::Activetext => srgb(238, 0, 0),
-                SystemColor::Linktext => srgb(0, 0, 238),
-                SystemColor::Visitedtext => srgb(85, 26, 139),
-                SystemColor::Buttonborder
-                // Deprecated system colors (CSS Color 4) mapped to Buttonborder.
-                | SystemColor::Activeborder
-                | SystemColor::Inactiveborder
-                | SystemColor::Threeddarkshadow
-                | SystemColor::Threedshadow
-                | SystemColor::Windowframe => srgb(169, 169, 169),
-                SystemColor::Buttonface
-                // Deprecated system colors (CSS Color 4) mapped to Buttonface.
-                | SystemColor::Buttonhighlight
-                | SystemColor::Buttonshadow
-                | SystemColor::Threedface
-                | SystemColor::Threedhighlight
-                | SystemColor::Threedlightshadow => srgb(220, 220, 220),
-                SystemColor::Buttontext => srgb(0, 0, 0),
-                SystemColor::Canvas
-                // Deprecated system colors (CSS Color 4) mapped to Canvas.
-                | SystemColor::Activecaption
-                | SystemColor::Appworkspace
-                | SystemColor::Background
-                | SystemColor::Inactivecaption
-                | SystemColor::Infobackground
-                | SystemColor::Menu
-                | SystemColor::Scrollbar
-                | SystemColor::Window => srgb(255, 255, 255),
-                SystemColor::Canvastext
-                // Deprecated system colors (CSS Color 4) mapped to Canvastext.
-                | SystemColor::Captiontext
-                | SystemColor::Infotext
-                | SystemColor::Menutext
-                | SystemColor::Windowtext => srgb(0, 0, 0),
-                SystemColor::Field => srgb(255, 255, 255),
-                SystemColor::Fieldtext => srgb(0, 0, 0),
-                SystemColor::Graytext
-                // Deprecated system colors (CSS Color 4) mapped to Graytext.
-                | SystemColor::Inactivecaptiontext => srgb(109, 109, 109),
-                SystemColor::Highlight => srgb(0, 65, 198),
-                SystemColor::Highlighttext => srgb(0, 0, 0),
-                SystemColor::Mark => srgb(255, 235, 59),
-                SystemColor::Marktext => srgb(0, 0, 0),
-                SystemColor::Selecteditem => srgb(0, 102, 204),
-                SystemColor::Selecteditemtext => srgb(255, 255, 255),
-            }
+            palette.light.get(system_color)
         }
     }
 
