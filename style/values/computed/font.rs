@@ -447,7 +447,7 @@ impl FontFamily {
         generic_font_family!(MONOSPACE, Monospace);
         generic_font_family!(CURSIVE, Cursive);
         generic_font_family!(FANTASY, Fantasy);
-        #[cfg(feature = "gecko")]
+        // VIPER-PATCH(servo-math-fonts): see `GenericFontFamily::Math`.
         generic_font_family!(MATH, Math);
         #[cfg(feature = "gecko")]
         generic_font_family!(MOZ_EMOJI, MozEmoji);
@@ -463,7 +463,7 @@ impl FontFamily {
             GenericFontFamily::Monospace => &*MONOSPACE,
             GenericFontFamily::Cursive => &*CURSIVE,
             GenericFontFamily::Fantasy => &*FANTASY,
-            #[cfg(feature = "gecko")]
+            // VIPER-PATCH(servo-math-fonts): see `GenericFontFamily::Math`.
             GenericFontFamily::Math => &*MATH,
             #[cfg(feature = "gecko")]
             GenericFontFamily::MozEmoji => &*MOZ_EMOJI,
@@ -640,6 +640,12 @@ fn math_enabled(context: &ParserContext) -> bool {
     context.chrome_rules_enabled() || crate::pref!("mathml.font_family_math.enabled")
 }
 
+// VIPER-PATCH(servo-math-fonts): see `GenericFontFamily::Math`.
+#[cfg(feature = "servo")]
+fn math_enabled(_: &ParserContext) -> bool {
+    true
+}
+
 /// A generic font-family name.
 ///
 /// The order here is important, if you change it make sure that
@@ -679,7 +685,10 @@ pub enum GenericFontFamily {
     Monospace,
     Cursive,
     Fantasy,
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(servo-math-fonts): CSS Fonts 4 section 2.1.3's `math`
+    // generic family (MathML Core section 3.1) parses in servo builds too;
+    // upstream builds it for Gecko only, behind a preference. Which face it
+    // names is the embedder's.
     #[parse(condition = "math_enabled")]
     Math,
     #[parse(condition = "system_ui_enabled")]
@@ -697,8 +706,10 @@ impl GenericFontFamily {
     pub(crate) fn valid_for_user_font_prioritization(self) -> bool {
         match self {
             Self::None | Self::Cursive | Self::Fantasy | Self::SystemUi => false,
+            // VIPER-PATCH(servo-math-fonts): see `GenericFontFamily::Math`.
+            Self::Math => false,
             #[cfg(feature = "gecko")]
-            Self::Math | Self::MozEmoji => false,
+            Self::MozEmoji => false,
             Self::Serif | Self::SansSerif | Self::Monospace => true,
         }
     }

@@ -1387,7 +1387,11 @@ affects = "layout"
 type = "MathDepth"
 initial = "0"
 struct = "font"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(servo-math-fonts): MathML Core's `math-depth` (section 3.2) and
+# `math-style` (section 3.4) sat behind upstream's `layout.unimplemented`
+# preference, which servo builds never set, so a servo build dropped their
+# declarations; they parse and compute in servo builds, and `font-size: math`
+# (section 3.3) scales by their change of depth.
 spec = "https://mathml-refresh.github.io/mathml-core/#the-math-script-level-property"
 affects = ""
 
@@ -3884,7 +3888,7 @@ keyword = { values = ["auto", "none"], gecko_constant_prefix = "NS_FONT_OPTICAL_
 
 [math-style]
 struct = "font"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(servo-math-fonts): see math-depth.
 spec = "https://mathml-refresh.github.io/mathml-core/#the-math-style-property"
 animation_type = "discrete"
 affects = "layout"

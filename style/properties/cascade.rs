@@ -998,7 +998,7 @@ impl<'a> Cascade<'a> {
             },
             FontSize => {
                 if self.seen.longhands.contains(LonghandId::MathDepth) {
-                    #[cfg(feature = "gecko")]
+                    // VIPER-PATCH(servo-math-fonts): in servo builds too.
                     Self::recompute_math_font_size_if_needed(context);
                 }
                 if self.seen.longhands.contains(LonghandId::XLang)
@@ -1508,6 +1508,55 @@ impl<'a> Cascade<'a> {
         builder.mutate_font().set_font_size(new_size);
     }
 
+    /// VIPER-PATCH(servo-math-fonts): `font-size: math` in servo builds
+    /// (MathML Core section 3.3): the parent's sizes times the scale factor
+    /// of the change of `math-depth`, from the inherited first available
+    /// font's MATH table when the embedder's metrics give one, else 0.71 per
+    /// level. The used size is clamped to the device's minimum as any other
+    /// size that follows the default (`minimum-logical-font-size`).
+    /// MathML Core defines no script minimum size, so none applies.
+    #[cfg(feature = "servo")]
+    fn recompute_math_font_size_if_needed(context: &mut computed::Context) {
+        use crate::font_metrics::FontMetricsOrientation;
+        use crate::values::generics::NonNegative;
+        use crate::values::specified::font::QueryFontMetricsFlags;
+        use crate::values::specified::length::FontBaseSize;
+
+        let font = context.builder.get_font();
+        let mut size = font.clone_font_size();
+        if size.keyword_info.kw != specified::FontSizeKeyword::Math {
+            return;
+        }
+        let parent_font = context.builder.get_parent_font();
+        let parent_depth = parent_font.clone_math_depth() as i32;
+        let depth = font.clone_math_depth() as i32;
+        if parent_depth == depth {
+            return;
+        }
+        let parent_size = parent_font.clone_font_size().computed_size();
+        let metrics = context.query_font_metrics(
+            FontBaseSize::InheritedStyle,
+            FontMetricsOrientation::Horizontal,
+            QueryFontMetricsFlags::NEEDS_MATH_SCALES,
+        );
+        let scale = scale_factor_for_math_depth_change(
+            parent_depth,
+            depth,
+            metrics.script_percent_scale_down,
+            metrics.script_script_percent_scale_down,
+        );
+        size.computed_size = NonNegative(parent_size.scale_by(scale));
+        size.used_size = match context.device().minimum_logical_font_size() {
+            Some(minimum)
+                if size.keyword_info.follows_default && size.computed_size.0 < minimum =>
+            {
+                NonNegative(minimum)
+            },
+            _ => size.computed_size,
+        };
+        context.builder.mutate_font().set_font_size(size);
+    }
+
     /// Special handling of font-size: math (used for MathML).
     /// https://w3c.github.io/mathml-core/#the-math-script-level-property
     /// TODO: Bug: 1548471: MathML Core also does not specify a script min size
@@ -1523,56 +1572,8 @@ impl<'a> Cascade<'a> {
             return;
         }
 
-        const SCALE_FACTOR_WHEN_INCREMENTING_MATH_DEPTH_BY_ONE: f32 = 0.71;
-
-        // Helper function that calculates the scale factor applied to font-size
-        // when math-depth goes from parent_math_depth to computed_math_depth.
-        // This function is essentially a modification of the MathML3's formula
-        // 0.71^(parent_math_depth - computed_math_depth) so that a scale factor
-        // of parent_script_percent_scale_down is applied when math-depth goes
-        // from 0 to 1 and parent_script_script_percent_scale_down is applied
-        // when math-depth goes from 0 to 2. This is also a straightforward
-        // implementation of the specification's algorithm:
-        // https://w3c.github.io/mathml-core/#the-math-script-level-property
-        fn scale_factor_for_math_depth_change(
-            parent_math_depth: i32,
-            computed_math_depth: i32,
-            parent_script_percent_scale_down: Option<f32>,
-            parent_script_script_percent_scale_down: Option<f32>,
-        ) -> f32 {
-            let mut a = parent_math_depth;
-            let mut b = computed_math_depth;
-            let c = SCALE_FACTOR_WHEN_INCREMENTING_MATH_DEPTH_BY_ONE;
-            let scale_between_0_and_1 = parent_script_percent_scale_down.unwrap_or(c);
-            let scale_between_0_and_2 = parent_script_script_percent_scale_down.unwrap_or(c * c);
-            let mut s = 1.0;
-            let mut invert_scale_factor = false;
-            if a == b {
-                return s;
-            }
-            if b < a {
-                std::mem::swap(&mut a, &mut b);
-                invert_scale_factor = true;
-            }
-            let mut e = b - a;
-            if a <= 0 && b >= 2 {
-                s *= scale_between_0_and_2;
-                e -= 2;
-            } else if a == 1 {
-                s *= scale_between_0_and_2 / scale_between_0_and_1;
-                e -= 1;
-            } else if b == 1 {
-                s *= scale_between_0_and_1;
-                e -= 1;
-            }
-            s *= c.powi(e);
-            if invert_scale_factor {
-                1.0 / s.max(f32::MIN_POSITIVE)
-            } else {
-                s
-            }
-        }
-
+        // VIPER-PATCH(servo-math-fonts): the scale factor's helper is now
+        // `scale_factor_for_math_depth_change`, below, shared with servo's.
         let (new_size, new_unconstrained_size) = {
             use crate::values::specified::font::QueryFontMetricsFlags;
 
@@ -2709,5 +2710,58 @@ fn substitute_all(
     // properties.
     for attr in &seen.attr {
         run_one(VarType::Attr((*attr).clone()));
+    }
+}
+
+// VIPER-PATCH(servo-math-fonts): upstream's helper of
+// `recompute_math_font_size_if_needed`, moved out of its Gecko body so both
+// builds share it, unchanged.
+const SCALE_FACTOR_WHEN_INCREMENTING_MATH_DEPTH_BY_ONE: f32 = 0.71;
+
+// Helper function that calculates the scale factor applied to font-size
+// when math-depth goes from parent_math_depth to computed_math_depth.
+// This function is essentially a modification of the MathML3's formula
+// 0.71^(parent_math_depth - computed_math_depth) so that a scale factor
+// of parent_script_percent_scale_down is applied when math-depth goes
+// from 0 to 1 and parent_script_script_percent_scale_down is applied
+// when math-depth goes from 0 to 2. This is also a straightforward
+// implementation of the specification's algorithm:
+// https://w3c.github.io/mathml-core/#the-math-script-level-property
+fn scale_factor_for_math_depth_change(
+    parent_math_depth: i32,
+    computed_math_depth: i32,
+    parent_script_percent_scale_down: Option<f32>,
+    parent_script_script_percent_scale_down: Option<f32>,
+) -> f32 {
+    let mut a = parent_math_depth;
+    let mut b = computed_math_depth;
+    let c = SCALE_FACTOR_WHEN_INCREMENTING_MATH_DEPTH_BY_ONE;
+    let scale_between_0_and_1 = parent_script_percent_scale_down.unwrap_or(c);
+    let scale_between_0_and_2 = parent_script_script_percent_scale_down.unwrap_or(c * c);
+    let mut s = 1.0;
+    let mut invert_scale_factor = false;
+    if a == b {
+        return s;
+    }
+    if b < a {
+        std::mem::swap(&mut a, &mut b);
+        invert_scale_factor = true;
+    }
+    let mut e = b - a;
+    if a <= 0 && b >= 2 {
+        s *= scale_between_0_and_2;
+        e -= 2;
+    } else if a == 1 {
+        s *= scale_between_0_and_2 / scale_between_0_and_1;
+        e -= 1;
+    } else if b == 1 {
+        s *= scale_between_0_and_1;
+        e -= 1;
+    }
+    s *= c.powi(e);
+    if invert_scale_factor {
+        1.0 / s.max(f32::MIN_POSITIVE)
+    } else {
+        s
     }
 }

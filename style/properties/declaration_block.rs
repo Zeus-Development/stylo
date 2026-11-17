@@ -2022,7 +2022,8 @@ mod servo_scrollbars_margin_trim_tests {
 
     /// The value `css` declares for `name`, serialized, or `None` when the
     /// declaration is dropped.
-    fn declared(name: &str, css: &str) -> Option<String> {
+    // VIPER-PATCH(servo-math-fonts): shared with STYLO-PIN-E's tests.
+    pub(super) fn declared(name: &str, css: &str) -> Option<String> {
         let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
         let css = format!("{name}: {css}");
         let block =
@@ -2073,5 +2074,72 @@ mod servo_scrollbars_margin_trim_tests {
         assert_eq!(color.to_css_string(), "auto");
         assert_eq!(scrollbar_width::get_initial_value().to_css_string(), "auto");
         assert_eq!(margin_trim::get_initial_value().to_css_string(), "none");
+    }
+}
+
+// VIPER-PATCH(servo-math-fonts): the patch's fork tests; the cascade's
+// `font-size: math` is tested in Viper, since these tests build no element.
+#[cfg(test)]
+mod servo_math_fonts_tests {
+    use super::parse_style_attribute;
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::context::QuirksMode;
+    use crate::properties::longhands::{math_depth, math_style};
+    use crate::properties::{LonghandId, PropertyDeclaration};
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use crate::values::computed::font::{GenericFontFamily, SingleFontFamily};
+    use crate::values::specified::FontFamily;
+    use style_traits::ToCss;
+
+    #[test]
+    fn servo_math_fonts_parse() {
+        for (name, css, serialized) in [
+            ("math-depth", "auto-add", "auto-add"),
+            ("math-depth", "add(-2)", "add(-2)"),
+            ("math-depth", "3", "3"),
+            ("math-style", "compact", "compact"),
+            ("math-style", "normal", "normal"),
+            ("font-size", "math", "math"),
+            ("font-family", "math, serif", "math, serif"),
+        ] {
+            assert_eq!(
+                declared(name, css).as_deref(),
+                Some(serialized),
+                "{name}: {css}"
+            );
+        }
+        for (name, css) in [
+            ("math-depth", "auto"),
+            ("math-depth", "add(1.5)"),
+            ("math-style", "script"),
+            ("font-size", "math 1px"),
+        ] {
+            assert_eq!(declared(name, css), None, "{name}: {css}");
+        }
+        assert_eq!(math_depth::get_initial_value(), 0);
+        assert_eq!(math_style::get_initial_value().to_css_string(), "normal");
+        assert!(LonghandId::MathDepth.inherited() && LonghandId::MathStyle.inherited());
+    }
+
+    #[test]
+    fn servo_math_fonts_math_is_the_generic_family() {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let block = parse_style_attribute(
+            "font-family: math, \"math\"",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
+        let PropertyDeclaration::FontFamily(FontFamily::Values(ref list)) = block.declarations()[0]
+        else {
+            panic!("font-family: {:?}", block.declarations());
+        };
+        let families: Vec<_> = list.iter().collect();
+        assert!(matches!(
+            families[0],
+            SingleFontFamily::Generic(GenericFontFamily::Math)
+        ));
+        assert!(matches!(families[1], SingleFontFamily::FamilyName(_)));
     }
 }

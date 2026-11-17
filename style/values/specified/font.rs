@@ -519,7 +519,8 @@ pub enum FontSizeKeyword {
     XXXLarge,
     /// Indicate whether to apply font-size: math is specified so that extra
     /// scaling due to math-depth changes is applied during the cascade.
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(servo-math-fonts): MathML Core section 3.3's `math`
+    // keyword in servo builds too; upstream builds it for Gecko only.
     Math,
     #[css(skip)]
     None,
@@ -533,15 +534,9 @@ impl FontSizeKeyword {
     }
 
     /// Returns true if the font size is the math keyword
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(servo-math-fonts): one body for both builds.
     pub fn is_math(self) -> bool {
         matches!(self, Self::Math)
-    }
-
-    /// Returns true if the font size is the math keyword
-    #[cfg(feature = "servo")]
-    pub fn is_math(self) -> bool {
-        false
     }
 }
 
@@ -1054,6 +1049,8 @@ impl FontSize {
             parent_size.keyword_info.follows_default
         };
         match *self {
+            // VIPER-PATCH(servo-math-fonts): `math` scales the parent's size.
+            FontSize::Keyword(info) if info.kw.is_math() => parent(),
             FontSize::Keyword(..) => true,
             FontSize::Smaller | FontSize::Larger => parent(),
             FontSize::Length(LengthPercentage::Percentage(_)) => parent(),
