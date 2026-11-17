@@ -4345,7 +4345,12 @@ spec = "https://drafts.csswg.org/css-text-4/#propdef-white-space-collapse"
 animation_type = "discrete"
 affects = "layout"
 servo_restyle_damage = "rebuild_box"
-keyword = { values = ["collapse", "preserve", "preserve-breaks", "break-spaces"], extra_gecko_values = ["preserve-spaces"], gecko_aliases = ["-moz-pre-space=preserve-spaces"] }
+# VIPER-PATCH(servo-preserve-spaces): CSS Text 4 section 4.1's
+# `preserve-spaces` was an extra Gecko value, so servo builds dropped it; it
+# parses and computes in servo builds too, last in the list as before, so
+# Gecko's enum is unchanged. Its `-moz-pre-space` alias stays Gecko's, and
+# laying the value out is the embedder's.
+keyword = { values = ["collapse", "preserve", "preserve-breaks", "break-spaces", "preserve-spaces"], gecko_aliases = ["-moz-pre-space=preserve-spaces"] }
 
 [timeline-scope]
 type = "ScopedName"

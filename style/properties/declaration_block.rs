@@ -2143,3 +2143,22 @@ mod servo_math_fonts_tests {
         assert!(matches!(families[1], SingleFontFamily::FamilyName(_)));
     }
 }
+
+// VIPER-PATCH(servo-preserve-spaces): the patch's fork test.
+#[cfg(test)]
+mod servo_preserve_spaces_tests {
+    use super::servo_scrollbars_margin_trim_tests::declared;
+
+    #[test]
+    fn servo_preserve_spaces_parse() {
+        assert_eq!(
+            declared("white-space-collapse", "preserve-spaces").as_deref(),
+            Some("preserve-spaces")
+        );
+        assert_eq!(
+            declared("white-space-collapse", "PRESERVE-SPACES").as_deref(),
+            Some("preserve-spaces")
+        );
+        assert_eq!(declared("white-space-collapse", "-moz-pre-space"), None);
+    }
+}
