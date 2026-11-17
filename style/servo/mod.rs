@@ -11,6 +11,9 @@ pub mod animation;
 pub mod attr;
 mod encoding_support;
 pub mod media_features;
+// VIPER-PATCH(servo-remaining-media-features): Media Queries 4's and 5's
+// remaining features.
+pub mod remaining_media_features;
 pub mod restyle_damage;
 pub mod selector_parser;
 mod shadow_parts;

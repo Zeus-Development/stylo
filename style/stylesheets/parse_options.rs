@@ -101,6 +101,21 @@ pub struct ParseOptions {
     /// [CSS Inline 3 section 4.2]: https://drafts.csswg.org/css-inline-3/#transverse-alignment
     /// [SVG 1.1 section 10.9.2]: https://www.w3.org/TR/SVG11/text.html#AlignmentBaselineProperty
     pub vertical_align_longhand: bool,
+    /// VIPER-PATCH(servo-remaining-media-features): the media features the
+    /// parser leaves unknown, each named without a `min-`, `max-` or
+    /// `-webkit-` prefix and compared ASCII case-insensitively: a media
+    /// query naming one parses as if the feature did not exist, so its
+    /// condition is a `<general-enclosed>`, which evaluates to unknown
+    /// ([Media Queries 4 section 3]). Container features are not affected,
+    /// nor queries parsed before the options change. Default: the
+    /// features servo builds evaluate that upstream's list lacks
+    /// (`REMAINING_MEDIA_FEATURES`), so the default options parse media
+    /// queries as upstream does; an embedder that evaluates them sets the
+    /// features it leaves unknown, often none.
+    ///
+    /// [Media Queries 4 section 3]: https://drafts.csswg.org/mediaqueries-4/#mq-syntax
+    #[ignore_malloc_size_of = "static data"]
+    pub unknown_media_features: &'static [&'static str],
 }
 
 impl Default for ParseOptions {
@@ -112,6 +127,11 @@ impl Default for ParseOptions {
             unsupported_values: &[],
             selector_names: None,           // VIPER-PATCH(selector-names-hook)
             vertical_align_longhand: false, // VIPER-PATCH(vertical-align-longhand)
+            // VIPER-PATCH(servo-remaining-media-features): upstream's list.
+            #[cfg(feature = "servo")]
+            unknown_media_features: crate::servo::remaining_media_features::REMAINING_MEDIA_FEATURES,
+            #[cfg(not(feature = "servo"))]
+            unknown_media_features: &[],
         }
     }
 }
@@ -133,6 +153,8 @@ impl PartialEq for ParseOptions {
             && same_hook
             // VIPER-PATCH(vertical-align-longhand)
             && self.vertical_align_longhand == other.vertical_align_longhand
+            // VIPER-PATCH(servo-remaining-media-features)
+            && self.unknown_media_features == other.unknown_media_features
     }
 }
 
@@ -148,6 +170,8 @@ impl std::fmt::Debug for ParseOptions {
             .field("selector_names", &self.selector_names.is_some())
             // VIPER-PATCH(vertical-align-longhand)
             .field("vertical_align_longhand", &self.vertical_align_longhand)
+            // VIPER-PATCH(servo-remaining-media-features)
+            .field("unknown_media_features", &self.unknown_media_features)
             .finish()
     }
 }

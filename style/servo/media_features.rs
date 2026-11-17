@@ -10,6 +10,8 @@ use crate::queries::values::{Orientation, PrefersColorScheme};
 use crate::values::computed::{CSSPixelLength, Context, Ratio, Resolution};
 // VIPER-PATCH(servo-device-media-features): `forced-colors`' keyword.
 use crate::values::specified::color::ForcedColors;
+// VIPER-PATCH(servo-remaining-media-features): their evaluators and types.
+use super::remaining_media_features::*;
 use std::fmt::Debug;
 
 /// https://drafts.csswg.org/mediaqueries-4/#width
@@ -296,8 +298,9 @@ fn eval_forced_colors(context: &Context, query: Option<ForcedColors>) -> bool {
 }
 
 // VIPER-PATCH(servo-device-media-features): five more entries (below).
+// VIPER-PATCH(servo-remaining-media-features): twenty more (below).
 /// A list with all the media features that Servo supports.
-pub static MEDIA_FEATURES: [QueryFeatureDescription; 21] = [
+pub static MEDIA_FEATURES: [QueryFeatureDescription; 41] = [
     feature!(
         atom!("width"),
         AllowsRanges::Yes,
@@ -426,6 +429,127 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 21] = [
         AllowsRanges::No,
         keyword_evaluator!(eval_forced_colors, ForcedColors),
         FeatureFlags::empty(),
+    ),    // VIPER-PATCH(servo-remaining-media-features): the twenty features of
+    // `remaining_media_features`, with their atoms.
+    feature!(
+        atom!("color"),
+        AllowsRanges::Yes,
+        Evaluator::Integer(eval_color),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("color-index"),
+        AllowsRanges::Yes,
+        Evaluator::Integer(eval_color_index),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("monochrome"),
+        AllowsRanges::Yes,
+        Evaluator::Integer(eval_monochrome),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("grid"),
+        AllowsRanges::No,
+        Evaluator::BoolInteger(eval_grid),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("update"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_update, Update),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("overflow-block"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_overflow_block, OverflowBlock),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("overflow-inline"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_overflow_inline, OverflowInline),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("device-aspect-ratio"),
+        AllowsRanges::Yes,
+        Evaluator::NumberRatio(eval_device_aspect_ratio),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("horizontal-viewport-segments"),
+        AllowsRanges::Yes,
+        Evaluator::Integer(eval_horizontal_viewport_segments),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("vertical-viewport-segments"),
+        AllowsRanges::Yes,
+        Evaluator::Integer(eval_vertical_viewport_segments),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("display-mode"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_display_mode, DisplayMode),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("environment-blending"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_environment_blending, EnvironmentBlending),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("inverted-colors"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_inverted_colors, InvertedColors),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("nav-controls"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_nav_controls, NavControls),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("video-color-gamut"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_video_color_gamut, ColorGamut),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("video-dynamic-range"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_video_dynamic_range, DynamicRange),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("prefers-reduced-transparency"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_prefers_reduced_transparency, PrefersReduced),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("prefers-reduced-data"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_prefers_reduced_data, PrefersReduced),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("prefers-bold-text"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_prefers_bold_text, PrefersBoldText),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("ua-color-scheme"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_ua_color_scheme, PrefersColorScheme),
+        FeatureFlags::empty(),
     ),
 ];
 
@@ -475,8 +599,9 @@ mod scripting_tests {
 
 // VIPER-PATCH(servo-device-media-features): each feature evaluates the
 // device's setting by Media Queries 5's rules, in a boolean context too.
+// VIPER-PATCH(servo-remaining-media-features): its device for their tests.
 #[cfg(test)]
-mod device_media_features_tests {
+pub(super) mod device_media_features_tests {
     use super::*;
     use crate::context::QuirksMode;
     use crate::device::servo::FontMetricsProvider;
@@ -514,7 +639,7 @@ mod device_media_features_tests {
         }
     }
 
-    fn device(features: DeviceMediaFeatures) -> Device {
+    pub(in crate::servo) fn device(features: DeviceMediaFeatures) -> Device {
         let mut device = Device::new(
             MediaType::screen(),
             QuirksMode::NoQuirks,

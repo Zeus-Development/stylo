@@ -420,7 +420,13 @@ impl QueryFeatureExpression {
             },
         };
 
+        // VIPER-PATCH(servo-remaining-media-features): a media feature the
+        // parse options leave unknown, as an unknown name is.
         if disabled_by_pref(&feature.name, context)
+            || (feature_type == FeatureType::Media
+                && (context.parse_options.unknown_media_features)
+                    .iter()
+                    .any(|name| feature.name.eq_str_ignore_ascii_case(name)))
             || !flags.contains(feature.flags.parsing_requirements())
             || (range.is_some() && !feature.allows_ranges())
         {

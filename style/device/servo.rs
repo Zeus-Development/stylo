@@ -17,6 +17,9 @@ use crate::servo::media_features::PointerCapabilities;
 // VIPER-PATCH(servo-device-media-features): the settings of the color and
 // user-preference media features.
 use crate::servo::media_features::DeviceMediaFeatures;
+// VIPER-PATCH(servo-remaining-media-features): the settings of Media
+// Queries 4's and 5's remaining features.
+use crate::servo::remaining_media_features::RemainingMediaFeatures;
 use crate::values::computed::font::GenericFontFamily;
 use crate::values::computed::{
     CSSPixelLength, Length, LineHeight, LinkParameters, NonNegativeLength,
@@ -105,6 +108,10 @@ pub(super) struct ExtraDeviceData {
     /// media features report.
     #[ignore_malloc_size_of = "Pure stack type"]
     device_media_features: DeviceMediaFeatures,
+    // VIPER-PATCH(servo-remaining-media-features): the embedder's settings.
+    /// The settings Media Queries 4's and 5's remaining features report.
+    #[ignore_malloc_size_of = "Pure stack type"]
+    remaining_media_features: RemainingMediaFeatures,
     // VIPER-PATCH(normal-color-scheme-option): the embedder's scheme for
     // `color-scheme: normal`.
     /// The colour scheme an element whose `color-scheme` is `normal` uses.
@@ -171,6 +178,8 @@ impl Device {
                 all_pointer_capabilities,
                 // VIPER-PATCH(servo-device-media-features): the defaults.
                 device_media_features: DeviceMediaFeatures::default(),
+                // VIPER-PATCH(servo-remaining-media-features): the defaults.
+                remaining_media_features: RemainingMediaFeatures::default(),
                 // VIPER-PATCH(normal-color-scheme-option): upstream's answer.
                 normal_color_scheme: NormalColorScheme::default(),
                 // VIPER-PATCH(minimum-logical-font-size): no minimum.
@@ -363,6 +372,20 @@ impl Device {
     /// features of this [`Device`].
     pub fn device_media_features(&self) -> DeviceMediaFeatures {
         self.extra.device_media_features
+    }
+
+    // VIPER-PATCH(servo-remaining-media-features): the settings' accessors.
+    /// Set the settings behind Media Queries 4's and 5's remaining features
+    /// on this [`Device`]; the same note as `set_device_media_features`'
+    /// applies.
+    pub fn set_remaining_media_features(&mut self, features: RemainingMediaFeatures) {
+        self.extra.remaining_media_features = features;
+    }
+
+    /// Returns the settings behind Media Queries 4's and 5's remaining
+    /// features of this [`Device`].
+    pub fn remaining_media_features(&self) -> RemainingMediaFeatures {
+        self.extra.remaining_media_features
     }
 
     /// Returns the default background color.
