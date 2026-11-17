@@ -102,7 +102,10 @@ STY-SYSTEM-COLORS-1 adds `system-color-palette` to `stylo`; Viper's
 STYLO-PIN-C adds `servo-scrollbars-margin-trim`, `servo-paged-media` and
 `pseudo-element-hooks` to `stylo`; Viper's STYLO-PIN-D adds
 `servo-remaining-media-features` to `stylo` and `stylo_atoms`, and
-`registered-pseudo-elements` to `stylo`.
+`registered-pseudo-elements` to `stylo`; Viper's STYLO-PIN-E adds
+`servo-math-display`, `servo-math-fonts`, `servo-preserve-spaces`,
+`servo-filter-url`, `text-spacing-trim-longhand` and `unknown-properties`
+to `stylo`.
 The other four directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -166,6 +169,12 @@ apart from the packaging files.
 | `pseudo-element-hooks` | `stylo`: `device/pseudo_element_hooks.rs` (new), `device/mod.rs`, `device/servo.rs`, `properties/cascade.rs`, `properties/properties.mako.rs`, `rule_cache.rs`, `style_adjuster.rs` | Embedder control: CSS Pseudo-Elements 4 and CSS Lists 3 name the properties that apply to `::placeholder`, `::first-letter`, `::first-line` and `::marker` and leave the user agent's own pseudo-element styles to it; upstream fixes each restriction in the engine and adjusts no pseudo-element after the cascade in servo builds. The servo `Device` gains `PseudoElementHooks`: per pseudo-element, the longhands that apply in author and user rules (or all), in place of the engine's set, and a `PseudoElementAdjuster` run after the engine's adjustments with the originating element's name; the defaults are the engine's sets and no adjustment | `viper-style::cascade stylo_pin_c::pseudo_element_hooks_keep_the_engines_sets` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 200 / 65 |
 | `servo-remaining-media-features` | `stylo`: `servo/remaining_media_features.rs` (new), `servo/mod.rs`, `servo/media_features.rs`, `device/servo.rs`, `stylesheets/parse_options.rs`, `queries/feature_expression.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: the twenty media features of Media Queries 4 and 5 that upstream's servo list lacks (`color`, `color-index`, `monochrome`, `grid`, `update`, `overflow-block`, `overflow-inline`, `device-aspect-ratio`, `horizontal-viewport-segments`, `vertical-viewport-segments`, `display-mode`, `environment-blending`, `inverted-colors`, `nav-controls`, `video-color-gamut`, `video-dynamic-range`, `prefers-reduced-transparency`, `prefers-reduced-data`, `prefers-bold-text`, `ua-color-scheme`), so a query on one was unknown. Each evaluates from `RemainingMediaFeatures`, the embedder's settings the servo `Device` keeps (`device-aspect-ratio` from the device's size, `ua-color-scheme` from the device's scheme unless set), and `ParseOptions::unknown_media_features` names the media features the parser leaves unknown; its default is these twenty, so the default options parse as upstream does | `viper-style::cascade stylo_pin_d::servo_remaining_media_features_stay_unknown_under_basic` | Candidate; draft to the owner first | Viper STYLO-PIN-D | 552 / 155 |
 | `registered-pseudo-elements` | `stylo`: `servo/selector_parser.rs`, `selector_parser.rs`, `device/pseudo_element_hooks.rs` | Embedder control: CSS Pseudo-Elements 4 lets a user agent style pseudo-elements of its own, and upstream's servo build has a fixed set: an embedder's `SelectorNames` could only build `Unmatched`, whose names share one rule bucket and one restriction. `PseudoElement::Registered` holds a name the embedder registers (`PseudoElement::registered`), with its own rule bucket (`PerPseudoElementMap` keys it by name), its own restriction in `PseudoElementHooks`, a lazy cascade, the user-action pseudo-classes after it and its own serialization | `viper-style cascade::document::stylo_pin_d_tests::registered_pseudo_elements_cascade_from_their_own_rules` | Candidate; draft to the owner first | Viper STYLO-PIN-D | 119 / 151 |
+| `servo-math-display` | `stylo`: `values/specified/box.rs`, `style_adjuster.rs` | Standard: MathML Core section 2.1's `math` `<display-inside>` was in neither build, so `display: math` was dropped; servo builds parse `math`, `inline math` and `block math` (`math` alone is inline), serialize the shortest form, blockify to `block math`, and compute `block flow` and `inline flow` on an element that is not a MathML element, a pseudo-element included | `viper-style::cascade stylo_pin_e::servo_math_display_computes` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 49 / 38 |
+| `servo-math-fonts` | `stylo`: `properties/longhands.toml`, `properties/cascade.rs`, `values/specified/font.rs`, `values/computed/font.rs`, `properties/declaration_block.rs` (its tests) | Standard: MathML Core's `math-depth` and `math-style` sat behind upstream's `layout.unimplemented`, and `font-size: math` and the `math` generic family were built for upstream's other build only, so servo builds dropped them; they parse and compute, and `font-size: math` scales the parent's size by MathML Core section 3.3's factor for the change of `math-depth` (the inherited font's MATH table scales when the embedder's metrics give them, else 0.71 per level), the used size clamped by `minimum-logical-font-size` | `viper-style::cascade stylo_pin_e::servo_math_fonts_compute` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 127 / 65 |
+| `servo-preserve-spaces` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its test) | Standard: CSS Text 4 section 4.1's `white-space-collapse: preserve-spaces` was an extra value of upstream's other build, so servo builds dropped it; it parses and computes (its `-moz-pre-space` alias stays the other build's) | `viper-style::cascade stylo_pin_e::servo_preserve_spaces_computes` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 7 / 16 |
+| `servo-filter-url` | `stylo`: `values/specified/effects.rs`, `values/computed/effects.rs`, `values/animated/effects.rs`, `url/servo.rs`, `properties/declaration_block.rs` (its test) | Standard: Filter Effects 1 section 5's `<url>` filter was typed `Impossible` in servo builds, so a `filter` or `backdrop-filter` holding `url()` was dropped at parse time; it parses and computes with servo's specified and computed URL types, as upstream's other build has it with its own, and computes without a context (`CssUrl::to_computed_url`) | `viper-style::cascade stylo_pin_e::servo_filter_url_computes` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 30 / 45 |
+| `text-spacing-trim-longhand` | `stylo`: `values/specified/spacing_trim.rs` (new), `values/specified/mod.rs`, `values/computed/mod.rs`, `properties/longhands.toml`, `properties/data.py`, `properties/declaration_block.rs` (its test) | Standard: CSS Text 4 section 8.5's `text-spacing-trim` is not in upstream; servo builds get the longhand (inherited, initial `normal`) with the Editor's Draft's grammar, `auto`, `trim-all`, `normal`, `space-all`, `trim-both` and any combination of one keyword per position, computed as three keywords | `viper-style::cascade stylo_pin_e::text_spacing_trim_computes_and_inherits` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 278 / 107 |
+| `unknown-properties` | `stylo`: `stylesheets/parse_options.rs`, `properties/properties.mako.rs` | Embedder control: an embedder had no way to leave a property the build parses unknown in one document, as `unknown_media_features` does for media features; `ParseOptions::unknown_properties` names them (default none), and a declaration or supports condition naming one, by its declared name, is dropped or false | `viper-style::cascade stylo_pin_e::unknown_properties_under_basic` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 30 / 31 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2111,6 +2120,175 @@ Problem, change, every spot, the Miri commands and the before/after results:
   rules' target of 100: the documented variant, its arms in the
   serialization, index and cascade type, the constructor and the key, the
   map's entries by name and the restriction's key.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Embedder control, so a candidate; a draft goes to the Viper
+  owner first.
+
+## Patch `servo-math-display`
+
+- **Problem.** MathML Core section 2.1 adds `math` to `<display-inside>`:
+  `display: math` (outside type `inline` when omitted) and `block math`.
+  Upstream has the value in neither build, so a servo build dropped the
+  declaration.
+- **Change.** `DisplayInside::Math`, last in the enum and servo builds
+  only, so no other value moves. `math` parses as an inside keyword, its
+  default outside type is `inline`, `list-item` does not combine with it,
+  `inline math` serializes as `math` and `block math` as itself (Typed OM
+  refuses the two-keyword form, as for `block ruby`), and blockification
+  gives `block math`. The style adjuster gives an element that is not a
+  MathML element, a pseudo-element included, `block flow` for `block math`
+  and `inline flow` for `inline math`, as section 2.1 asks, before
+  blockification.
+- **Spots.** `style/values/specified/box.rs` (the variant, its outside
+  type, the keyword, the serialization, Typed OM and the test module, which
+  shares `chrome-display-ruby`'s parse helper) and `style/style_adjuster.rs`
+  (`adjust_for_math_display` and its call).
+- **Fork tests.** `servo_math_display_parses_and_serializes`. The fork's
+  tests build no `TElement`, so the adjuster is tested in Viper.
+- **Viper proof.** `stylo_pin_e::servo_math_display_computes`: the values
+  compute on MathML elements and become flow on HTML elements and
+  pseudo-elements, under a grammar that admits them.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-math-fonts`
+
+- **Problem.** MathML Core defines `math-depth` (section 3.2),
+  `font-size: math` (section 3.3), `math-style` (section 3.4) and the
+  `math` generic family (CSS Fonts 4 section 2.1.3). Upstream builds
+  `math-depth` and `math-style` in servo builds behind its
+  `layout.unimplemented` preference, which servo builds never set, and
+  builds `FontSizeKeyword::Math` and `GenericFontFamily::Math` for its
+  other build only, so a servo build dropped all four (an unquoted `math`
+  in `font-family` was a family name).
+- **Change.** The two preference lines go. `FontSizeKeyword::Math` and
+  `GenericFontFamily::Math` (its parse condition true in servo builds) lose
+  their gates. In the cascade, servo builds run
+  `recompute_math_font_size_if_needed` too: when `font-size` is `math` and
+  `math-depth` changed, the computed size is the parent's times
+  `scale_factor_for_math_depth_change` (upstream's helper, moved out of
+  the other build's body unchanged), with the inherited first available
+  font's `scriptPercentScaleDown` and `scriptScriptPercentScaleDown` when
+  the embedder's font metrics give them, else 0.71 per level; the used
+  size is clamped to the device's minimum as any size that follows the
+  default (`minimum-logical-font-size`), and `math` follows the default
+  when the parent's size does. MathML Core has no script minimum size, so
+  none applies. Laying out MathML, and which face `math` names, are the
+  embedder's.
+- **Spots.** `style/properties/longhands.toml` (`math-depth`,
+  `math-style`), `style/properties/cascade.rs` (the servo function, its
+  call and the shared helper), `style/values/specified/font.rs` (the
+  keyword, `is_math`, `follows_default`), `style/values/computed/font.rs`
+  (the generic family) and `style/properties/declaration_block.rs` (the
+  test module; `servo_scrollbars_margin_trim_tests::declared` is shared).
+- **Fork tests.** `servo_math_fonts_parse` and
+  `servo_math_fonts_math_is_the_generic_family`.
+- **Viper proof.** `stylo_pin_e::servo_math_fonts_compute` (`math-depth`
+  and `math-style` inherit, `font-size: math` scales by 0.71 per level up
+  and down).
+- **Size.** 127 added code lines, comments included, over the patch rules'
+  target of 100: 51 of them are upstream's scale-factor helper and its marker, moved out
+  of the other build's function unchanged so that both builds share it.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-preserve-spaces`
+
+- **Problem.** CSS Text 4 section 4.1 gives `white-space-collapse` the value
+  `preserve-spaces`, which SVG 2's `xml:space` mapping uses. Upstream lists
+  it as an extra value of its other build, so servo builds dropped it.
+- **Change.** `preserve-spaces` joins the servo values, last as before, so
+  the other build's enum is unchanged; the `-moz-pre-space` alias stays
+  that build's. The `white-space` shorthand takes it through its
+  longhand. Laying it out is the embedder's.
+- **Spots.** `style/properties/longhands.toml` (`white-space-collapse`) and
+  `style/properties/declaration_block.rs` (the test module).
+- **Fork tests.** `servo_preserve_spaces_parse`.
+- **Viper proof.** `stylo_pin_e::servo_preserve_spaces_computes`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-filter-url`
+
+- **Problem.** Filter Effects 1 section 5 lets a filter list hold
+  `<url>`, a reference to an SVG `filter` element. Upstream types it
+  `Impossible` in servo builds (specified, computed and animated), so a
+  `filter` or `backdrop-filter` holding `url()` was dropped at parse time,
+  and its other functions with it.
+- **Change.** The three filter types take servo's `SpecifiedUrl` and
+  `ComputedUrl`, as the other build takes its own; `url()` parses in both
+  builds. `Filter::to_computed_value_without_context` computes a servo URL
+  with `CssUrl::to_computed_url`, upstream's `to_computed_value` body,
+  which needs no context (servo resolves a URL when it parses it). Which
+  element the URL names, and drawing it, are the embedder's.
+- **Spots.** `style/values/specified/effects.rs`,
+  `style/values/computed/effects.rs`, `style/values/animated/effects.rs`,
+  `style/url/servo.rs` and `style/properties/declaration_block.rs` (the
+  test module).
+- **Fork tests.** `servo_filter_url_parses_and_computes`
+  (`filter: url(#f) blur(2px)` computes to both functions, in order).
+- **Viper proof.** `stylo_pin_e::servo_filter_url_computes`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `text-spacing-trim-longhand`
+
+- **Problem.** CSS Text 4 section 8.5 defines `text-spacing-trim`
+  (inherited, initial `normal`), which upstream does not have, so a servo
+  build dropped its declarations.
+- **Change.** A servo-build longhand (`engine = "servo"`; the other build
+  would need its glue) of a new value, `TextSpacingTrim`
+  (`values/specified/spacing_trim.rs`): `auto`, `trim-all`, or one keyword
+  per controlled position (start: `trim-start`, `space-start`,
+  `space-first`; adjacent pairs: `trim-adjacent`, `space-adjacent`; end:
+  `allow-end`, `trim-end`, `space-end`), which is the computed value
+  ("three keywords, one per controlled position"). It parses the Editor's
+  Draft's grammar, `<spacing-trim> | auto` with `<spacing-trim>` any
+  combination of the three groups, each once, or `trim-both`, `space-all`
+  or `trim-all`, and `normal`, the initial value; omitted positions take
+  `trim-start trim-adjacent allow-end`. It serializes the shortest form:
+  `normal`, `space-all` and `trim-both` by name, otherwise the keywords
+  that differ from the omitted positions' (`trim-start` when none does).
+  The grammar is wider than some engines': a single `allow-end`, for one,
+  is valid by the draft. Spacing punctuation is the embedder's.
+- **Spots.** `style/values/specified/spacing_trim.rs` (new, with its test
+  module), `style/values/specified/mod.rs`, `style/values/computed/mod.rs`,
+  `style/properties/longhands.toml`, `style/properties/data.py` (the value
+  is `Copy`) and `style/properties/declaration_block.rs` (the test module).
+- **Fork tests.** `text_spacing_trim_parses_the_editors_draft_grammar` and
+  `text_spacing_trim_longhand_parses_inherits_and_starts_normal`.
+- **Viper proof.** `stylo_pin_e::text_spacing_trim_computes_and_inherits`.
+- **Size.** 278 added code lines, comments included, over the patch rules'
+  target of 100: a new value module (four documented types, each with
+  upstream's derive list, the grammar's parser, the shortest-form
+  serializer and the completion keywords) and the longhand's entry.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `unknown-properties`
+
+- **Problem.** An embedder that does not yet implement a property the build
+  parses had no way to leave it unknown for one document, as
+  `unknown_media_features` does for media features: its declarations
+  applied and supports conditions answered true.
+- **Change.** `ParseOptions::unknown_properties` (default none) names the
+  property names the parser leaves unknown, ASCII case-insensitively, by
+  the declared name: `NonCustomPropertyId::allowed_in_ignoring_rule_type`
+  refuses them, so a declaration of one is dropped wherever a block is
+  parsed with the options, and a supports condition naming one is false.
+  Another alias of the property, and a shorthand that sets it, are not
+  affected. `ParseOptions::leaves_property_unknown` answers for one name.
+- **Spots.** `style/stylesheets/parse_options.rs` (the field, its default,
+  equality and debug output, the method and the test module, which shares
+  `value_grammar_tests`' helpers) and `style/properties/properties.mako.rs`
+  (the refusal).
+- **Fork tests.** `unknown_properties_are_dropped_by_their_declared_name`.
+- **Viper proof.** `stylo_pin_e::unknown_properties_under_basic`.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Embedder control, so a candidate; a draft goes to the Viper
   owner first.
