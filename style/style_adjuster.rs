@@ -574,6 +574,32 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
     }
 
+    /// VIPER-PATCH(servo-math-display): MathML Core section 2.1. On an
+    /// element that is not a MathML element, a pseudo-element included,
+    /// `block math` and `inline math` compute to `block flow` and
+    /// `inline flow`. Before blockification, so the outside type is still
+    /// the one declared.
+    #[cfg(feature = "servo")]
+    fn adjust_for_math_display<E>(&mut self, element: Option<E>)
+    where
+        E: TElement,
+    {
+        use crate::values::specified::box_::{DisplayInside, DisplayOutside};
+
+        let display = self.style.get_box().clone_display();
+        if display.inside() != DisplayInside::Math {
+            return;
+        }
+        if self.style.pseudo.is_none() && element.map_or(true, |e| e.is_mathml_element()) {
+            return;
+        }
+        let flow = match display.outside() {
+            DisplayOutside::Block => Display::Block,
+            _ => Display::Inline,
+        };
+        self.style.mutate_box().set_display(flow);
+    }
+
     /// VIPER-PATCH(chrome-frames-and-textarea): Chrome match. Chrome 154
     /// computes `display: block`, `position: static` and `float: none` for
     /// every HTML `frame` and `frameset` element, whatever the author asks
@@ -1165,6 +1191,9 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         // VIPER-PATCH(chrome-frames-and-textarea): servo builds only.
         #[cfg(feature = "servo")]
         self.adjust_for_frames_and_textarea(element);
+        // VIPER-PATCH(servo-math-display): servo builds only.
+        #[cfg(feature = "servo")]
+        self.adjust_for_math_display(element);
         #[cfg(feature = "gecko")]
         {
             self.adjust_for_fieldset_content();

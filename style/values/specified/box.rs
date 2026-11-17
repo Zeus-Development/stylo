@@ -173,6 +173,10 @@ pub enum DisplayInside {
     RubyTextContainer,
     #[cfg(feature = "gecko")]
     WebkitBox,
+    // VIPER-PATCH(servo-math-display): MathML Core section 2.1's `math`
+    // <display-inside>, in servo builds; last, so no other value moves.
+    #[cfg(feature = "servo")]
+    Math,
 }
 
 impl DisplayInside {
@@ -193,6 +197,10 @@ impl DisplayInside {
             // VIPER-PATCH(chrome-display-ruby): `ruby` is inline in servo
             // builds too.
             DisplayInside::Ruby => DisplayOutside::Inline,
+            // VIPER-PATCH(servo-math-display): `math` alone is `inline math`
+            // (MathML Core section 2.1).
+            #[cfg(feature = "servo")]
+            DisplayInside::Math => DisplayOutside::Inline,
             _ => DisplayOutside::Block,
         }
     }
@@ -547,6 +555,9 @@ impl DisplayKeyword {
             "grid" if grid_enabled() => Inside(DisplayInside::Grid),
             // VIPER-PATCH(chrome-display-ruby): `ruby` in servo builds too.
             "ruby" => Inside(DisplayInside::Ruby),
+            // VIPER-PATCH(servo-math-display): see `DisplayInside::Math`.
+            #[cfg(feature = "servo")]
+            "math" => Inside(DisplayInside::Math),
         })
     }
 }
@@ -571,6 +582,10 @@ impl ToCss for Display {
                 // VIPER-PATCH(chrome-display-ruby): a blockified ruby (floated,
                 // for example) serializes as `block ruby` in servo builds too.
                 (DisplayOutside::Block, DisplayInside::Ruby) => dest.write_str("block ruby"),
+                // VIPER-PATCH(servo-math-display): `inline math` is `math`,
+                // the shortest form; `block math` keeps both keywords.
+                #[cfg(feature = "servo")]
+                (DisplayOutside::Block, DisplayInside::Math) => dest.write_str("block math"),
                 (_, inside) => {
                     if self.is_list_item() {
                         if outside != DisplayOutside::Block {
@@ -604,6 +619,11 @@ impl ToTyped for Display {
 
         #[cfg(feature = "gecko")]
         if outside == DisplayOutside::Block && inside == DisplayInside::Ruby {
+            return Err(());
+        }
+        // VIPER-PATCH(servo-math-display): `block math` is two keywords.
+        #[cfg(feature = "servo")]
+        if outside == DisplayOutside::Block && inside == DisplayInside::Math {
             return Err(());
         }
 
@@ -2270,7 +2290,8 @@ mod chrome_display_ruby_tests {
     use cssparser::Parser;
     use style_traits::{ParsingMode, ToCss};
 
-    fn parsed(text: &str) -> Option<Display> {
+    // VIPER-PATCH(servo-math-display): shared with its tests.
+    pub(super) fn parsed(text: &str) -> Option<Display> {
         let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
         let context = ParserContext::new(
             Origin::Author,
@@ -2300,6 +2321,46 @@ mod chrome_display_ruby_tests {
         assert!(parsed("ruby-text-container").is_none());
         let blockified = parsed("ruby").unwrap().equivalent_block_display(false);
         assert_eq!(blockified.to_css_string(), "block ruby");
+    }
+}
+
+// VIPER-PATCH(servo-math-display): `math` parses as a <display-inside>,
+// inline unless `block` is given, and never with `list-item`.
+#[cfg(all(test, feature = "servo"))]
+mod servo_math_display_tests {
+    use super::chrome_display_ruby_tests::parsed;
+    use super::{DisplayInside, DisplayOutside};
+    use style_traits::ToCss;
+
+    #[test]
+    fn servo_math_display_parses_and_serializes() {
+        let css = |text: &str| parsed(text).map(|display| display.to_css_string());
+        for (text, serialized) in [
+            ("math", "math"),
+            ("MATH", "math"),
+            ("inline math", "math"),
+            ("math inline", "math"),
+            ("block math", "block math"),
+            ("math block", "block math"),
+        ] {
+            assert_eq!(css(text).as_deref(), Some(serialized), "{text}");
+        }
+        for text in [
+            "math list-item",
+            "block math list-item",
+            "math flow",
+            "math math",
+        ] {
+            assert!(parsed(text).is_none(), "{text}");
+        }
+        let math = parsed("math").unwrap();
+        assert_eq!(
+            (math.outside(), math.inside()),
+            (DisplayOutside::Inline, DisplayInside::Math)
+        );
+        let blockified = math.equivalent_block_display(false);
+        assert_eq!(blockified.to_css_string(), "block math");
+        assert_eq!(math.equivalent_block_display(true), blockified);
     }
 }
 
