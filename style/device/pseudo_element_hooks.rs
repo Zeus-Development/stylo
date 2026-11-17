@@ -14,7 +14,7 @@
 //! `list-style-position`). The defaults are upstream's: the engine's sets
 //! and no adjustment.
 
-use crate::properties::{ComputedValues, LonghandIdSet, StyleBuilder};
+use crate::properties::{LonghandIdSet, StyleBuilder};
 use crate::selector_parser::PseudoElement;
 use std::fmt::Debug;
 use std::sync::Arc;

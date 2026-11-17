@@ -97,7 +97,10 @@ STYLO-PIN-B adds `minimum-logical-font-size`, `servo-content-language` (a
 proof of upstream's servo behaviour, with no code), `text-autospace-initial`
 and `servo-standard-pseudo-elements` to `stylo`, and a third group to
 `engine-gates`; Viper's S3-13e3 adds `selectors-host-context` to
-`selectors`, `stylo` and `stylo_malloc_size_of`.
+`selectors`, `stylo` and `stylo_malloc_size_of`; Viper's
+STY-SYSTEM-COLORS-1 adds `system-color-palette` to `stylo`; Viper's
+STYLO-PIN-C adds `servo-scrollbars-margin-trim`, `servo-paged-media` and
+`pseudo-element-hooks` to `stylo`.
 The other four directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -156,6 +159,9 @@ apart from the packaging files.
 | `selectors-host-context` | `selectors`: `parser.rs`, `matching.rs`, `builder.rs`; `stylo`: `servo/selector_parser.rs`, `stylesheets/parse_options.rs` (its tests); `stylo_malloc_size_of`: `lib.rs` | Standard: CSS Scoping 1 section 3.2.3's `:host-context(<compound-selector>)`, which upstream's `selectors` has no component for. A `Parser` hook, `parse_host_context` (default `false`), parses it as a new component, `Component::HostContext`, where `:host()` parses; in the context of a shadow tree it matches the featureless host when its compound selector matches the host or one of the host's shadow-including ancestors, and elsewhere nothing. Its specificity is a pseudo-class's plus its argument's, and `compound_matches_featureless_host` lets it match the featureless host, so Stylo files its rules with a shadow root's host rules. Servo's `SelectorParser` enables it | `viper-style::shadow_host_context host_context_matches_by_the_host_or_an_ancestor` | Candidate; draft to the owner first | Viper S3-13e3 | 112 / 87 |
 | `servo-standard-pseudo-elements` | `stylo`: `servo/selector_parser.rs` | Embedder control and standard pseudo-elements: CSS Pseudo-Elements 4's `::target-text`, `::spelling-error`, `::grammar-error` and `::search-text`, the CSS Custom Highlight API's `::highlight()`, CSS Overflow 5's `::scroll-marker`, `::scroll-marker-group`, `::scroll-button()` and `::column`, CSS View Transitions 1's `::view-transition`, and HTML's `::picker()`, `::picker-icon` and `::checkmark` had no variant in servo builds, so an embedder's `SelectorNames` could build them only as `Unmatched`, all in one rule bucket. Each gains its own `PseudoElement` variant and index, so its rules are in a bucket of their own; they cascade lazily, accept the user-action pseudo-classes (Selectors 4 section 3.6.3), and the functional ones hold their argument (`has_argument`, so their bucket's rules are matched against it). Servo's own parser does not build them: without a hook it refuses the names, as upstream does | `viper-style::cascade stylo_pin_b::servo_standard_pseudo_elements_have_their_own_variants` | Candidate; draft to the owner first | Viper STYLO-PIN-B | 126 / 104 |
 | `system-color-palette` | `stylo`: `device/system_colors.rs` (new), `device/mod.rs`, `device/servo.rs` | Embedder control: CSS Color 4 section 6.2 leaves the values of the system colours to the user agent and its platform, and upstream's servo `Device::system_color` fixes one light and one dark table, so an embedder cannot give a device's own colours; the `Device` gains `SystemColorPalette` (`set_system_colors`, `system_colors`), a light and a dark `SystemColors` table of the nineteen colours, read through the element's used scheme, the deprecated colours mapped as section 6.2.1 says, upstream's values the default | `viper-style::cascade system_colors::system_color_palette_reaches_the_cascade` | Candidate; draft to the owner first | Viper STY-SYSTEM-COLORS-1 | 209 / 153 |
+| `servo-scrollbars-margin-trim` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS Scrollbars Styling 1's `scrollbar-color` and `scrollbar-width` sat behind upstream's `layout.unimplemented` preference, which servo builds never set, and CSS Box 4's `margin-trim` was built for upstream's other build only, so servo builds dropped their declarations; their gates go, and they parse and compute in servo builds (painting and laying them out stay the embedder's) | `viper-style::cascade stylo_pin_c::servo_scrollbars_margin_trim_compute` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 8 / 59 |
+| `servo-paged-media` | `stylo`: `stylesheets/rule_parser.rs`, `properties/longhands.toml`, `stylist.rs`, `values/specified/box.rs`, `properties/properties.mako.rs` (the size test), `stylesheets/page_rule.rs` (its tests) | Standard: CSS Paged Media 3's `@page` rule (section 3) and its `size` descriptor (section 7.1) parsed in upstream's other build only, so servo builds dropped them; they parse in servo builds, with the page selectors and the margin descriptors, and `Stylist::compute_for_page` cascades the matching `@page` rules of every origin over the root's style; `BreakBetween` gains CSS Fragmentation 3 section 3.1's `avoid-page`, `recto`, `verso`, `avoid-column` and `column`, which upstream had in neither build. Margin at-rules stay the other build's | `viper-style::cascade stylo_pin_c::servo_paged_media_parses_page_rules_and_break_values` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 91 / 101 |
+| `pseudo-element-hooks` | `stylo`: `device/pseudo_element_hooks.rs` (new), `device/mod.rs`, `device/servo.rs`, `properties/cascade.rs`, `properties/properties.mako.rs`, `rule_cache.rs`, `style_adjuster.rs` | Embedder control: CSS Pseudo-Elements 4 and CSS Lists 3 name the properties that apply to `::placeholder`, `::first-letter`, `::first-line` and `::marker` and leave the user agent's own pseudo-element styles to it; upstream fixes each restriction in the engine and adjusts no pseudo-element after the cascade in servo builds. The servo `Device` gains `PseudoElementHooks`: per pseudo-element, the longhands that apply in author and user rules (or all), in place of the engine's set, and a `PseudoElementAdjuster` run after the engine's adjustments with the originating element's name; the defaults are the engine's sets and no adjustment | `viper-style::cascade stylo_pin_c::pseudo_element_hooks_keep_the_engines_sets` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 200 / 65 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1481,7 +1487,7 @@ Problem, change, every spot, the Miri commands and the before/after results:
   build, though CSS Fragmentation 3 section 3.1 defines them, so
   `break-before: column` is still dropped; `BreakWithin` has all four of
   its values. Viper registers the gap; a later patch of the grammar is its
-  own row. In the second group, servo builds' `font` and `font-variant`
+  own row (since Viper STYLO-PIN-C, `servo-paged-media` adds the five). In the second group, servo builds' `font` and `font-variant`
   shorthands still leave out `font-variant-emoji` (upstream's
   `extra_gecko_sub_properties`), so they do not reset it, though CSS Fonts
   4 makes it a sub-property of both; and its seven shorthands above are
@@ -1852,6 +1858,125 @@ Problem, change, every spot, the Miri commands and the before/after results:
   102 removed: upstream's match moves into the module as the two tables of
   the default (49 lines) and `get`'s mapping (48 lines), and the nineteen
   fields each carry their documentation, comments included.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Embedder control, so a candidate; a draft goes to the
+  Viper owner first.
+
+## Patch `servo-scrollbars-margin-trim`
+
+- **Problem.** CSS Scrollbars Styling 1 defines `scrollbar-color`
+  (section 2) and `scrollbar-width` (section 3) for every user agent;
+  upstream builds both longhands in servo builds but behind its
+  `layout.unimplemented` preference, which servo builds never set, so a
+  servo build's parser dropped their declarations and every element
+  computed `auto`. CSS Box 4's `margin-trim` (section 4) was built for
+  upstream's other build only (`engine = "gecko"`).
+- **Change.** The `servo_pref` line of the two scrollbar longhands and the
+  `engine` line of `margin-trim` go; nothing else changes. The value types
+  were already built for both engines (`margin-trim` keeps upstream's
+  block-axis grammar: `none`, `block`, `block-start`, `block-end`), the
+  longhands keep upstream's `affects`, and painting or laying them out is
+  the embedder's.
+- **Spots.** `style/properties/longhands.toml` (three entries, the reason in
+  full at `scrollbar-color`) and `style/properties/declaration_block.rs`
+  (the test module).
+- **Fork tests.** `servo_scrollbars_margin_trim_parse` (the values each
+  parses and refuses) and `servo_scrollbars_margin_trim_initial_values`.
+- **Viper proof.** `stylo_pin_c::servo_scrollbars_margin_trim_compute`,
+  which computes the three through Viper's cascade (`scrollbar-color`
+  inherited, the other two not).
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-paged-media`
+
+- **Problem.** CSS Paged Media 3's `@page` rule (section 3) parsed in
+  upstream's other build only (`"page" if cfg!(feature = "gecko")`), and
+  its `size` descriptor (section 7.1) was that build's longhand, so a
+  servo build dropped every `@page` rule and no embedder could read a
+  page's size or margins; the page's style was computed only through that
+  build's anonymous page box. CSS Fragmentation 3 section 3.1 gives
+  `break-before` and `break-after` the values `avoid-page`, `recto`,
+  `verso`, `avoid-column` and `column`, which upstream's `BreakBetween`
+  lacks in both builds (the `engine-gates` known difference).
+- **Change.** `@page` parses in servo builds, with its page selectors and
+  the declarations its rule type allows (the margins and, now built,
+  `size`); its margin at-rules stay the other build's (behind their
+  preference). The stylist already files the rules (`PageRuleMap`);
+  `Stylist::compute_for_page` (servo builds) cascades the `@page` rules of
+  every origin that match a page's name and pseudo-classes, in specificity
+  order, over the root element's style. `BreakBetween` gains the five
+  values, each computing as itself; the legacy `page-break-*` shorthands
+  refuse them and serialize nothing for them, as for `always`. Servo's
+  `ComputedValues` grows from 248 to 256 bytes (the page struct).
+- **Spots.** `style/stylesheets/rule_parser.rs` (the at-rule name),
+  `style/properties/longhands.toml` (`size`), `style/stylist.rs`
+  (`compute_for_page`), `style/values/specified/box.rs` (`BreakBetween`
+  and its two legacy functions), `style/properties/properties.mako.rs`
+  (the size test) and `style/stylesheets/page_rule.rs` (the test module).
+- **Fork tests.** `servo_paged_media_parses_page_rules` (three `@page`
+  rules: their selectors, declared longhands and matching of a first left
+  page) and `servo_paged_media_break_values_and_size` (the five values, the
+  legacy shorthands, and `size` refused in a style rule). The fork's tests
+  build no `TElement`, so `compute_for_page` is tested in Viper.
+- **Viper proof.** `stylo_pin_c::servo_paged_media_parses_page_rules_and_break_values`:
+  CSSOM lists the `@page` rules with their selectors and descriptors, and
+  the break values compute through Viper's cascade. Viper's task
+  PAGE-STYLE-1 reads the page's style with `compute_for_page`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `pseudo-element-hooks`
+
+- **Problem.** CSS Pseudo-Elements 4 (sections 2 and 4.3) and CSS Lists 3
+  (section 3.1.1) name the properties that apply to `::first-letter`,
+  `::first-line`, `::placeholder` and `::marker`, and the user agent sets
+  styles of its own on a pseudo-element, some of them derived after the
+  cascade (CSS Lists 3 lays a marker out by its list item's
+  `list-style-position`; CSS Position 4 computes a top-layer box's
+  position). Upstream fixes each restriction in the engine (the
+  `APPLIES_TO_*` flags, applied to author and user rules) and adjusts no
+  pseudo-element after the cascade in servo builds, so an embedder can
+  neither widen a restriction (an author's `letter-spacing` on `::marker`)
+  nor set a value its user agent derives.
+- **Change.** A new module, `device/pseudo_element_hooks.rs`:
+  `PseudoElementHooks`, by pseudo-element index the longhands that apply in
+  author and user rules (`Some(set)`) or every longhand (`None`), in place
+  of the engine's set, and an optional `PseudoElementAdjuster`, a trait the
+  embedder implements, called with the pseudo-element, the originating
+  element's namespace and local name (`OriginatingElement`), the style
+  builder and the longhands an author or user declared. The servo `Device`
+  keeps one (`set_pseudo_element_hooks`, `pseudo_element_hooks`), the
+  default the engine's sets and no adjuster; `Device::pseudo_element_restriction`
+  answers the cascade (the engine's set in the other build).
+  `LonghandIdSet::with_restriction_flag` gives the engine's set of a flag,
+  generated with the flags. The cascade's declaration filter asks the
+  device, a style under a restriction is never put in or taken from the
+  rule cache (any pseudo-element may now have one), and `StyleAdjuster`
+  runs the adjuster last before the position-try tactic, after the
+  engine's adjustments. Like the other `Device` settings, a change needs
+  the embedder to restyle.
+- **Spots.** `style/device/pseudo_element_hooks.rs` (new: the types and
+  the tests); `style/device/mod.rs` (the module and
+  `pseudo_element_restriction`); `style/device/servo.rs` (the import, the
+  field, its default and the accessors); `style/properties/cascade.rs`
+  (`DeclarationIterator`'s set and `cascade_rules`' cache condition);
+  `style/rule_cache.rs` (`find`); `style/properties/properties.mako.rs`
+  (`with_restriction_flag`); `style/style_adjuster.rs`
+  (`adjust_for_pseudo_element_hooks` and its call).
+- **Fork tests.** `pseudo_element_hooks_default_to_the_engines_sets` and
+  `pseudo_element_hooks_take_the_embedders_sets`. The fork's tests build
+  no `TElement`, so the cascade through the hooks is tested in Viper.
+- **Viper proof.** `stylo_pin_c::pseudo_element_hooks_keep_the_engines_sets`:
+  with no hook set, Viper's configuration at this pin, the default hooks
+  are the engine's sets, and an author's `::marker` and `::placeholder`
+  rules apply only those sets' properties. Viper's task B18e
+  (STY-MARKER-1) sets the hooks from its configuration, with its tests.
+- **Size.** 200 added code lines, over the patch rules' target of 100: a
+  new module of two types and a trait, each documented, used in six spots
+  across five files, comments included.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Embedder control, so a candidate; a draft goes to the
   Viper owner first.
