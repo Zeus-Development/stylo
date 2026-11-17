@@ -20,7 +20,7 @@ use crate::font_metrics::FontMetricsOrientation;
 use crate::properties::{
     property_counts, CSSWideKeyword, ComputedValues, DeclarationImportanceIterator, LonghandId,
     LonghandIdSet, PrioritaryPropertyId, PrioritaryPropertyIdSet, PropertyDeclaration,
-    PropertyDeclarationId, PropertyFlags, ShorthandsWithPropertyReferencesCache, StyleBuilder,
+    PropertyDeclarationId, ShorthandsWithPropertyReferencesCache, StyleBuilder,
     CASCADE_PROPERTY,
 };
 use crate::properties::{CustomDeclaration, CustomDeclarationValue, UnparsedValue};
@@ -118,7 +118,8 @@ where
 struct DeclarationIterator<'a> {
     // Global to the iteration.
     guards: &'a StylesheetGuards<'a>,
-    restriction: Option<PropertyFlags>,
+    // VIPER-PATCH(pseudo-element-hooks): the longhands that apply.
+    restriction: Option<&'a LonghandIdSet>,
     // The rule we're iterating over.
     current_rule_node: Option<&'a StrongRuleNode>,
     // Per rule state.
@@ -132,8 +133,10 @@ impl<'a> DeclarationIterator<'a> {
         rule_node: &'a StrongRuleNode,
         guards: &'a StylesheetGuards,
         pseudo: Option<&PseudoElement>,
+        // VIPER-PATCH(pseudo-element-hooks): the device's restriction.
+        stylist: &'a Stylist,
     ) -> Self {
-        let restriction = pseudo.and_then(|p| p.property_restriction());
+        let restriction = pseudo.and_then(|p| stylist.device().pseudo_element_restriction(p));
         let mut iter = Self {
             guards,
             current_rule_node: Some(rule_node),
@@ -175,8 +178,10 @@ impl<'a> Iterator for DeclarationIterator<'a> {
                     // property.  Custom properties are always allowed, but
                     // longhands are only allowed if they have our
                     // restriction flag set.
+                    // VIPER-PATCH(pseudo-element-hooks): if they are in the
+                    // restriction's set.
                     if let PropertyDeclarationId::Longhand(id) = decl.id() {
-                        if !id.flags().contains(restriction)
+                        if !restriction.contains(id)
                             && self.priority.cascade_level().origin() != CascadeOrigin::UA
                         {
                             continue;
@@ -214,12 +219,17 @@ fn cascade_rules<E>(
 where
     E: TElement,
 {
+    // VIPER-PATCH(pseudo-element-hooks): a style under a restriction, which
+    // the embedder may give any pseudo-element, is never cached.
+    if pseudo.is_some_and(|p| stylist.device().pseudo_element_restriction(p).is_some()) {
+        rule_cache_conditions.set_uncacheable();
+    }
     apply_declarations(
         stylist,
         pseudo,
         rule_node,
         guards,
-        DeclarationIterator::new(rule_node, guards, pseudo),
+        DeclarationIterator::new(rule_node, guards, pseudo, stylist),
         parent_style,
         layout_parent_style,
         first_line_reparenting,

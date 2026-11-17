@@ -9,6 +9,9 @@ use crate::custom_properties::CssEnvironment;
 #[cfg(feature = "servo")]
 use crate::derives::*;
 use crate::properties::ComputedValues;
+// VIPER-PATCH(pseudo-element-hooks): the restriction's types.
+use crate::properties::LonghandIdSet;
+use crate::selector_parser::PseudoElement;
 use crate::values::computed::font::QueryFontMetricsFlags;
 use crate::values::computed::Length;
 use parking_lot::RwLock;
@@ -28,6 +31,9 @@ pub mod servo;
 // VIPER-PATCH(system-color-palette): the embedder's system colours.
 #[cfg(feature = "servo")]
 pub mod system_colors;
+// VIPER-PATCH(pseudo-element-hooks): the embedder's pseudo-element hooks.
+#[cfg(feature = "servo")]
+pub mod pseudo_element_hooks;
 
 /// A device is a structure that represents the current media a given document
 /// is displayed in.
@@ -94,6 +100,20 @@ pub struct Device {
 }
 
 impl Device {
+    // VIPER-PATCH(pseudo-element-hooks): the restriction the cascade reads.
+    /// The longhands that apply to `pseudo` in author and user rules, or
+    /// `None` when every longhand does: in servo builds the embedder's set
+    /// ([`PseudoElementHooks`](pseudo_element_hooks::PseudoElementHooks)),
+    /// else the engine's.
+    pub fn pseudo_element_restriction(&self, pseudo: &PseudoElement) -> Option<&LonghandIdSet> {
+        #[cfg(feature = "servo")]
+        return self.pseudo_element_hooks().restriction(pseudo);
+        #[cfg(feature = "gecko")]
+        return pseudo
+            .property_restriction()
+            .and_then(LonghandIdSet::with_restriction_flag);
+    }
+
     /// Get the relevant environment to resolve `env()` functions.
     #[inline]
     pub fn environment(&self) -> &CssEnvironment {

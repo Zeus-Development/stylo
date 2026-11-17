@@ -24,6 +24,8 @@ use crate::values::computed::{
 use crate::values::specified::color::{ColorSchemeFlags, ForcedColors, SystemColor};
 // VIPER-PATCH(system-color-palette): the embedder's system colours.
 use crate::device::system_colors::SystemColorPalette;
+// VIPER-PATCH(pseudo-element-hooks): the embedder's pseudo-element hooks.
+use crate::device::pseudo_element_hooks::PseudoElementHooks;
 use crate::values::specified::font::{
     QueryFontMetricsFlags, FONT_MEDIUM_CAP_PX, FONT_MEDIUM_CH_PX, FONT_MEDIUM_EX_PX,
     FONT_MEDIUM_IC_PX, FONT_MEDIUM_LINE_HEIGHT_PX, FONT_MEDIUM_PX,
@@ -117,6 +119,10 @@ pub(super) struct ExtraDeviceData {
     /// The values of the system colours in each colour scheme.
     #[ignore_malloc_size_of = "Pure stack type"]
     system_colors: SystemColorPalette,
+    // VIPER-PATCH(pseudo-element-hooks): the embedder's hooks.
+    /// The pseudo-element property restrictions and post-cascade adjustment.
+    #[ignore_malloc_size_of = "Owned by embedder"]
+    pseudo_element_hooks: PseudoElementHooks,
     /// An implementation of a trait which implements support for querying font metrics.
     #[ignore_malloc_size_of = "Owned by embedder"]
     font_metrics_provider: Box<dyn FontMetricsProvider>,
@@ -171,6 +177,9 @@ impl Device {
                 minimum_logical_font_size: None,
                 // VIPER-PATCH(system-color-palette): upstream's values.
                 system_colors: SystemColorPalette::default(),
+                // VIPER-PATCH(pseudo-element-hooks): the engine's sets, no
+                // adjustment.
+                pseudo_element_hooks: PseudoElementHooks::default(),
                 font_metrics_provider,
             },
         }
@@ -439,6 +448,18 @@ impl Device {
     /// Returns the values of the system colours in each colour scheme.
     pub fn system_colors(&self) -> SystemColorPalette {
         self.extra.system_colors
+    }
+
+    // VIPER-PATCH(pseudo-element-hooks): the accessors.
+    /// Set the pseudo-element hooks on this [`Device`]. Like the other
+    /// settings, a change needs the embedder to restyle.
+    pub fn set_pseudo_element_hooks(&mut self, hooks: PseudoElementHooks) {
+        self.extra.pseudo_element_hooks = hooks;
+    }
+
+    /// Returns the pseudo-element hooks.
+    pub fn pseudo_element_hooks(&self) -> &PseudoElementHooks {
+        &self.extra.pseudo_element_hooks
     }
 
     // VIPER-PATCH(minimum-logical-font-size): the accessors.

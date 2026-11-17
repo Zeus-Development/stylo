@@ -182,10 +182,12 @@ impl RuleCache {
     pub fn find(&self, guards: &StylesheetGuards, context: &Context) -> Option<&ComputedValues> {
         // A pseudo-element with property restrictions can result in different
         // computed values if it's also used for a non-pseudo.
+        // VIPER-PATCH(pseudo-element-hooks): the device's restriction.
+        let device = context.builder.device;
         if context
             .builder
             .pseudo
-            .and_then(|p| p.property_restriction())
+            .and_then(|p| device.pseudo_element_restriction(p))
             .is_some()
         {
             return None;

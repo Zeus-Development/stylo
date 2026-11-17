@@ -681,6 +681,27 @@ impl PrioritaryPropertyId {
 }
 
 impl LonghandIdSet {
+    // VIPER-PATCH(pseudo-element-hooks): the engine's restriction sets.
+    /// The longhands carrying `flag`, one of the pseudo-element restriction
+    /// flags (`APPLIES_TO_*`); `None` for any other flag.
+    pub fn with_restriction_flag(flag: PropertyFlags) -> Option<&'static Self> {
+        static FIRST_LINE: LonghandIdSet = ${longhand_id_set(lambda p: p.name in FIRST_LINE_RESTRICTIONS)};
+        static FIRST_LETTER: LonghandIdSet = ${longhand_id_set(lambda p: p.name in FIRST_LETTER_RESTRICTIONS)};
+        static PLACEHOLDER: LonghandIdSet = ${longhand_id_set(lambda p: p.name in PLACEHOLDER_RESTRICTIONS)};
+        static MARKER: LonghandIdSet = ${longhand_id_set(lambda p: p.name in MARKER_RESTRICTIONS)};
+        static CUE: LonghandIdSet = ${longhand_id_set(lambda p: p.name in CUE_RESTRICTIONS)};
+        [
+            (PropertyFlags::APPLIES_TO_FIRST_LINE, &FIRST_LINE),
+            (PropertyFlags::APPLIES_TO_FIRST_LETTER, &FIRST_LETTER),
+            (PropertyFlags::APPLIES_TO_PLACEHOLDER, &PLACEHOLDER),
+            (PropertyFlags::APPLIES_TO_MARKER, &MARKER),
+            (PropertyFlags::APPLIES_TO_CUE, &CUE),
+        ]
+        .into_iter()
+        .find(|(restriction, _)| restriction.bits() == flag.bits())
+        .map(|(_, set)| set)
+    }
+
     /// The set of non-inherited longhands.
     #[inline]
     pub(super) fn reset() -> &'static Self {

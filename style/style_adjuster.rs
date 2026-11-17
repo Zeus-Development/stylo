@@ -929,6 +929,32 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
     }
 
+    // VIPER-PATCH(pseudo-element-hooks): the embedder's post-cascade
+    // adjustment of a pseudo-element's style, after the engine's own.
+    /// Runs the device's pseudo-element adjuster, if any, on a
+    /// pseudo-element's style; `element` is the originating element.
+    #[cfg(feature = "servo")]
+    fn adjust_for_pseudo_element_hooks<E>(
+        &mut self,
+        element: Option<E>,
+        author_specified_properties: &LonghandIdSet,
+    ) where
+        E: TElement,
+    {
+        use crate::device::pseudo_element_hooks::OriginatingElement;
+        let device = self.style.device;
+        let (Some(pseudo), Some(adjuster)) =
+            (self.style.pseudo, device.pseudo_element_hooks().adjuster())
+        else {
+            return;
+        };
+        let element = element.as_ref().map(|e| OriginatingElement {
+            namespace: e.namespace(),
+            local_name: e.local_name(),
+        });
+        adjuster.adjust(pseudo, element, self.style, author_specified_properties);
+    }
+
     /// Performs adjustments for position-try-fallbacks. The properties that need adjustments here
     /// are luckily not affected by previous adjustments nor by other computed-value-time effects,
     /// so we can just perform them here.
@@ -1160,6 +1186,9 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         self.adjust_for_appearance(element);
         #[cfg(feature = "gecko")]
         self.adjust_for_marker_pseudo(author_specified_properties);
+        // VIPER-PATCH(pseudo-element-hooks): the embedder's adjustment.
+        #[cfg(feature = "servo")]
+        self.adjust_for_pseudo_element_hooks(element, author_specified_properties);
         if !try_tactic.is_empty() {
             self.adjust_for_try_tactic(try_tactic);
         }
