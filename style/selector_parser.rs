@@ -122,6 +122,9 @@ pub enum PseudoElementCascadeType {
 pub struct PerPseudoElementMap<T> {
     sparse: [i8; PSEUDO_COUNT],
     dense: Vec<T>,
+    // VIPER-PATCH(registered-pseudo-elements): a registered pseudo-element's
+    // entry, by its name: each name has an entry of its own.
+    registered: Vec<(Box<str>, T)>,
 }
 
 impl<T> Default for PerPseudoElementMap<T> {
@@ -129,8 +132,21 @@ impl<T> Default for PerPseudoElementMap<T> {
         Self {
             dense: Vec::new(),
             sparse: [const { -1 }; PSEUDO_COUNT],
+            registered: Vec::new(), // VIPER-PATCH(registered-pseudo-elements)
         }
     }
+}
+
+// VIPER-PATCH(registered-pseudo-elements): the name keying a registered
+// pseudo-element's entry; gecko builds register none.
+#[cfg(feature = "servo")]
+fn registered_name(pseudo: &PseudoElement) -> Option<&str> {
+    pseudo.registered_name()
+}
+
+#[cfg(not(feature = "servo"))]
+fn registered_name(_: &PseudoElement) -> Option<&str> {
+    None
 }
 
 impl<T> Debug for PerPseudoElementMap<T>
@@ -158,6 +174,11 @@ where
 impl<T> PerPseudoElementMap<T> {
     /// Get an entry in the map.
     pub fn get(&self, pseudo: &PseudoElement) -> Option<&T> {
+        // VIPER-PATCH(registered-pseudo-elements): its entry by name.
+        if let Some(name) = registered_name(pseudo) {
+            let mut entries = self.registered.iter();
+            return entries.find(|(n, _)| **n == *name).map(|(_, v)| v);
+        }
         let idx = pseudo.index();
         debug_assert!(self.sparse.get(idx).is_some());
         let i = self.sparse[idx];
@@ -172,12 +193,21 @@ impl<T> PerPseudoElementMap<T> {
     pub fn clear(&mut self) {
         self.dense.clear();
         self.sparse.fill(-1);
+        self.registered.clear(); // VIPER-PATCH(registered-pseudo-elements)
     }
 
     /// Set an entry value.
     ///
     /// Returns an error if the element is not a simple pseudo.
     pub fn set(&mut self, pseudo: &PseudoElement, value: T) {
+        // VIPER-PATCH(registered-pseudo-elements): its entry by name.
+        if let Some(name) = registered_name(pseudo) {
+            match self.registered.iter_mut().find(|(n, _)| **n == *name) {
+                Some(entry) => entry.1 = value,
+                None => self.registered.push((name.into(), value)),
+            }
+            return;
+        }
         let idx = pseudo.index();
         let i = self.sparse[idx];
         if i < 0 {
@@ -194,6 +224,15 @@ impl<T> PerPseudoElementMap<T> {
     where
         F: FnOnce() -> T,
     {
+        // VIPER-PATCH(registered-pseudo-elements): its entry by name.
+        if let Some(name) = registered_name(pseudo) {
+            let found = self.registered.iter().position(|(n, _)| **n == *name);
+            let i = found.unwrap_or_else(|| {
+                self.registered.push((name.into(), f()));
+                self.registered.len() - 1
+            });
+            return &mut self.registered[i].1;
+        }
         let idx = pseudo.index();
         let mut i = self.sparse[idx];
         if i < 0 {
@@ -208,12 +247,17 @@ impl<T> PerPseudoElementMap<T> {
 
     /// Get an iterator for the entries.
     pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.dense.iter()
+        // VIPER-PATCH(registered-pseudo-elements): the registered entries
+        // after the others.
+        let registered = self.registered.iter().map(|(_, v)| v);
+        self.dense.iter().chain(registered)
     }
 
     /// Get a mutable iterator for the entries.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.dense.iter_mut()
+        // VIPER-PATCH(registered-pseudo-elements): as `iter`.
+        let registered = self.registered.iter_mut().map(|(_, v)| v);
+        self.dense.iter_mut().chain(registered)
     }
 }
 

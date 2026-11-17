@@ -51,26 +51,31 @@ pub trait PseudoElementAdjuster: Debug + Send + Sync {
 pub struct PseudoElementHooks {
     /// By pseudo-element index: the longhands that apply, or `None` for
     /// every longhand.
-    restrictions: Vec<(usize, Option<LonghandIdSet>)>,
+    // VIPER-PATCH(registered-pseudo-elements): and by a registered one's
+    // name.
+    restrictions: Vec<((usize, Option<Box<str>>), Option<LonghandIdSet>)>,
     adjuster: Option<Arc<dyn PseudoElementAdjuster>>,
 }
 
 impl PseudoElementHooks {
     /// Sets the longhands that apply to `pseudo` (and to every
-    /// pseudo-element of its index) in author and user rules, `None` for
-    /// every longhand, in place of the engine's set.
+    /// pseudo-element of its index, or of its name when it is registered)
+    /// in author and user rules, `None` for every longhand, in place of the
+    /// engine's set.
     pub fn set_restriction(&mut self, pseudo: &PseudoElement, longhands: Option<LonghandIdSet>) {
-        let index = pseudo.index();
-        self.restrictions.retain(|(i, _)| *i != index);
-        self.restrictions.push((index, longhands));
+        let key = (pseudo.index(), pseudo.registered_name().map(Box::from));
+        self.restrictions.retain(|(k, _)| *k != key);
+        self.restrictions.push((key, longhands));
     }
 
     /// The longhands that apply to `pseudo` in author and user rules, or
     /// `None` when every longhand does: the embedder's set, else the
     /// engine's (`PseudoElement::property_restriction`).
     pub fn restriction(&self, pseudo: &PseudoElement) -> Option<&LonghandIdSet> {
-        let index = pseudo.index();
-        match self.restrictions.iter().find(|(i, _)| *i == index) {
+        // VIPER-PATCH(registered-pseudo-elements): a registered one's name.
+        let (index, name) = (pseudo.index(), pseudo.registered_name());
+        let mut entries = self.restrictions.iter();
+        match entries.find(|(key, _)| key.0 == index && key.1.as_deref() == name) {
             Some((_, set)) => set.as_ref(),
             None => pseudo
                 .property_restriction()
@@ -152,5 +157,23 @@ mod tests {
         assert!(hooks.adjuster().is_some());
         hooks.set_adjuster(None);
         assert!(hooks.adjuster().is_none());
+    }
+
+    // VIPER-PATCH(registered-pseudo-elements): a registered name's
+    // restriction is its own, whatever its arguments.
+    #[test]
+    fn registered_pseudo_elements_have_their_own_restrictions() {
+        let mut hooks = PseudoElementHooks::default();
+        let mut color = LonghandIdSet::new();
+        color.insert(LonghandId::Color);
+        let part = PseudoElement::registered("-x-part", Some("a"));
+        hooks.set_restriction(&part, Some(color));
+        let other = PseudoElement::registered("-x-part", Some("b"));
+        assert_eq!(hooks.restriction(&other), Some(&color));
+        assert!(hooks.restriction(&PseudoElement::registered("-x-other", None)).is_none());
+        assert!(hooks.restriction(&PseudoElement::Unmatched("-x-part".into())).is_none());
+        hooks.set_restriction(&other, None);
+        assert!(hooks.restriction(&part).is_none());
+        assert_eq!(hooks.restrictions.len(), 1);
     }
 }

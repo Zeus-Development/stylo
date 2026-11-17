@@ -116,6 +116,19 @@ pub enum PseudoElement {
     PickerIcon,
     Checkmark,
 
+    // VIPER-PATCH(registered-pseudo-elements): a pseudo-element name an
+    // embedder registers, which its `SelectorNames` builds: upstream has no
+    // way to add one, and `Unmatched` puts every name in one rule bucket. It
+    // holds its name in ASCII lowercase without `::`, followed, when it is
+    // functional, by its arguments in parentheses as the embedder
+    // serializes them (`-x-part`, `-x-part(a)`). Each name has its rule
+    // bucket of its own (`registered_name`; a functional one's holds the
+    // rules of every argument, as `Highlight`'s does, which the embedder's
+    // matching function tells apart), cascades lazily, takes the user-action
+    // pseudo-classes after it (Selectors 4 section 3.6.3) and serializes as
+    // held.
+    Registered(Box<str>),
+
     // VIPER-PATCH(chrome-dom-api-pseudos): see PATCHES.md.
     // VIPER-PATCH(selector-names-hook): a pseudo-element an embedder's
     // `SelectorNames` admits beyond servo's names; upstream Servo, and
@@ -132,7 +145,8 @@ pub enum PseudoElement {
 // VIPER-PATCH(chrome-dom-api-pseudos): `Unmatched` is the last variant.
 // VIPER-PATCH(selector-names-hook): its index, as no constant holds a name.
 // VIPER-PATCH(servo-standard-pseudo-elements): 13 more before it.
-pub const PSEUDO_COUNT: usize = 37;
+// VIPER-PATCH(registered-pseudo-elements): and `Registered`.
+pub const PSEUDO_COUNT: usize = 38;
 
 impl ToCss for PseudoElement {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
@@ -140,6 +154,11 @@ impl ToCss for PseudoElement {
         W: fmt::Write,
     {
         use self::PseudoElement::*;
+        // VIPER-PATCH(registered-pseudo-elements): its name as held.
+        if let Registered(ref name) = *self {
+            dest.write_str("::")?;
+            return dest.write_str(name);
+        }
         dest.write_str(match *self {
             After => "::after",
             Before => "::before",
@@ -182,6 +201,8 @@ impl ToCss for PseudoElement {
             // VIPER-PATCH(chrome-dom-api-pseudos): a name no stylesheet uses.
             // VIPER-PATCH(selector-names-hook): every name.
             Unmatched(_) => "::-internal-unmatched",
+            // VIPER-PATCH(registered-pseudo-elements): written above.
+            Registered(_) => unreachable!(),
         })?;
         // VIPER-PATCH(servo-standard-pseudo-elements): a functional one's
         // argument, as serialized.
@@ -208,7 +229,8 @@ impl ::selectors::parser::PseudoElement for PseudoElement {
         // VIPER-PATCH(servo-standard-pseudo-elements): and the standard ones,
         // as Selectors 4 section 3.6.3 allows unless a pseudo-element's
         // specification says otherwise.
-        matches!(self, Self::Unmatched(_)) || self.is_servo_standard()
+        // VIPER-PATCH(registered-pseudo-elements): and the registered ones.
+        matches!(self, Self::Unmatched(_) | Self::Registered(_)) || self.is_servo_standard()
     }
 }
 
@@ -268,7 +290,10 @@ impl PseudoElement {
             Picker(_) => 33,
             PickerIcon => 34,
             Checkmark => 35,
-            Unmatched(_) => 36,
+            // VIPER-PATCH(registered-pseudo-elements): one index for every
+            // name, which maps key by name too (`registered_name`).
+            Registered(_) => 36,
+            Unmatched(_) => 37,
         }
     }
 
@@ -414,6 +439,8 @@ impl PseudoElement {
             // VIPER-PATCH(chrome-dom-api-pseudos): computed only on request.
             // VIPER-PATCH(selector-names-hook): every name.
             PseudoElement::Unmatched(_) => PseudoElementCascadeType::Lazy,
+            // VIPER-PATCH(registered-pseudo-elements): on request too.
+            PseudoElement::Registered(_) => PseudoElementCascadeType::Lazy,
             // VIPER-PATCH(servo-standard-pseudo-elements): on request too.
             PseudoElement::TargetText
             | PseudoElement::SpellingError
@@ -489,10 +516,36 @@ impl PseudoElement {
     pub fn has_argument(&self) -> bool {
         // VIPER-PATCH(servo-standard-pseudo-elements): the functional ones,
         // whose bucket holds the rules of every argument.
-        matches!(
-            self,
-            Self::Highlight(_) | Self::ScrollButton(_) | Self::Picker(_)
-        )
+        // VIPER-PATCH(registered-pseudo-elements): a functional registered
+        // one too.
+        match self {
+            Self::Highlight(_) | Self::ScrollButton(_) | Self::Picker(_) => true,
+            Self::Registered(name) => name.contains('('),
+            _ => false,
+        }
+    }
+
+    // VIPER-PATCH(registered-pseudo-elements): the constructor and the key.
+    /// The registered pseudo-element `name` (compared ASCII
+    /// case-insensitively, without `::`), with the arguments `arguments` as
+    /// serialized when it is functional.
+    pub fn registered(name: &str, arguments: Option<&str>) -> Self {
+        let name = name.to_ascii_lowercase();
+        Self::Registered(match arguments {
+            Some(arguments) => format!("{name}({arguments})").into(),
+            None => name.into(),
+        })
+    }
+
+    /// A registered pseudo-element's name, without its arguments: the key
+    /// of its rule bucket and of its embedder's restriction. `None` for any
+    /// other pseudo-element.
+    #[inline]
+    pub fn registered_name(&self) -> Option<&str> {
+        match self {
+            Self::Registered(name) => Some(name.split_once('(').map_or(&**name, |(key, _)| key)),
+            _ => None,
+        }
     }
 
     /// Whether this pseudo-element is the ::target-text pseudo.
@@ -1443,6 +1496,8 @@ mod chrome_dom_api_pseudos_tests {
             Picker("select".into()),
             PickerIcon,
             Checkmark,
+            // VIPER-PATCH(registered-pseudo-elements): a registered name.
+            Registered("-x-part".into()),
             // VIPER-PATCH(selector-names-hook): a name.
             Unmatched("column".into()),
         ];
@@ -1594,5 +1649,136 @@ mod servo_standard_pseudo_elements_tests {
         for (_, css) in standard() {
             assert!(!parses(&format!("p{css}")), "{css}");
         }
+    }
+}
+
+// VIPER-PATCH(registered-pseudo-elements): the variant's tests.
+#[cfg(test)]
+mod registered_pseudo_elements_tests {
+    use super::{NonTSPseudoClass, PseudoElement, SelectorImpl, SelectorParser, PSEUDO_COUNT};
+    use crate::selector_parser::PerPseudoElementMap;
+    use crate::stylesheets::{Namespaces, Origin, ParseOptions, SelectorNames, UrlExtraData};
+    use cssparser::{Parser, ToCss};
+    use selectors::parser::{Component, ParseRelative, PseudoElement as _, SelectorList};
+    use style_traits::ParseError;
+
+    /// Registers every pseudo-element name starting with `-x-`, a
+    /// functional one with an identifier argument.
+    struct Registers;
+
+    impl SelectorNames for Registers {
+        fn pseudo_class<'i>(
+            &self,
+            _: &SelectorParser<'_>,
+            _: &str,
+            _: Option<&mut Parser<'i>>,
+        ) -> Option<Result<NonTSPseudoClass, ParseError>> {
+            None
+        }
+
+        fn pseudo_element<'i>(
+            &self,
+            _: &SelectorParser<'_>,
+            name: &str,
+            args: Option<&mut Parser<'i>>,
+        ) -> Option<Result<PseudoElement, ParseError>> {
+            if !name.to_ascii_lowercase().starts_with("-x-") {
+                return None;
+            }
+            Some(match args {
+                None => Ok(PseudoElement::registered(name, None)),
+                Some(args) => args
+                    .expect_ident()
+                    .map(|arg| PseudoElement::registered(name, Some(&**arg)))
+                    .map_err(ParseError::from),
+            })
+        }
+
+        fn refuses(&self, _: &str) -> bool {
+            false
+        }
+
+        fn valid_after(&self, _: &PseudoElement, _: &Component<SelectorImpl>) -> Option<bool> {
+            None
+        }
+    }
+
+    static REGISTERS: Registers = Registers;
+
+    /// The serialization of `selectors` in an author sheet whose hook is
+    /// `Registers`.
+    fn parse(selectors: &str) -> Option<String> {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let mut parse_options = ParseOptions::default();
+        parse_options.selector_names = Some(&REGISTERS);
+        let parser = SelectorParser {
+            stylesheet_origin: Origin::Author,
+            namespaces: &Namespaces::default(),
+            url_data: &url,
+            for_supports_rule: false,
+            parse_options,
+        };
+        let list = SelectorList::parse(&parser, &mut Parser::new(selectors), ParseRelative::No);
+        list.ok().map(|list| list.to_css_string())
+    }
+
+    #[test]
+    fn registered_pseudo_elements_parse_serialize_and_cascade_lazily() {
+        assert_eq!(parse("p::-X-Part").as_deref(), Some("p::-x-part"));
+        assert_eq!(parse("::-x-part:hover").as_deref(), Some("::-x-part:hover"));
+        assert_eq!(parse("p::-x-fn(A)").as_deref(), Some("p::-x-fn(A)"));
+        assert_eq!(parse("p::-y-part"), None);
+        let part = PseudoElement::registered("-X-Part", None);
+        let functional = PseudoElement::registered("-x-fn", Some("a"));
+        assert_eq!(part, PseudoElement::Registered("-x-part".into()));
+        assert_eq!(part.to_css_string(), "::-x-part");
+        assert_eq!(functional.to_css_string(), "::-x-fn(a)");
+        for (pseudo, has_argument) in [(&part, false), (&functional, true)] {
+            assert!(pseudo.is_lazy() && pseudo.accepts_state_pseudo_classes());
+            assert!(!pseudo.is_element_backed() && !pseudo.is_servo_standard());
+            assert!(pseudo.property_restriction().is_none());
+            assert_eq!(pseudo.has_argument(), has_argument);
+            assert_eq!(pseudo.index(), PSEUDO_COUNT - 2);
+        }
+        assert_eq!(part.registered_name(), Some("-x-part"));
+        assert_eq!(functional.registered_name(), Some("-x-fn"));
+        let unmatched = PseudoElement::Unmatched("-x-part".into());
+        assert_eq!(unmatched.registered_name(), None);
+    }
+
+    /// The entry of the registered `name` with `arguments` in `map`.
+    fn entry<'m>(
+        map: &'m PerPseudoElementMap<&'static str>,
+        name: &str,
+        arguments: Option<&str>,
+    ) -> Option<&'m str> {
+        map.get(&PseudoElement::registered(name, arguments)).copied()
+    }
+
+    /// Each name has an entry of its own, apart from `Unmatched`'s; a
+    /// functional one's entry is shared by its arguments.
+    #[test]
+    fn registered_pseudo_elements_have_their_own_buckets() {
+        let mut map = PerPseudoElementMap::<&'static str>::default();
+        map.set(&PseudoElement::Unmatched("-x-a".into()), "unmatched");
+        map.set(&PseudoElement::registered("-x-a", None), "a");
+        let b = PseudoElement::registered("-x-b", None);
+        *map.get_or_insert_with(&b, || "b0") = "b";
+        assert_eq!(*map.get_or_insert_with(&b, || "b1"), "b");
+        map.set(&PseudoElement::registered("-x-fn", Some("one")), "fn");
+        assert_eq!(entry(&map, "-x-a", None), Some("a"));
+        assert_eq!(entry(&map, "-X-B", None), Some("b"));
+        assert_eq!(entry(&map, "-x-fn", Some("two")), Some("fn"));
+        assert_eq!(entry(&map, "-x-c", None), None);
+        let unmatched = PseudoElement::Unmatched("-x-b".into());
+        assert_eq!(map.get(&unmatched).copied(), Some("unmatched"));
+        map.set(&PseudoElement::registered("-x-a", None), "a2");
+        let all: Vec<_> = map.iter().copied().collect();
+        assert_eq!(all, ["unmatched", "a2", "b", "fn"]);
+        map.iter_mut().for_each(|value| *value = "x");
+        assert_eq!(entry(&map, "-x-fn", None), Some("x"));
+        map.clear();
+        assert_eq!(map.iter().count(), 0);
+        assert_eq!(entry(&map, "-x-a", None), None);
     }
 }
