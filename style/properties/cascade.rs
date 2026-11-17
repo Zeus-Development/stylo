@@ -20,8 +20,7 @@ use crate::font_metrics::FontMetricsOrientation;
 use crate::properties::{
     property_counts, CSSWideKeyword, ComputedValues, DeclarationImportanceIterator, LonghandId,
     LonghandIdSet, PrioritaryPropertyId, PrioritaryPropertyIdSet, PropertyDeclaration,
-    PropertyDeclarationId, ShorthandsWithPropertyReferencesCache, StyleBuilder,
-    CASCADE_PROPERTY,
+    PropertyDeclarationId, ShorthandsWithPropertyReferencesCache, StyleBuilder, CASCADE_PROPERTY,
 };
 use crate::properties::{CustomDeclaration, CustomDeclarationValue, UnparsedValue};
 use crate::properties_and_values::rule::Descriptors as PropertyDescriptors;

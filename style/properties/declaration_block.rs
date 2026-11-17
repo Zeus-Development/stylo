@@ -2037,7 +2037,11 @@ mod servo_scrollbars_margin_trim_tests {
     fn servo_scrollbars_margin_trim_parse() {
         for (name, css, serialized) in [
             ("scrollbar-color", "auto", "auto"),
-            ("scrollbar-color", "red rgb(0, 0, 255)", "red rgb(0, 0, 255)"),
+            (
+                "scrollbar-color",
+                "red rgb(0, 0, 255)",
+                "red rgb(0, 0, 255)",
+            ),
             ("scrollbar-width", "auto", "auto"),
             ("scrollbar-width", "thin", "thin"),
             ("scrollbar-width", "NONE", "none"),
@@ -2047,7 +2051,11 @@ mod servo_scrollbars_margin_trim_tests {
             ("margin-trim", "block-end", "block-end"),
             ("margin-trim", "block-end block-start", "block"),
         ] {
-            assert_eq!(declared(name, css).as_deref(), Some(serialized), "{name}: {css}");
+            assert_eq!(
+                declared(name, css).as_deref(),
+                Some(serialized),
+                "{name}: {css}"
+            );
         }
         for (name, css) in [
             ("scrollbar-color", "red"),

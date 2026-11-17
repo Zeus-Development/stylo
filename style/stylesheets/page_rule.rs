@@ -395,7 +395,10 @@ mod servo_paged_media_tests {
             })
             .map(|rule| {
                 let block = rule.block.read_with(&guard);
-                let names = block.declarations().iter().map(|d| d.id().name().to_string());
+                let names = block
+                    .declarations()
+                    .iter()
+                    .map(|d| d.id().name().to_string());
                 let matches = rule.match_specificity(first_left).is_some();
                 (rule.selectors.to_css_string(), names.collect(), matches)
             })
@@ -439,7 +442,14 @@ mod servo_paged_media_tests {
 
     #[test]
     fn servo_paged_media_break_values_and_size() {
-        for value in ["avoid-page", "recto", "verso", "avoid-column", "column", "page"] {
+        for value in [
+            "avoid-page",
+            "recto",
+            "verso",
+            "avoid-column",
+            "column",
+            "page",
+        ] {
             assert_eq!(declared("break-before", value).as_deref(), Some(value));
             assert_eq!(declared("break-after", value).as_deref(), Some(value));
         }
@@ -447,7 +457,10 @@ mod servo_paged_media_tests {
             assert_eq!(declared("page-break-before", value), None, "{value}");
         }
         // The legacy shorthand has no spelling for the new values.
-        assert_eq!(declared("page-break-after", "always").as_deref(), Some("always"));
+        assert_eq!(
+            declared("page-break-after", "always").as_deref(),
+            Some("always")
+        );
         assert_eq!(declared("break-after", "column").as_deref(), Some("column"));
         // `size` is a descriptor of `@page` only.
         assert_eq!(declared("size", "A4"), None);
