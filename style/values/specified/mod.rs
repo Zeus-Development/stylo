@@ -108,6 +108,8 @@ pub use self::text::{OverflowWrap, TextEmphasisPosition, TextEmphasisStyle, Word
 pub use self::text::{TextAlignKeyword, TextDecorationLine, TextOverflow, WordSpacing};
 pub use self::text::{TextAlignLast, TextAutospace, TextUnderlinePosition};
 pub use self::text::{TextBoxEdge, TextBoxTrim};
+// VIPER-PATCH(text-spacing-trim-longhand): the new value module.
+pub use self::spacing_trim::TextSpacingTrim;
 pub use self::text::{
     TextDecorationInset, TextDecorationLength, TextDecorationSkipInk, TextJustify, TextTransform,
 };
@@ -156,6 +158,8 @@ pub mod ratio;
 pub mod rect;
 pub mod resolution;
 pub mod source_size_list;
+// VIPER-PATCH(text-spacing-trim-longhand): see the module.
+pub mod spacing_trim;
 pub mod svg;
 pub mod svg_path;
 pub mod table;

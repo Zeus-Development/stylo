@@ -683,6 +683,8 @@ class Longhand(Property):
                 "MozScriptSizeMultiplier",
                 "TransformBox",
                 "TextDecorationSkipInk",
+                # VIPER-PATCH(text-spacing-trim-longhand): its value is Copy.
+                "TextSpacingTrim",
                 "OutlineStyle",
                 "Overflow",
                 "OverflowAnchor",

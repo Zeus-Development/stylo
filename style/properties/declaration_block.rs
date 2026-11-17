@@ -2210,3 +2210,45 @@ mod servo_filter_url_tests {
         assert_eq!(blur.0.to_css_string(), "2px");
     }
 }
+
+// VIPER-PATCH(text-spacing-trim-longhand): the longhand's fork test; its
+// grammar's is in `values/specified/spacing_trim.rs`.
+#[cfg(test)]
+mod text_spacing_trim_longhand_tests {
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::properties::longhands::text_spacing_trim;
+    use crate::properties::LonghandId;
+    use crate::values::computed::TextSpacingTrim;
+    use style_traits::ToCss;
+
+    #[test]
+    fn text_spacing_trim_longhand_parses_inherits_and_starts_normal() {
+        for (css, serialized) in [
+            ("normal", "normal"),
+            ("auto", "auto"),
+            ("space-all", "space-all"),
+            ("trim-both", "trim-both"),
+            ("trim-all", "trim-all"),
+            ("trim-start", "trim-start"),
+            ("space-first", "space-first"),
+            ("space-first trim-end", "space-first trim-end"),
+            ("inherit", "inherit"),
+        ] {
+            assert_eq!(
+                declared("text-spacing-trim", css).as_deref(),
+                Some(serialized),
+                "{css}"
+            );
+        }
+        assert_eq!(declared("text-spacing-trim", "none"), None);
+        assert_eq!(
+            text_spacing_trim::get_initial_value(),
+            TextSpacingTrim::NORMAL
+        );
+        assert_eq!(
+            text_spacing_trim::get_initial_value().to_css_string(),
+            "normal"
+        );
+        assert!(LonghandId::TextSpacingTrim.inherited());
+    }
+}

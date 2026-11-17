@@ -2667,6 +2667,20 @@ has_effect_on_gecko_scrollbars = false
 spec = "https://drafts.csswg.org/css-text-4/#text-autospace-property"
 affects = "layout"
 
+# VIPER-PATCH(text-spacing-trim-longhand): CSS Text 4 section 8.5's
+# longhand, which upstream does not have, in servo builds (Gecko's would need
+# its glue): inherited, initial `normal`, the Editor's Draft's grammar
+# (`values/specified/spacing_trim.rs`).
+[text-spacing-trim]
+type = "TextSpacingTrim"
+initial = "computed::TextSpacingTrim::NORMAL"
+struct = "inherited_text"
+engine = "servo"
+animation_type = "discrete"
+spec = "https://drafts.csswg.org/css-text-4/#text-spacing-trim-property"
+servo_restyle_damage = "rebuild_box"
+affects = "layout"
+
 [text-box-edge]
 type = "TextBoxEdge"
 initial = "computed::TextBoxEdge::Auto"
