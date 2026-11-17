@@ -1416,23 +1416,23 @@ impl Stylist {
             declarations.into_iter().map(|block| block.for_rule_tree()),
             guards,
         );
-        let inputs = CascadeInputs {
-            rules: Some(rules),
-            visited_rules: None,
-            flags: Default::default(),
-            included_cascade_flags: RuleCascadeFlags::empty(),
-        };
-        self.cascade_style_and_visited::<E>(
-            None,
-            None,
-            &inputs,
+        // A page has neither an element nor a pseudo-element, which
+        // `cascade_style_and_visited` needs, and no visited style.
+        properties::cascade::<E>(
+            self,
+            /* pseudo = */ None,
+            &rules,
             guards,
             parent,
             parent,
             FirstLineReparenting::No,
             &PositionTryFallbacksTryTactic::default(),
+            /* visited_rules = */ None,
+            Default::default(),
+            RuleCascadeFlags::empty(),
             /* rule_cache = */ None,
             &mut RuleCacheConditions::default(),
+            /* element = */ None,
             &mut TreeCountingCaches::default(),
         )
     }
