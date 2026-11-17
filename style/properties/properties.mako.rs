@@ -2856,8 +2856,9 @@ macro_rules! longhand_properties_idents {
 #[cfg(feature = "gecko")]
 size_of_test!(ComputedValues, 248);
 // VIPER-PATCH(selector-names-hook): `pseudo` holds an `Unmatched` name.
+// VIPER-PATCH(servo-paged-media): and the page struct (`size`).
 #[cfg(feature = "servo")]
-size_of_test!(ComputedValues, 248);
+size_of_test!(ComputedValues, 256);
 
 // FFI relies on this.
 size_of_test!(Option<Arc<ComputedValues>>, 8);

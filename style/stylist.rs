@@ -1381,6 +1381,62 @@ impl Stylist {
         )
     }
 
+    // VIPER-PATCH(servo-paged-media): the style of a page in servo builds.
+    /// Computes the style of a page (CSS Paged Media 3 section 3.3): the
+    /// `@page` rules of every origin whose selectors match a page named
+    /// `name` (`None` for a page without a name) with the page
+    /// pseudo-classes `pseudos`, in specificity order, over `parent` (the
+    /// root element's style, which the page context inherits), or over the
+    /// initial values without one. Upstream computes it in its other build
+    /// only, through that build's anonymous page box.
+    #[cfg(feature = "servo")]
+    pub fn compute_for_page<E>(
+        &self,
+        guards: &StylesheetGuards,
+        name: Option<&Atom>,
+        pseudos: PagePseudoClassFlags,
+        parent: Option<&ComputedValues>,
+    ) -> Arc<ComputedValues>
+    where
+        E: TElement,
+    {
+        let name = name.cloned();
+        let mut declarations = Vec::new();
+        for (data, origin) in self.iter_extra_data_origins_rev() {
+            data.pages.match_and_append_rules(
+                &mut declarations,
+                origin,
+                guards,
+                &self.cascade_data,
+                &name,
+                pseudos,
+            );
+        }
+        let rules = self.rule_tree.insert_ordered_rules_with_important(
+            declarations.into_iter().map(|block| block.for_rule_tree()),
+            guards,
+        );
+        let inputs = CascadeInputs {
+            rules: Some(rules),
+            visited_rules: None,
+            flags: Default::default(),
+            included_cascade_flags: RuleCascadeFlags::empty(),
+        };
+        self.cascade_style_and_visited::<E>(
+            None,
+            None,
+            &inputs,
+            guards,
+            parent,
+            parent,
+            FirstLineReparenting::No,
+            &PositionTryFallbacksTryTactic::default(),
+            /* rule_cache = */ None,
+            &mut RuleCacheConditions::default(),
+            &mut TreeCountingCaches::default(),
+        )
+    }
+
     /// Computes a fallback style lazily given the current and parent styles, and name.
     #[cfg(feature = "gecko")]
     pub fn resolve_position_try<E>(

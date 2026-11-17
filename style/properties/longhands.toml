@@ -2025,7 +2025,8 @@ affects = "layout"
 type = "PageSize"
 initial = "computed::PageSize::auto()"
 struct = "page"
-engine = "gecko"
+# VIPER-PATCH(servo-paged-media): the `@page` descriptor `size` (CSS Paged
+# Media 3 section 7.1) in servo builds too; see `@page` in rule_parser.rs.
 spec = "https://drafts.csswg.org/css-page-3/#page-size-prop"
 animation_type = "none"
 rule_types_allowed = ["page"]

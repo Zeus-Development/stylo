@@ -2012,6 +2012,15 @@ pub enum BreakBetween {
     Avoid,
     Left,
     Right,
+    // VIPER-PATCH(servo-paged-media): CSS Fragmentation 3 section 3.1's
+    // other page and column values, which upstream left out of both builds,
+    // so a declaration with one was dropped. Each computes as itself; no
+    // legacy `page-break-*` value names one.
+    AvoidPage,
+    Recto,
+    Verso,
+    AvoidColumn,
+    Column,
 }
 
 impl BreakBetween {
@@ -2027,7 +2036,15 @@ impl BreakBetween {
             BreakBetween::Auto | BreakBetween::Avoid | BreakBetween::Left | BreakBetween::Right => {
                 Ok(break_value)
             },
-            BreakBetween::Page => Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError)),
+            // VIPER-PATCH(servo-paged-media): refused, as `page` is.
+            BreakBetween::Page
+            | BreakBetween::AvoidPage
+            | BreakBetween::Recto
+            | BreakBetween::Verso
+            | BreakBetween::AvoidColumn
+            | BreakBetween::Column => {
+                Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError))
+            },
         }
     }
 
@@ -2044,7 +2061,13 @@ impl BreakBetween {
                 self.to_css(dest)
             },
             BreakBetween::Page => dest.write_str("always"),
-            BreakBetween::Always => Ok(()),
+            // VIPER-PATCH(servo-paged-media): not expressible, as `always`.
+            BreakBetween::Always
+            | BreakBetween::AvoidPage
+            | BreakBetween::Recto
+            | BreakBetween::Verso
+            | BreakBetween::AvoidColumn
+            | BreakBetween::Column => Ok(()),
         }
     }
 }

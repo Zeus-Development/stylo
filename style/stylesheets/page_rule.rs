@@ -352,3 +352,104 @@ impl DeepCloneWithLock for PageRule {
         }
     }
 }
+
+// VIPER-PATCH(servo-paged-media): a fork test of `@page`, its `size`
+// descriptor and the break values in servo builds (PATCHES.md).
+#[cfg(test)]
+mod servo_paged_media_tests {
+    use super::PagePseudoClassFlags;
+    use crate::context::QuirksMode;
+    use crate::properties::{parse_style_attribute, PropertyId};
+    use crate::shared_lock::SharedRwLock;
+    use crate::stylesheets::{AllowImportRules, CssRule, CssRuleType, Origin};
+    use crate::stylesheets::{StylesheetContents, UrlExtraData};
+    use style_traits::ToCss;
+
+    fn url() -> UrlExtraData {
+        UrlExtraData::from(::url::Url::parse("about:blank").unwrap())
+    }
+
+    /// Each top-level `@page` rule: its selectors' text, the longhands it
+    /// declares and whether it matches a first left page.
+    fn pages(css: &str) -> Vec<(String, Vec<String>, bool)> {
+        let lock = SharedRwLock::new();
+        let contents = StylesheetContents::from_str(
+            css,
+            url(),
+            Origin::Author,
+            &lock,
+            None,
+            None,
+            QuirksMode::NoQuirks,
+            AllowImportRules::Yes,
+            None,
+        );
+        let guard = lock.read();
+        let rules = &contents.rules.read_with(&guard).0;
+        let first_left = PagePseudoClassFlags::FIRST | PagePseudoClassFlags::LEFT;
+        rules
+            .iter()
+            .filter_map(|rule| match rule {
+                CssRule::Page(rule) => Some(rule.read_with(&guard)),
+                _ => None,
+            })
+            .map(|rule| {
+                let block = rule.block.read_with(&guard);
+                let names = block.declarations().iter().map(|d| d.id().name().to_string());
+                let matches = rule.match_specificity(first_left).is_some();
+                (rule.selectors.to_css_string(), names.collect(), matches)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn servo_paged_media_parses_page_rules() {
+        let pages = pages(
+            "@page { size: A4 landscape; margin-top: 2cm }\
+             p { color: red }\
+             @page :first { margin: 1in; color: red }\
+             @page :right { size: 10in 5in }",
+        );
+        let longhands = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            pages,
+            [
+                (String::new(), longhands(&["size", "margin-top"]), true),
+                (
+                    ":first".to_owned(),
+                    longhands(&["margin-top", "margin-right", "margin-bottom", "margin-left"]),
+                    true,
+                ),
+                (":right".to_owned(), longhands(&["size"]), false),
+            ]
+        );
+    }
+
+    /// The value `css` declares for `name` in a style rule, serialized, or
+    /// `None` when the declaration is dropped.
+    fn declared(name: &str, css: &str) -> Option<String> {
+        let css = format!("{name}: {css}");
+        let block =
+            parse_style_attribute(&css, &url(), None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let id = PropertyId::parse_enabled_for_all_content(name).unwrap();
+        let mut text = String::new();
+        block.property_value_to_css(&id, &mut text).unwrap();
+        (block.len() > 0).then_some(text)
+    }
+
+    #[test]
+    fn servo_paged_media_break_values_and_size() {
+        for value in ["avoid-page", "recto", "verso", "avoid-column", "column", "page"] {
+            assert_eq!(declared("break-before", value).as_deref(), Some(value));
+            assert_eq!(declared("break-after", value).as_deref(), Some(value));
+        }
+        for value in ["column", "recto", "avoid-page"] {
+            assert_eq!(declared("page-break-before", value), None, "{value}");
+        }
+        // The legacy shorthand has no spelling for the new values.
+        assert_eq!(declared("page-break-after", "always").as_deref(), Some("always"));
+        assert_eq!(declared("break-after", "column").as_deref(), Some("column"));
+        // `size` is a descriptor of `@page` only.
+        assert_eq!(declared("size", "A4"), None);
+    }
+}
