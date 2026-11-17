@@ -1935,7 +1935,12 @@ affects = "paint"
 type = "ScrollbarColor"
 initial = "Default::default()"
 struct = "inherited_ui"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(servo-scrollbars-margin-trim): parsed and computed in servo
+# builds, a standard longhand (CSS Scrollbars Styling 1 section 2) that
+# upstream keeps behind `layout.unimplemented`, which servo builds never
+# set, so its declarations were dropped; likewise `scrollbar-width`
+# (section 3) and `margin-trim` (CSS Box 4 section 4, upstream's other
+# build only). Painting or laying them out is the embedder's.
 spec = "https://drafts.csswg.org/css-scrollbars-1/#scrollbar-color"
 boxed = true
 ignored_when_colors_disabled = true
@@ -3432,7 +3437,7 @@ affects = "layout"
 type = "MarginTrim"
 initial = "computed::MarginTrim::empty()"
 struct = "margin"
-engine = "gecko"
+# VIPER-PATCH(servo-scrollbars-margin-trim): see scrollbar-color.
 gecko_pref = "layout.css.margin-trim.enabled"
 animation_type = "none"
 spec = "https://drafts.csswg.org/css-box-4/#propdef-margin-trim"
@@ -4202,7 +4207,7 @@ keyword = { values = ["auto", "normal", "active", "disabled", "inactive"] }
 
 [scrollbar-width]
 struct = "ui"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(servo-scrollbars-margin-trim): see scrollbar-color.
 spec = "https://drafts.csswg.org/css-scrollbars-1/#scrollbar-width"
 animation_type = "discrete"
 affects = "layout"

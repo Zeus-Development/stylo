@@ -2008,3 +2008,62 @@ mod text_autospace_initial_tests {
         assert_eq!(initial.to_css_string(), "normal");
     }
 }
+
+// VIPER-PATCH(servo-scrollbars-margin-trim): a fork test of the three
+// longhands servo builds now parse (PATCHES.md).
+#[cfg(test)]
+mod servo_scrollbars_margin_trim_tests {
+    use super::parse_style_attribute;
+    use crate::context::QuirksMode;
+    use crate::properties::longhands::{margin_trim, scrollbar_color, scrollbar_width};
+    use crate::properties::PropertyId;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use style_traits::ToCss;
+
+    /// The value `css` declares for `name`, serialized, or `None` when the
+    /// declaration is dropped.
+    fn declared(name: &str, css: &str) -> Option<String> {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let css = format!("{name}: {css}");
+        let block =
+            parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let id = PropertyId::parse_enabled_for_all_content(name).unwrap();
+        let mut text = String::new();
+        block.property_value_to_css(&id, &mut text).unwrap();
+        (block.len() > 0).then_some(text)
+    }
+
+    #[test]
+    fn servo_scrollbars_margin_trim_parse() {
+        for (name, css, serialized) in [
+            ("scrollbar-color", "auto", "auto"),
+            ("scrollbar-color", "red rgb(0, 0, 255)", "red rgb(0, 0, 255)"),
+            ("scrollbar-width", "auto", "auto"),
+            ("scrollbar-width", "thin", "thin"),
+            ("scrollbar-width", "NONE", "none"),
+            ("margin-trim", "none", "none"),
+            ("margin-trim", "block", "block"),
+            ("margin-trim", "block-start", "block-start"),
+            ("margin-trim", "block-end", "block-end"),
+            ("margin-trim", "block-end block-start", "block"),
+        ] {
+            assert_eq!(declared(name, css).as_deref(), Some(serialized), "{name}: {css}");
+        }
+        for (name, css) in [
+            ("scrollbar-color", "red"),
+            ("scrollbar-width", "10px"),
+            ("margin-trim", "block none"),
+            ("margin-trim", "block-start block-start"),
+        ] {
+            assert_eq!(declared(name, css), None, "{name}: {css}");
+        }
+    }
+
+    #[test]
+    fn servo_scrollbars_margin_trim_initial_values() {
+        let color = scrollbar_color::get_initial_value();
+        assert_eq!(color.to_css_string(), "auto");
+        assert_eq!(scrollbar_width::get_initial_value().to_css_string(), "auto");
+        assert_eq!(margin_trim::get_initial_value().to_css_string(), "none");
+    }
+}
