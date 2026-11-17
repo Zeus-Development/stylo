@@ -100,7 +100,9 @@ and `servo-standard-pseudo-elements` to `stylo`, and a third group to
 `selectors`, `stylo` and `stylo_malloc_size_of`; Viper's
 STY-SYSTEM-COLORS-1 adds `system-color-palette` to `stylo`; Viper's
 STYLO-PIN-C adds `servo-scrollbars-margin-trim`, `servo-paged-media` and
-`pseudo-element-hooks` to `stylo`.
+`pseudo-element-hooks` to `stylo`; Viper's STYLO-PIN-D adds
+`servo-remaining-media-features` to `stylo` and `stylo_atoms`, and
+`registered-pseudo-elements` to `stylo`.
 The other four directories equal the base commit's. V10b part 4a pins no new
 crate; on 2026-10-15 it checked the two crates it patches again, as above:
 the `.crate` SHA-256 of `selectors` 0.41.0 and `stylo` 0.22.0 still equals
@@ -162,6 +164,8 @@ apart from the packaging files.
 | `servo-scrollbars-margin-trim` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS Scrollbars Styling 1's `scrollbar-color` and `scrollbar-width` sat behind upstream's `layout.unimplemented` preference, which servo builds never set, and CSS Box 4's `margin-trim` was built for upstream's other build only, so servo builds dropped their declarations; their gates go, and they parse and compute in servo builds (painting and laying them out stay the embedder's) | `viper-style::cascade stylo_pin_c::servo_scrollbars_margin_trim_compute` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 8 / 59 |
 | `servo-paged-media` | `stylo`: `stylesheets/rule_parser.rs`, `properties/longhands.toml`, `stylist.rs`, `values/specified/box.rs`, `properties/properties.mako.rs` (the size test), `stylesheets/page_rule.rs` (its tests) | Standard: CSS Paged Media 3's `@page` rule (section 3) and its `size` descriptor (section 7.1) parsed in upstream's other build only, so servo builds dropped them; they parse in servo builds, with the page selectors and the margin descriptors, and `Stylist::compute_for_page` cascades the matching `@page` rules of every origin over the root's style; `BreakBetween` gains CSS Fragmentation 3 section 3.1's `avoid-page`, `recto`, `verso`, `avoid-column` and `column`, which upstream had in neither build. Margin at-rules stay the other build's | `viper-style::cascade stylo_pin_c::servo_paged_media_parses_page_rules_and_break_values` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 91 / 101 |
 | `pseudo-element-hooks` | `stylo`: `device/pseudo_element_hooks.rs` (new), `device/mod.rs`, `device/servo.rs`, `properties/cascade.rs`, `properties/properties.mako.rs`, `rule_cache.rs`, `style_adjuster.rs` | Embedder control: CSS Pseudo-Elements 4 and CSS Lists 3 name the properties that apply to `::placeholder`, `::first-letter`, `::first-line` and `::marker` and leave the user agent's own pseudo-element styles to it; upstream fixes each restriction in the engine and adjusts no pseudo-element after the cascade in servo builds. The servo `Device` gains `PseudoElementHooks`: per pseudo-element, the longhands that apply in author and user rules (or all), in place of the engine's set, and a `PseudoElementAdjuster` run after the engine's adjustments with the originating element's name; the defaults are the engine's sets and no adjustment | `viper-style::cascade stylo_pin_c::pseudo_element_hooks_keep_the_engines_sets` | Candidate; draft to the owner first | Viper STYLO-PIN-C | 200 / 65 |
+| `servo-remaining-media-features` | `stylo`: `servo/remaining_media_features.rs` (new), `servo/mod.rs`, `servo/media_features.rs`, `device/servo.rs`, `stylesheets/parse_options.rs`, `queries/feature_expression.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: the twenty media features of Media Queries 4 and 5 that upstream's servo list lacks (`color`, `color-index`, `monochrome`, `grid`, `update`, `overflow-block`, `overflow-inline`, `device-aspect-ratio`, `horizontal-viewport-segments`, `vertical-viewport-segments`, `display-mode`, `environment-blending`, `inverted-colors`, `nav-controls`, `video-color-gamut`, `video-dynamic-range`, `prefers-reduced-transparency`, `prefers-reduced-data`, `prefers-bold-text`, `ua-color-scheme`), so a query on one was unknown. Each evaluates from `RemainingMediaFeatures`, the embedder's settings the servo `Device` keeps (`device-aspect-ratio` from the device's size, `ua-color-scheme` from the device's scheme unless set), and `ParseOptions::unknown_media_features` names the media features the parser leaves unknown; its default is these twenty, so the default options parse as upstream does | `viper-style::cascade stylo_pin_d::servo_remaining_media_features_stay_unknown_under_basic` | Candidate; draft to the owner first | Viper STYLO-PIN-D | 552 / 155 |
+| `registered-pseudo-elements` | `stylo`: `servo/selector_parser.rs`, `selector_parser.rs`, `device/pseudo_element_hooks.rs` | Embedder control: CSS Pseudo-Elements 4 lets a user agent style pseudo-elements of its own, and upstream's servo build has a fixed set: an embedder's `SelectorNames` could only build `Unmatched`, whose names share one rule bucket and one restriction. `PseudoElement::Registered` holds a name the embedder registers (`PseudoElement::registered`), with its own rule bucket (`PerPseudoElementMap` keys it by name), its own restriction in `PseudoElementHooks`, a lazy cascade, the user-action pseudo-classes after it and its own serialization | `viper-style cascade::document::stylo_pin_d_tests::registered_pseudo_elements_cascade_from_their_own_rules` | Candidate; draft to the owner first | Viper STYLO-PIN-D | 119 / 151 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1990,6 +1994,126 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Embedder control, so a candidate; a draft goes to the
   Viper owner first.
+
+## Patch `servo-remaining-media-features`
+
+- **Problem.** Upstream's servo media feature list lacks twenty features
+  of Media Queries 4 and 5: `color` (Media Queries 5 section 6.1),
+  `color-index` (6.2), `monochrome` (6.3), `grid` (5.3), `update` (5.4),
+  `overflow-block` (4.5), `overflow-inline` (4.6), `device-aspect-ratio`
+  (appendix A, deprecated but still defined),
+  `horizontal-viewport-segments` (4.7), `vertical-viewport-segments` (4.8),
+  `display-mode` (4.9), `environment-blending` (5.5), `inverted-colors`
+  (6.6), `nav-controls` (7.4), `video-color-gamut` (8.1),
+  `video-dynamic-range` (8.2), `prefers-reduced-transparency` (12.2),
+  `prefers-reduced-data` (12.7), `prefers-bold-text` (12.6) and
+  `ua-color-scheme` (12.5.1). A query on one parses as
+  `<general-enclosed>` and is unknown (upstream's gecko build reads most of
+  them from its document).
+- **Change.** A new module, `servo/remaining_media_features.rs`: the
+  keyword types (`Update`, `OverflowBlock`, `OverflowInline`,
+  `DisplayMode`, `EnvironmentBlending`, `InvertedColors`, `NavControls`,
+  `PrefersReduced` for both reduction preferences, `PrefersBoldText`; the
+  video features reuse `ColorGamut` and `DynamicRange`, `ua-color-scheme`
+  `PrefersColorScheme`), `RemainingMediaFeatures`, the embedder's settings
+  (`#[non_exhaustive]`, so later fields stay compatible), and the
+  evaluators. The default is a conventional browser on a color screen:
+  `color` 8, `color-index` 0, `monochrome` 0, `grid` 0, `update: fast`,
+  `overflow-block: scroll`, `overflow-inline: scroll`, one viewport segment
+  each way, `display-mode: browser`, `environment-blending: opaque`,
+  `inverted-colors: none`, `nav-controls: back`, `video-color-gamut: srgb`,
+  `video-dynamic-range: standard`, `no-preference` for the three
+  preferences, and `ua-color-scheme` the device's `prefers-color-scheme`.
+  `device-aspect-ratio` is the device's width to its height. The servo
+  `Device` keeps the settings (`set_remaining_media_features`,
+  `remaining_media_features`), and the twenty join the list with their
+  atoms. In a boolean context a feature matches unless its value is `0`,
+  `none` or `no-preference` (Media Queries 5's boolean-context rule); a
+  video gamut or range matches every value up to the device's, as
+  `color-gamut` does. `ParseOptions::unknown_media_features` names the
+  media features (any, compared ASCII case-insensitively, without a
+  `min-`, `max-` or `-webkit-` prefix) the parser leaves unknown, as if the
+  list lacked them; container features are not affected. Its default is
+  `REMAINING_MEDIA_FEATURES`, the twenty, so the default options parse
+  every media query as upstream does: an embedder evaluates them by
+  setting the features it leaves unknown, often none.
+- **Spots.** `style/servo/remaining_media_features.rs` (new: the types, the
+  settings, the evaluators and the tests); `style/servo/mod.rs` (the
+  module); `style/servo/media_features.rs` (the import, the twenty list
+  entries, and the device helper of `device_media_features_tests` made
+  visible to the module's tests); `style/device/servo.rs` (the import, the
+  field, its default and the accessors);
+  `style/stylesheets/parse_options.rs` (the option, its default, `PartialEq`
+  and `Debug`); `style/queries/feature_expression.rs` (the parser's check);
+  `stylo_atoms/static_atoms.txt` (nineteen atoms; `color` was there).
+- **Fork tests.** `servo_remaining_media_features_evaluate` (each feature
+  under the defaults and under changed settings, in a boolean context too,
+  and invalid values) and
+  `servo_remaining_media_features_default_to_unknown` (the default options
+  leave each unknown, negated too; any feature may be left unknown).
+- **Viper proof.** `stylo_pin_d::servo_remaining_media_features_stay_unknown_under_basic`:
+  the engine evaluates them with no feature left unknown, and under Basic,
+  which sets neither the settings nor the option at this pin, every one
+  stays unknown in `matchMedia`'s lists and `@media` rules. Viper's
+  STY-MQ-REST-1 sets both from its configuration.
+- **Size.** 552 added code lines, comments included, over the patch rules'
+  target of 100: nine documented keyword types and the settings struct,
+  twenty evaluators, twenty list entries in upstream's six-line form,
+  nineteen atoms, the device's field and accessors, and the parse option
+  with its check.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `registered-pseudo-elements`
+
+- **Problem.** CSS Pseudo-Elements 4 lets a user agent style
+  pseudo-elements of its own beyond the standard ones, and upstream's
+  servo build has a fixed set. An embedder's `SelectorNames`
+  (`selector-names-hook`) could admit another name only as
+  `PseudoElement::Unmatched`, whose names all share one index: one rule
+  bucket, so the rules of `::-x-a` reach `::-x-b`'s cascade, one
+  restriction in `PseudoElementHooks`, and the serialization
+  `::-internal-unmatched`.
+- **Change.** `PseudoElement::Registered`, before `Unmatched`, holds a name
+  the embedder registers, in ASCII lowercase without `::`, followed by its
+  arguments in parentheses when it is functional; `PseudoElement::registered`
+  builds one, and the embedder's `SelectorNames::pseudo_element` returns it.
+  It serializes as held, cascades lazily, takes the user-action
+  pseudo-classes after it (Selectors 4 section 3.6.3), and has one index
+  (36; `PSEUDO_COUNT` 38), so `registered_name` (the name without its
+  arguments) keys it apart: `PerPseudoElementMap` keeps each name's entry
+  in a list of its own, so each name has its own rule bucket, and
+  `PseudoElementHooks` keys a registered pseudo-element's restriction by
+  its name. A functional one's bucket holds the rules of every argument, as
+  `Highlight`'s does (`has_argument`, so the selector map matches the
+  pseudo-element and the embedder's matching function tells the arguments
+  apart). Basic's names register none, so nothing changes until an
+  embedder does.
+- **Spots.** `style/servo/selector_parser.rs` (the variant, its
+  serialization, index, cascade type and state pseudo-classes,
+  `has_argument`, `registered` and `registered_name`, `PSEUDO_COUNT`, and
+  the tests); `style/selector_parser.rs` (`PerPseudoElementMap`'s entries
+  by name); `style/device/pseudo_element_hooks.rs` (the restriction's key
+  and its test).
+- **Fork tests.** `registered_pseudo_elements_parse_serialize_and_cascade_lazily`,
+  `registered_pseudo_elements_have_their_own_buckets` and
+  `registered_pseudo_elements_have_their_own_restrictions`; the indices
+  test `selector_names_hook_indices_stay_distinct` lists the variant. The
+  fork's tests build no `TElement`, so the cascade is tested in Viper:
+  `viper-style`'s crate-internal
+  `cascade::document::stylo_pin_d_tests::registered_pseudo_elements_cascade_from_their_own_rules`
+  (two registered names compute from their own rules, a third from none,
+  and a restriction set for one name applies to it alone).
+- **Viper proof.** That crate-internal test. Viper's STY-PSEUDO-HOOK-1
+  registers a provider's names.
+- **Size.** 119 added code lines, comments included, just over the patch
+  rules' target of 100: the documented variant, its arms in the
+  serialization, index and cascade type, the constructor and the key, the
+  map's entries by name and the restriction's key.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Embedder control, so a candidate; a draft goes to the Viper
+  owner first.
 
 ## Retired patches
 
