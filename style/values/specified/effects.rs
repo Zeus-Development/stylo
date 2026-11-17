@@ -25,11 +25,9 @@ use crate::values::generics::effects::SimpleShadow as GenericSimpleShadow;
 use crate::values::generics::{NonNegative, ZeroToOne};
 use crate::values::specified::color::Color;
 use crate::values::specified::length::{Length, NonNegativeLength};
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(servo-filter-url): servo's URL type too, so no `Impossible`.
 use crate::values::specified::url::SpecifiedUrl;
 use crate::values::specified::{Angle, NonNegativeNumberOrPercentage, Number, NumberOrPercentage};
-#[cfg(feature = "servo")]
-use crate::values::Impossible;
 use crate::Zero;
 use cssparser::{match_ignore_ascii_case, Parser};
 use style_traits::{ParseError, StyleParseErrorKind};
@@ -39,12 +37,12 @@ pub type BoxShadow =
     GenericBoxShadow<Option<Color>, Length, Option<NonNegativeLength>, Option<Length>>;
 
 /// A specified value for a single `filter`.
-#[cfg(feature = "gecko")]
+// VIPER-PATCH(servo-filter-url): Filter Effects 1 section 5's `<url>`
+// filter in servo builds too, with servo's URL types, as Gecko builds have
+// it with theirs; upstream's servo type was `Impossible`, so a servo build
+// dropped every `filter` holding a `url()` at parse time. Which filter
+// element it names, and drawing it, are the embedder's.
 pub type SpecifiedFilter = GenericFilter<Angle, FilterFactor, Length, SimpleShadow, SpecifiedUrl>;
-
-/// A specified value for a single `filter`.
-#[cfg(feature = "servo")]
-pub type SpecifiedFilter = GenericFilter<Angle, FilterFactor, Length, SimpleShadow, Impossible>;
 
 pub use self::SpecifiedFilter as Filter;
 
@@ -283,8 +281,10 @@ impl Filter {
             },
             #[cfg(feature = "gecko")]
             Filter::Url(ref url) => Ok(ComputedFilter::Url(ComputedUrl(url.clone()))),
+            // VIPER-PATCH(servo-filter-url): servo resolves the URL when it
+            // parses it, so its computed value needs no context.
             #[cfg(feature = "servo")]
-            Filter::Url(_) => Err(()),
+            Filter::Url(ref url) => Ok(ComputedFilter::Url(url.to_computed_url())),
         }
     }
 }
@@ -292,11 +292,9 @@ impl Filter {
 impl Parse for Filter {
     #[inline]
     fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
-        #[cfg(feature = "gecko")]
-        {
-            if let Ok(url) = input.try_parse(|i| SpecifiedUrl::parse(context, i)) {
-                return Ok(GenericFilter::Url(url));
-            }
+        // VIPER-PATCH(servo-filter-url): in servo builds too.
+        if let Ok(url) = input.try_parse(|i| SpecifiedUrl::parse(context, i)) {
+            return Ok(GenericFilter::Url(url));
         }
         let function = match input.expect_function() {
             Ok(f) => f.clone(),

@@ -2162,3 +2162,51 @@ mod servo_preserve_spaces_tests {
         assert_eq!(declared("white-space-collapse", "-moz-pre-space"), None);
     }
 }
+
+// VIPER-PATCH(servo-filter-url): the patch's fork test.
+#[cfg(test)]
+mod servo_filter_url_tests {
+    use super::parse_style_attribute;
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::context::QuirksMode;
+    use crate::properties::PropertyDeclaration;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use crate::values::computed::url::ComputedUrl;
+    use crate::values::computed::Filter as ComputedFilter;
+    use style_traits::ToCss;
+
+    #[test]
+    fn servo_filter_url_parses_and_computes() {
+        assert_eq!(
+            declared("filter", "url(#f) blur(2px)").as_deref(),
+            Some("url(\"#f\") blur(2px)")
+        );
+        assert_eq!(
+            declared("filter", "blur(2px) url(\"a.svg#f\")").as_deref(),
+            Some("blur(2px) url(\"a.svg#f\")")
+        );
+        let url = UrlExtraData::from(::url::Url::parse("https://a.test/p").unwrap());
+        let block = parse_style_attribute(
+            "filter: url(#f) blur(2px)",
+            &url,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        );
+        let PropertyDeclaration::Filter(ref filters) = block.declarations()[0] else {
+            panic!("filter: {:?}", block.declarations());
+        };
+        let computed: Vec<_> = filters
+            .0
+            .iter()
+            .map(|filter| filter.to_computed_value_without_context().unwrap())
+            .collect();
+        let [ComputedFilter::Url(ComputedUrl::Valid(ref target)), ComputedFilter::Blur(ref blur)] =
+            computed[..]
+        else {
+            panic!("computed: {computed:?}");
+        };
+        assert_eq!(target.as_str(), "https://a.test/p#f");
+        assert_eq!(blur.0.to_css_string(), "2px");
+    }
+}

@@ -171,12 +171,10 @@ impl ToCss for CssUrl {
 /// A specified url() value for servo.
 pub type SpecifiedUrl = CssUrl;
 
-impl ToComputedValue for SpecifiedUrl {
-    type ComputedValue = ComputedUrl;
-
-    // If we can't resolve the URL from the specified one, we fall back to the original
-    // but still return it as a ComputedUrl::Invalid
-    fn to_computed_value(&self, _: &Context) -> Self::ComputedValue {
+impl CssUrl {
+    /// VIPER-PATCH(servo-filter-url): upstream's `to_computed_value`, which
+    /// needs no context, so that a `filter`'s URL computes without one.
+    pub fn to_computed_url(&self) -> ComputedUrl {
         match self.resolved {
             Some(ref url) => ComputedUrl::Valid(url.clone()),
             None => match self.original {
@@ -186,6 +184,17 @@ impl ToComputedValue for SpecifiedUrl {
                 },
             },
         }
+    }
+}
+
+impl ToComputedValue for SpecifiedUrl {
+    type ComputedValue = ComputedUrl;
+
+    // If we can't resolve the URL from the specified one, we fall back to the original
+    // but still return it as a ComputedUrl::Invalid
+    fn to_computed_value(&self, _: &Context) -> Self::ComputedValue {
+        // VIPER-PATCH(servo-filter-url): the body is `to_computed_url`.
+        self.to_computed_url()
     }
 
     fn from_computed_value(computed: &ComputedUrl) -> Self {
