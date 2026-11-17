@@ -116,6 +116,18 @@ pub struct ParseOptions {
     /// [Media Queries 4 section 3]: https://drafts.csswg.org/mediaqueries-4/#mq-syntax
     #[ignore_malloc_size_of = "static data"]
     pub unknown_media_features: &'static [&'static str],
+    /// VIPER-PATCH(unknown-properties): the property names the parser
+    /// leaves unknown, compared ASCII case-insensitively: a declaration
+    /// naming one is dropped as an unknown property's is ([CSS Syntax 3
+    /// section 5.4.6]), in a style rule, a `style` attribute or any other
+    /// block, and a supports condition naming one is false. The name is the
+    /// one declared: another alias, or a shorthand that sets the property,
+    /// is not affected, nor are blocks parsed before the options change.
+    /// Default: none, so every property servo builds parses as upstream's.
+    ///
+    /// [CSS Syntax 3 section 5.4.6]: https://drafts.csswg.org/css-syntax-3/#consume-declaration
+    #[ignore_malloc_size_of = "static data"]
+    pub unknown_properties: &'static [&'static str],
 }
 
 impl Default for ParseOptions {
@@ -132,6 +144,7 @@ impl Default for ParseOptions {
             unknown_media_features: crate::servo::remaining_media_features::REMAINING_MEDIA_FEATURES,
             #[cfg(not(feature = "servo"))]
             unknown_media_features: &[],
+            unknown_properties: &[], // VIPER-PATCH(unknown-properties)
         }
     }
 }
@@ -155,6 +168,8 @@ impl PartialEq for ParseOptions {
             && self.vertical_align_longhand == other.vertical_align_longhand
             // VIPER-PATCH(servo-remaining-media-features)
             && self.unknown_media_features == other.unknown_media_features
+            // VIPER-PATCH(unknown-properties)
+            && self.unknown_properties == other.unknown_properties
     }
 }
 
@@ -172,6 +187,8 @@ impl std::fmt::Debug for ParseOptions {
             .field("vertical_align_longhand", &self.vertical_align_longhand)
             // VIPER-PATCH(servo-remaining-media-features)
             .field("unknown_media_features", &self.unknown_media_features)
+            // VIPER-PATCH(unknown-properties)
+            .field("unknown_properties", &self.unknown_properties)
             .finish()
     }
 }
@@ -253,6 +270,14 @@ pub(crate) enum ValueRewrite {
 }
 
 impl ParseOptions {
+    /// VIPER-PATCH(unknown-properties): whether the parser leaves the
+    /// property `name` unknown (`unknown_properties`).
+    pub fn leaves_property_unknown(&self, name: &str) -> bool {
+        self.unknown_properties
+            .iter()
+            .any(|unknown| unknown.eq_ignore_ascii_case(name))
+    }
+
     /// VIPER-PATCH(vertical-align-longhand): the longhand a declaration of
     /// `id` declares: under `vertical_align_longhand`, the internal
     /// longhand of `alignment-baseline`, `baseline-shift` or
@@ -484,7 +509,8 @@ pub(crate) mod value_grammar_tests {
     }
 
     /// `CSS.supports(property, value)` under `options`.
-    fn supports(options: ParseOptions, property: &str, value: &str) -> bool {
+    // VIPER-PATCH(unknown-properties): shared with its tests.
+    pub(crate) fn supports(options: ParseOptions, property: &str, value: &str) -> bool {
         let url = url();
         let mut context = ParserContext::new(
             Origin::Author,
@@ -508,7 +534,8 @@ pub(crate) mod value_grammar_tests {
     }
 
     /// A `style` attribute parsed under `options`, serialized.
-    fn declared(options: ParseOptions, css: &str) -> String {
+    // VIPER-PATCH(unknown-properties): shared with its tests.
+    pub(crate) fn declared(options: ParseOptions, css: &str) -> String {
         let block = parse_style_attribute_with_options(
             css,
             &url(),
@@ -1125,5 +1152,35 @@ mod vertical_align_tests {
     fn vertical_align_longhand_options_compare() {
         assert_ne!(longhand(), ParseOptions::default());
         assert!(format!("{:?}", longhand()).contains("vertical_align_longhand: true"));
+    }
+}
+
+// VIPER-PATCH(unknown-properties): the patch's fork test.
+#[cfg(test)]
+mod unknown_properties_tests {
+    use super::value_grammar_tests::{declared, supports};
+    use super::ParseOptions;
+
+    #[test]
+    fn unknown_properties_are_dropped_by_their_declared_name() {
+        let mut options = ParseOptions::default();
+        assert!(options.unknown_properties.is_empty());
+        let css = "math-depth: 2; math-style: compact; color: red; -webkit-filter: blur(1px)";
+        assert_eq!(
+            declared(options, css),
+            "math-depth: 2; math-style: compact; color: red; filter: blur(1px);"
+        );
+        options.unknown_properties = &["MATH-DEPTH", "filter"];
+        assert!(options.leaves_property_unknown("math-depth"));
+        assert_eq!(
+            declared(options, css),
+            "math-style: compact; color: red; filter: blur(1px);"
+        );
+        assert!(!supports(options, "math-depth", "2"));
+        assert!(!supports(options, "Math-Depth", "inherit"));
+        assert!(!supports(options, "filter", "none"));
+        assert!(supports(options, "-webkit-filter", "none"));
+        assert!(supports(options, "math-style", "compact"));
+        assert!(supports(ParseOptions::default(), "math-depth", "2"));
     }
 }

@@ -435,6 +435,11 @@ impl NonCustomPropertyId {
 
 
     pub(super) fn allowed_in_ignoring_rule_type(self, context: &ParserContext) -> bool {
+        // VIPER-PATCH(unknown-properties): a name the embedder's options
+        // leave unknown is not allowed anywhere, as an unknown name.
+        if context.parse_options.leaves_property_unknown(self.name()) {
+            return false;
+        }
         // The semantics of these are kinda hard to reason about, what follows
         // is a description of the different combinations that can happen with
         // these three sets.
