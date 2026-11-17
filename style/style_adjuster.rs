@@ -948,7 +948,10 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         else {
             return;
         };
-        let element = element.as_ref().map(|e| OriginatingElement {
+        // The originating element, also when `element` backs the
+        // pseudo-element itself.
+        let originating = element.map(|e| e.ultimate_originating_element());
+        let element = originating.as_ref().map(|e| OriginatingElement {
             namespace: e.namespace(),
             local_name: e.local_name(),
         });

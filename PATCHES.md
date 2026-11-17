@@ -1919,7 +1919,10 @@ Problem, change, every spot, the Miri commands and the before/after results:
   rules: their selectors, declared longhands and matching of a first left
   page) and `servo_paged_media_break_values_and_size` (the five values, the
   legacy shorthands, and `size` refused in a style rule). The fork's tests
-  build no `TElement`, so `compute_for_page` is tested in Viper.
+  build no `TElement`, so `compute_for_page` is tested in Viper:
+  `viper-style`'s crate-internal
+  `cascade::document::stylo_pin_c_tests::compute_for_page_cascades_the_matching_page_rules`
+  (the rule without a selector, `:first` over it, and a named left page).
 - **Viper proof.** `stylo_pin_c::servo_paged_media_parses_page_rules_and_break_values`:
   CSSOM lists the `@page` rules with their selectors and descriptors, and
   the break values compute through Viper's cascade. Viper's task
@@ -1946,7 +1949,9 @@ Problem, change, every spot, the Miri commands and the before/after results:
   author and user rules (`Some(set)`) or every longhand (`None`), in place
   of the engine's set, and an optional `PseudoElementAdjuster`, a trait the
   embedder implements, called with the pseudo-element, the originating
-  element's namespace and local name (`OriginatingElement`), the style
+  element's namespace and local name (`OriginatingElement`, from the
+  ultimate originating element, also when the element backs the
+  pseudo-element), the style
   builder and the longhands an author or user declared. The servo `Device`
   keeps one (`set_pseudo_element_hooks`, `pseudo_element_hooks`), the
   default the engine's sets and no adjuster; `Device::pseudo_element_restriction`
@@ -1968,7 +1973,12 @@ Problem, change, every spot, the Miri commands and the before/after results:
   (`adjust_for_pseudo_element_hooks` and its call).
 - **Fork tests.** `pseudo_element_hooks_default_to_the_engines_sets` and
   `pseudo_element_hooks_take_the_embedders_sets`. The fork's tests build
-  no `TElement`, so the cascade through the hooks is tested in Viper.
+  no `TElement`, so the cascade through the hooks is tested in Viper:
+  `viper-style`'s crate-internal
+  `cascade::document::stylo_pin_c_tests::pseudo_element_hooks_reach_the_cascade_and_the_adjuster`
+  (a widened `::marker` set applies an author's `letter-spacing`, and the
+  adjuster's `display` is computed, given the pseudo-element, the `li` and
+  the author's longhands).
 - **Viper proof.** `stylo_pin_c::pseudo_element_hooks_keep_the_engines_sets`:
   with no hook set, Viper's configuration at this pin, the default hooks
   are the engine's sets, and an author's `::marker` and `::placeholder`
