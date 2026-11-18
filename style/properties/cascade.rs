@@ -824,6 +824,9 @@ pub(crate) struct Cascade<'a> {
     references_from_non_custom_properties: NonCustomReferenceMap<Vec<Arc<UnparsedValue>>>,
     /// Set of prioritary properties that have already been applied.
     ensured_prioritary: PrioritaryPropertyIdSet,
+    /// VIPER-PATCH(math-font-size-specified): whether the element's own
+    /// `font-size` declaration, the one applied, is `font-size: math`.
+    math_font_size: bool,
 }
 
 impl<'a> Cascade<'a> {
@@ -843,6 +846,8 @@ impl<'a> Cascade<'a> {
             may_have_custom_property_cycles: false,
             ensured_prioritary: PrioritaryPropertyIdSet::default(),
             references_from_non_custom_properties: Default::default(),
+            // VIPER-PATCH(math-font-size-specified): none applied yet.
+            math_font_size: false,
         }
     }
 
@@ -860,6 +865,8 @@ impl<'a> Cascade<'a> {
             may_have_custom_property_cycles: false,
             ensured_prioritary: PrioritaryPropertyIdSet::default(),
             references_from_non_custom_properties: Default::default(),
+            // VIPER-PATCH(math-font-size-specified): none applied yet.
+            math_font_size: false,
         }
     }
 
@@ -997,7 +1004,9 @@ impl<'a> Cascade<'a> {
                 self.recompute_keyword_font_size_if_needed(context);
             },
             FontSize => {
-                if self.seen.longhands.contains(LonghandId::MathDepth) {
+                // VIPER-PATCH(math-font-size-specified): only for the
+                // element's own `font-size: math`.
+                if self.seen.longhands.contains(LonghandId::MathDepth) && self.math_font_size {
                     // VIPER-PATCH(servo-math-fonts): in servo builds too.
                     Self::recompute_math_font_size_if_needed(context);
                 }
@@ -1164,6 +1173,11 @@ impl<'a> Cascade<'a> {
         };
 
         self.seen.longhands.insert(longhand_id);
+        if longhand_id == LonghandId::FontSize {
+            // VIPER-PATCH(math-font-size-specified): the declaration applied,
+            // after substitution, decides the `math` scaling.
+            self.math_font_size = is_math_font_size(&declaration);
+        }
         if origin.is_author_origin() {
             self.author_specified.insert(longhand_id);
         }
@@ -2713,6 +2727,19 @@ fn substitute_all(
     }
 }
 
+/// VIPER-PATCH(math-font-size-specified): whether `declaration` is
+/// `font-size: math`. MathML Core section 4.5 scales the inherited size by
+/// the change of `math-depth` only for that specified value; a `font-size`
+/// that copies the parent's, such as `inherit`, keeps the parent's size even
+/// when that size carries the `math` keyword.
+pub(crate) fn is_math_font_size(declaration: &PropertyDeclaration) -> bool {
+    matches!(
+        declaration,
+        PropertyDeclaration::FontSize(specified::FontSize::Keyword(info))
+            if info.kw == specified::FontSizeKeyword::Math
+    )
+}
+
 // VIPER-PATCH(servo-math-fonts): upstream's helper of
 // `recompute_math_font_size_if_needed`, moved out of its Gecko body so both
 // builds share it, unchanged.
@@ -2763,5 +2790,48 @@ fn scale_factor_for_math_depth_change(
         1.0 / s.max(f32::MIN_POSITIVE)
     } else {
         s
+    }
+}
+
+// VIPER-PATCH(math-font-size-specified): the patch's fork test. These tests
+// build no element, so the cascade's sizes are tested in Viper.
+#[cfg(test)]
+mod math_font_size_specified_tests {
+    use super::is_math_font_size;
+    use crate::context::QuirksMode;
+    use crate::properties::declaration_block::parse_style_attribute;
+    use crate::properties::LonghandId;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+
+    /// Whether the `font-size` declaration of the block `css` is
+    /// `font-size: math`.
+    fn scales(css: &str) -> bool {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let block =
+            parse_style_attribute(css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let declaration = block
+            .declarations()
+            .iter()
+            .find(|d| d.id().as_longhand() == Some(LonghandId::FontSize))
+            .unwrap_or_else(|| panic!("{css}: {:?}", block.declarations()));
+        is_math_font_size(declaration)
+    }
+
+    #[test]
+    fn math_font_size_specified_only_for_font_size_math() {
+        // MathML Core Appendix A: a script, then an accent, whose
+        // `font-size: inherit` keeps its parent's size.
+        assert!(scales("font-size: math; math-depth: add(1)"));
+        assert!(!scales("font-size: inherit; math-depth: add(1)"));
+        for css in [
+            "font-size: unset",
+            "font-size: initial",
+            "font-size: medium",
+            "font-size: 16px",
+            "font-size: smaller",
+            "font: 12px serif",
+        ] {
+            assert!(!scales(css), "{css}");
+        }
     }
 }
