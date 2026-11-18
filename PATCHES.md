@@ -175,6 +175,8 @@ apart from the packaging files.
 | `servo-filter-url` | `stylo`: `values/specified/effects.rs`, `values/computed/effects.rs`, `values/animated/effects.rs`, `url/servo.rs`, `properties/declaration_block.rs` (its test) | Standard: Filter Effects 1 section 5's `<url>` filter was typed `Impossible` in servo builds, so a `filter` or `backdrop-filter` holding `url()` was dropped at parse time; it parses and computes with servo's specified and computed URL types, as upstream's other build has it with its own, and computes without a context (`CssUrl::to_computed_url`) | `viper-style::cascade stylo_pin_e::servo_filter_url_computes` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 30 / 45 |
 | `text-spacing-trim-longhand` | `stylo`: `values/specified/spacing_trim.rs` (new), `values/specified/mod.rs`, `values/computed/mod.rs`, `properties/longhands.toml`, `properties/data.py`, `properties/declaration_block.rs` (its test) | Standard: CSS Text 4 section 8.5's `text-spacing-trim` is not in upstream; servo builds get the longhand (inherited, initial `normal`) with the Editor's Draft's grammar, `auto`, `trim-all`, `normal`, `space-all`, `trim-both` and any combination of one keyword per position, computed as three keywords | `viper-style::cascade stylo_pin_e::text_spacing_trim_computes_and_inherits` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 278 / 107 |
 | `unknown-properties` | `stylo`: `stylesheets/parse_options.rs`, `properties/properties.mako.rs` | Embedder control: an embedder had no way to leave a property the build parses unknown in one document, as `unknown_media_features` does for media features; `ParseOptions::unknown_properties` names them (default none), and a declaration or supports condition naming one, by its declared name, is dropped or false | `viper-style::cascade stylo_pin_e::unknown_properties_under_basic` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 30 / 31 |
+| `math-font-size-specified` | `stylo`: `properties/cascade.rs` | Standard: MathML Core section 4.5 scales the inherited `font-size` by the change of `math-depth` only for a specified `font-size: math`, but the cascade rescaled any computed size carrying the `math` keyword, which `font-size: inherit` copies from the parent, so MathML Core Appendix A's accent (`font-size: inherit` under `math-depth: add(1)`) shrank; the cascade now rescales only when the declaration it applied for the element, after substitution, is `font-size: math` | `viper-style::cascade stylo_pin_f::math_font_size_specified_keeps_the_accent_size` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 29 / 42 |
+| `servo-fragment-urls` | `stylo`: `url/servo.rs`, `properties/declaration_block.rs` (its test, and `servo-filter-url`'s) | Standard: CSS Values 4 section 4.5.1's fragment-only `url()` names an element of the current document whatever the sheet's base and serializes as just the fragment, but servo builds kept only the URL resolved against the base and could not tell a fragment (`CssUrl::is_fragment` logged an error and answered false); `is_fragment` answers from the original text, which starts with `#`, and such a URL computes to the new `ComputedUrl::Fragment`, its text as written, so it serializes as specified and two with the same text are equal; other URLs compute and serialize as before | `viper-style::cascade stylo_pin_f::servo_fragment_urls_compute_as_written` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 24 / 75 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2292,6 +2294,66 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Embedder control, so a candidate; a draft goes to the Viper
   owner first.
+
+## Patch `math-font-size-specified`
+
+- **Problem.** MathML Core section 4.5: "If the specified value
+  `font-size` is `math`", the computed size is the inherited size times
+  the scale factor of the change of `math-depth`. The cascade (servo's
+  `recompute_math_font_size_if_needed` since `servo-math-fonts`, and the
+  other build's) tested the computed size's keyword instead, and
+  `font-size: inherit` copies the parent's size with its `math` keyword.
+  So MathML Core Appendix A's accent rule, `mover[accent=true] >
+  :nth-child(2) { font-size: inherit }` beside the scripts' `math-depth:
+  add(1)`, gave the accent its parent's size times 0.71, where section 4.5
+  keeps the parent's.
+- **Change.** The cascade records, when it applies the element's
+  `font-size` declaration (after `var()` substitution), whether it is
+  `font-size: math` (`is_math_font_size`), and runs the math scaling only
+  then. A size inherited by `inherit`, `unset` or by not being declared
+  keeps the parent's value. Both builds share the call, so the other
+  build follows the specification too.
+- **Spots.** `style/properties/cascade.rs` (the `Cascade` field, its two
+  constructors, `apply_one_longhand`, the `FontSize` arm of
+  `did_apply_prioritary_property`, `is_math_font_size` and the test
+  module).
+- **Fork tests.** `math_font_size_specified_only_for_font_size_math`: the
+  Appendix A script's `font-size: math` scales, the accent's `font-size:
+  inherit` does not, nor do `unset`, `initial`, a keyword, a length,
+  `smaller` or the `font` shorthand. These tests build no element, so
+  the computed sizes are tested in Viper.
+- **Viper proof.** `stylo_pin_f::math_font_size_specified_keeps_the_accent_size`
+  (Appendix A's accent keeps its parent's 16px under a script's 11.36px).
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-fragment-urls`
+
+- **Problem.** CSS Values 4 section 4.5.1: a `url()` whose value starts
+  with `#` has the local url flag; it names an element of the current
+  document whatever the base, and serializes as just the fragment. Servo
+  builds resolve a URL when they parse it and computed only the resolved
+  URL, so `url(#f)` in a sheet with a URL of its own computed to the
+  sheet's URL with `#f` (another document), serialized that way, and
+  `CssUrl::is_fragment` could not answer.
+- **Change.** `CssUrl::is_fragment` answers from the original text, as the
+  other build does. `CssUrl::to_computed_url` (so `to_computed_value`)
+  gives such a URL `ComputedUrl::Fragment`, its original text: it
+  serializes as written, `url("#f")`, two with the same text are equal
+  whatever their sheets' bases, and `ComputedUrl::url` gives none for it,
+  since only the current document resolves it. Every other URL computes
+  and serializes as before. `servo-filter-url`'s fork test now expects
+  `url(#f)` in that form.
+- **Spots.** `style/url/servo.rs` (`is_fragment`, `to_computed_url`,
+  `from_computed_value`, the variant, `url` and `to_css`) and
+  `style/properties/declaration_block.rs` (the test module, and
+  `servo_filter_url_parses_and_computes`' expectation).
+- **Fork tests.** `servo_fragment_urls_keep_their_form`.
+- **Viper proof.** `stylo_pin_f::servo_fragment_urls_compute_as_written`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Retired patches
 
