@@ -2201,13 +2201,86 @@ mod servo_filter_url_tests {
             .iter()
             .map(|filter| filter.to_computed_value_without_context().unwrap())
             .collect();
-        let [ComputedFilter::Url(ComputedUrl::Valid(ref target)), ComputedFilter::Blur(ref blur)] =
+        // VIPER-PATCH(servo-fragment-urls): a fragment-only URL computes as
+        // written.
+        let [ComputedFilter::Url(ComputedUrl::Fragment(ref target)), ComputedFilter::Blur(ref blur)] =
             computed[..]
         else {
             panic!("computed: {computed:?}");
         };
-        assert_eq!(target.as_str(), "https://a.test/p#f");
+        assert_eq!(target.as_str(), "#f");
         assert_eq!(blur.0.to_css_string(), "2px");
+    }
+}
+
+// VIPER-PATCH(servo-fragment-urls): the patch's fork test.
+#[cfg(test)]
+mod servo_fragment_urls_tests {
+    use super::parse_style_attribute;
+    use crate::context::QuirksMode;
+    use crate::properties::PropertyDeclaration;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use crate::values::computed::url::ComputedUrl;
+    use crate::values::computed::Filter as ComputedFilter;
+    use crate::values::specified::Filter;
+    use servo_arc::Arc;
+    use style_traits::ToCss;
+
+    /// The specified and computed `url()` of `filter: <css>` in a block
+    /// whose base is `base`.
+    fn filter_url(css: &str, base: &str) -> (bool, ComputedUrl) {
+        let url = UrlExtraData::from(::url::Url::parse(base).unwrap());
+        let css = format!("filter: {css}");
+        let block =
+            parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let PropertyDeclaration::Filter(ref filters) = block.declarations()[0] else {
+            panic!("{css}: {:?}", block.declarations());
+        };
+        let Filter::Url(ref specified) = filters.0[0] else {
+            panic!("{css}: {filters:?}");
+        };
+        let ComputedFilter::Url(computed) =
+            filters.0[0].to_computed_value_without_context().unwrap()
+        else {
+            panic!("{css}: {filters:?}");
+        };
+        (specified.is_fragment(), computed)
+    }
+
+    #[test]
+    fn servo_fragment_urls_keep_their_form() {
+        let (fragment, local) = filter_url("url(#f)", "https://a.test/s.css");
+        assert!(fragment);
+        assert_eq!(local, ComputedUrl::Fragment(Arc::new("#f".to_owned())));
+        assert_eq!(local.to_css_string(), "url(\"#f\")");
+        assert_eq!(local.url(), None);
+        // Whatever the sheets' bases.
+        assert_eq!(filter_url("url('#f')", "about:blank").1, local);
+        assert_ne!(filter_url("url(#g)", "https://a.test/s.css").1, local);
+        // Other URLs resolve as before.
+        for (css, base, serialized) in [
+            (
+                "url(a.svg#f)",
+                "https://a.test/s.css",
+                "url(\"https://a.test/a.svg#f\")",
+            ),
+            (
+                "url(' #f')",
+                "https://a.test/s.css",
+                "url(\"https://a.test/s.css#f\")",
+            ),
+            (
+                "url(https://b.test/#f)",
+                "about:blank",
+                "url(\"https://b.test/#f\")",
+            ),
+            ("url(a.svg)", "about:blank", "url(\"a.svg\")"),
+        ] {
+            let (fragment, computed) = filter_url(css, base);
+            assert!(!fragment, "{css}");
+            assert!(!matches!(computed, ComputedUrl::Fragment(_)), "{css}");
+            assert_eq!(computed.to_css_string(), serialized, "{css}");
+        }
     }
 }
 

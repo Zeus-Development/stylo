@@ -92,12 +92,13 @@ impl CssUrl {
     /// Returns true if this URL looks like a fragment.
     /// See https://drafts.csswg.org/css-values/#local-urls
     ///
-    /// Since Servo currently stores resolved URLs, this is hard to implement. We
-    /// either need to change servo to lazily resolve (like Gecko), or note this
-    /// information in the tokenizer.
+    /// VIPER-PATCH(servo-fragment-urls): from the original text, which
+    /// starts with `#` (CSS Values 4's local url flag), as the other build
+    /// answers.
     pub fn is_fragment(&self) -> bool {
-        error!("Can't determine whether the url is a fragment.");
-        false
+        self.original
+            .as_ref()
+            .is_some_and(|original| original.starts_with('#'))
     }
 
     /// Returns the resolved url if it was valid.
@@ -175,6 +176,11 @@ impl CssUrl {
     /// VIPER-PATCH(servo-filter-url): upstream's `to_computed_value`, which
     /// needs no context, so that a `filter`'s URL computes without one.
     pub fn to_computed_url(&self) -> ComputedUrl {
+        // VIPER-PATCH(servo-fragment-urls): a fragment-only URL keeps its
+        // original text.
+        if let Some(original) = self.original.as_ref().filter(|_| self.is_fragment()) {
+            return ComputedUrl::Fragment(original.clone());
+        }
         match self.resolved {
             Some(ref url) => ComputedUrl::Valid(url.clone()),
             None => match self.original {
@@ -203,7 +209,8 @@ impl ToComputedValue for SpecifiedUrl {
                 original: None,
                 resolved: Some(url.clone()),
             },
-            ComputedUrl::Invalid(ref url) => CssUrlData {
+            // VIPER-PATCH(servo-fragment-urls): the text, unresolved.
+            ComputedUrl::Invalid(ref url) | ComputedUrl::Fragment(ref url) => CssUrlData {
                 original: Some(url.clone()),
                 resolved: None,
             },
@@ -219,10 +226,18 @@ pub enum ComputedUrl {
     Invalid(#[ignore_malloc_size_of = "Arc"] Arc<String>),
     /// The resolved `url()` relative to the stylesheet URL.
     Valid(#[ignore_malloc_size_of = "Arc"] Arc<Url>),
+    /// VIPER-PATCH(servo-fragment-urls): a fragment-only `url()`, its
+    /// original text starting with `#`. CSS Values 4 section 4.5.1: it
+    /// names an element of the current document whatever the sheet's base,
+    /// and serializes as just the fragment, so it is kept unresolved, and
+    /// two with the same text are equal.
+    Fragment(#[ignore_malloc_size_of = "Arc"] Arc<String>),
 }
 
 impl ComputedUrl {
-    /// Returns the resolved url if it was valid.
+    /// Returns the resolved url if it was valid; none for a fragment-only
+    /// url (VIPER-PATCH(servo-fragment-urls)), which only the current
+    /// document resolves.
     pub fn url(&self) -> Option<&Arc<Url>> {
         match *self {
             ComputedUrl::Valid(ref url) => Some(url),
@@ -239,6 +254,8 @@ impl ToCss for ComputedUrl {
         let string = match *self {
             ComputedUrl::Valid(ref url) => url.as_str(),
             ComputedUrl::Invalid(ref invalid_string) => invalid_string,
+            // VIPER-PATCH(servo-fragment-urls): as written.
+            ComputedUrl::Fragment(ref fragment) => fragment,
         };
 
         dest.write_str("url(")?;
