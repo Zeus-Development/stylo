@@ -177,6 +177,7 @@ apart from the packaging files.
 | `unknown-properties` | `stylo`: `stylesheets/parse_options.rs`, `properties/properties.mako.rs` | Embedder control: an embedder had no way to leave a property the build parses unknown in one document, as `unknown_media_features` does for media features; `ParseOptions::unknown_properties` names them (default none), and a declaration or supports condition naming one, by its declared name, is dropped or false | `viper-style::cascade stylo_pin_e::unknown_properties_under_basic` | Candidate; draft to the owner first | Viper STYLO-PIN-E | 30 / 31 |
 | `math-font-size-specified` | `stylo`: `properties/cascade.rs` | Standard: MathML Core section 4.5 scales the inherited `font-size` by the change of `math-depth` only for a specified `font-size: math`, but the cascade rescaled any computed size carrying the `math` keyword, which `font-size: inherit` copies from the parent, so MathML Core Appendix A's accent (`font-size: inherit` under `math-depth: add(1)`) shrank; the cascade now rescales only when the declaration it applied for the element, after substitution, is `font-size: math` | `viper-style::cascade stylo_pin_f::math_font_size_specified_keeps_the_accent_size` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 29 / 42 |
 | `servo-fragment-urls` | `stylo`: `url/servo.rs`, `properties/declaration_block.rs` (its test, and `servo-filter-url`'s) | Standard: CSS Values 4 section 4.5.1's fragment-only `url()` names an element of the current document whatever the sheet's base and serializes as just the fragment, but servo builds kept only the URL resolved against the base and could not tell a fragment (`CssUrl::is_fragment` logged an error and answered false); `is_fragment` answers from the original text, which starts with `#`, and such a URL computes to the new `ComputedUrl::Fragment`, its text as written, so it serializes as specified and two with the same text are equal; other URLs compute and serialize as before | `viper-style::cascade stylo_pin_f::servo_fragment_urls_compute_as_written` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 24 / 75 |
+| `deprecated-system-colors` | `stylo`: `device/system_colors.rs` | Standard: CSS Color 4's deprecated system colours (section 6.2.1, now its Appendix A) compute to the colour that section names, and it maps `ThreeDHighlight` and `ThreeDLightShadow` to `ButtonBorder`, as it does the other 3-D border colours, while upstream's match, which `system-color-palette` moved unchanged into `SystemColors::get`, gave them `ButtonFace`; `get` now answers them with `ButtonBorder`, and every other deprecated colour keeps its mapping, which the section's table confirms | `viper-style::cascade system_colors::deprecated_system_colors_follow_css_color_4` | Candidate; draft to the owner first | Viper STYLO-PIN-G | 10 / 50 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -1852,7 +1853,8 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Change.** A new module, `device/system_colors.rs`: `SystemColors`, the
   nineteen values of one scheme as named `AbsoluteColor` fields, with
   `get`, which answers a deprecated colour (section 6.2.1) by the colour
-  that section maps it to, as upstream's match did; and
+  that section maps it to, as upstream's match did (two of its rows were
+  off, which `deprecated-system-colors` corrects); and
   `SystemColorPalette`, a `light` and a `dark` table, whose `Default` is
   upstream's values, moved from the match unchanged. The servo `Device`
   keeps one (`set_system_colors`, `system_colors`), the default unless the
@@ -2351,6 +2353,33 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `servo_filter_url_parses_and_computes`' expectation).
 - **Fork tests.** `servo_fragment_urls_keep_their_form`.
 - **Viper proof.** `stylo_pin_f::servo_fragment_urls_compute_as_written`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `deprecated-system-colors`
+
+- **Problem.** CSS Color 4's deprecated system colours (section 6.2.1, now
+  its Appendix A, "Deprecated CSS System Colors") must each compute to the
+  colour the section names. It maps `ThreeDHighlight` and
+  `ThreeDLightShadow`, like `ThreeDDarkShadow` and `ThreeDShadow`, to
+  `ButtonBorder`. Upstream's servo match gave those two `ButtonFace`, and
+  `system-color-palette` moved the match unchanged into
+  `SystemColors::get`, so an embedder's palette whose `ButtonFace` and
+  `ButtonBorder` differ resolved them to the wrong colour.
+- **Change.** `SystemColors::get` answers `ThreeDHighlight` and
+  `ThreeDLightShadow` with `button_border`. The other 21 deprecated
+  colours were checked against the section's table and keep their
+  mapping.
+- **Spots.** `style/device/system_colors.rs` (`get`, the expectation of
+  `system_color_palette_is_the_embedders_per_scheme` for the two colours,
+  and the new test).
+- **Fork tests.** `deprecated_system_colors_map_as_css_color_4_says`: each
+  of the 23 deprecated keywords, parsed by its name, takes the value of
+  the colour the section names, in a table whose entries are distinct.
+- **Viper proof.** `system_colors::deprecated_system_colors_follow_css_color_4`,
+  which computes each deprecated keyword through Viper's cascade under a
+  palette of distinct colours in both schemes.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
