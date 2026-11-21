@@ -70,18 +70,22 @@ impl SystemColors {
             C::Activetext => self.active_text,
             C::Linktext => self.link_text,
             C::Visitedtext => self.visited_text,
+            // VIPER-PATCH(deprecated-system-colors): CSS Color 4's deprecated
+            // system colours (section 6.2.1, now its Appendix A) map
+            // `ThreeDHighlight` and `ThreeDLightShadow` to `ButtonBorder`,
+            // as they do the other 3-D border colours; upstream's match
+            // gave them `ButtonFace`.
             C::Buttonborder
             | C::Activeborder
             | C::Inactiveborder
             | C::Threeddarkshadow
+            | C::Threedhighlight
+            | C::Threedlightshadow
             | C::Threedshadow
             | C::Windowframe => self.button_border,
-            C::Buttonface
-            | C::Buttonhighlight
-            | C::Buttonshadow
-            | C::Threedface
-            | C::Threedhighlight
-            | C::Threedlightshadow => self.button_face,
+            C::Buttonface | C::Buttonhighlight | C::Buttonshadow | C::Threedface => {
+                self.button_face
+            },
             C::Buttontext => self.button_text,
             C::Canvas
             | C::Activecaption
@@ -303,8 +307,9 @@ mod tests {
             (C::Buttonhighlight, 5),
             (C::Buttonshadow, 5),
             (C::Threedface, 5),
-            (C::Threedhighlight, 5),
-            (C::Threedlightshadow, 5),
+            // VIPER-PATCH(deprecated-system-colors): `ButtonBorder`'s.
+            (C::Threedhighlight, 4),
+            (C::Threedlightshadow, 4),
             (C::Activecaption, 7),
             (C::Appworkspace, 7),
             (C::Background, 7),
@@ -325,5 +330,51 @@ mod tests {
             assert_eq!(light, srgb(i, 0, 0), "{color:?} light");
             assert_eq!(dark, srgb(0, i, 0), "{color:?} dark");
         }
+    }
+
+    // VIPER-PATCH(deprecated-system-colors): the patch's fork test.
+    /// Each deprecated system colour (CSS Color 4 section 6.2.1, now its
+    /// Appendix A), by its keyword, and the colour it computes to there.
+    const DEPRECATED: [(&str, &str); 23] = [
+        ("ActiveBorder", "ButtonBorder"),
+        ("ActiveCaption", "Canvas"),
+        ("AppWorkspace", "Canvas"),
+        ("Background", "Canvas"),
+        ("ButtonHighlight", "ButtonFace"),
+        ("ButtonShadow", "ButtonFace"),
+        ("CaptionText", "CanvasText"),
+        ("InactiveBorder", "ButtonBorder"),
+        ("InactiveCaption", "Canvas"),
+        ("InactiveCaptionText", "GrayText"),
+        ("InfoBackground", "Canvas"),
+        ("InfoText", "CanvasText"),
+        ("Menu", "Canvas"),
+        ("MenuText", "CanvasText"),
+        ("Scrollbar", "Canvas"),
+        ("ThreeDDarkShadow", "ButtonBorder"),
+        ("ThreeDFace", "ButtonFace"),
+        ("ThreeDHighlight", "ButtonBorder"),
+        ("ThreeDLightShadow", "ButtonBorder"),
+        ("ThreeDShadow", "ButtonBorder"),
+        ("Window", "Canvas"),
+        ("WindowFrame", "ButtonBorder"),
+        ("WindowText", "CanvasText"),
+    ];
+
+    /// Every deprecated system colour takes the value of the colour CSS
+    /// Color 4 maps it to, and of no other: each table entry is distinct.
+    #[test]
+    fn deprecated_system_colors_map_as_css_color_4_says() {
+        let colors = numbered(|i| srgb(i, 0, 0));
+        let keyword = |name: &str| SystemColor::from_ident(name).expect(name);
+        for (deprecated, maps_to) in DEPRECATED {
+            let value = colors.get(keyword(deprecated));
+            assert_eq!(value, colors.get(keyword(maps_to)), "{deprecated}");
+        }
+        // The 3-D border colours are `ButtonBorder`'s, not `ButtonFace`'s.
+        let button_border = colors.button_border;
+        assert_ne!(button_border, colors.button_face);
+        assert_eq!(colors.get(keyword("ThreeDHighlight")), button_border);
+        assert_eq!(colors.get(keyword("ThreeDLightShadow")), button_border);
     }
 }
