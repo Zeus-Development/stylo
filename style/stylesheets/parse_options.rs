@@ -238,12 +238,16 @@ pub trait SelectorNames: Sync {
     /// servo parses.
     fn refuses(&self, name: &str) -> bool;
 
+    // VIPER-PATCH(selectors-element-backed-after): asked after an
+    // element-backed pseudo-element too.
     /// Whether the simple selector `simple` (a pseudo-class, or a
-    /// tree-structural one such as `:only-child`) may follow `element`,
-    /// which is not element-backed, in its compound; `:is()`, `:where()`
-    /// and `:not()` are asked about what they hold instead. `None`:
-    /// upstream's rule, a user-action pseudo-class after a pseudo-element
-    /// that accepts state pseudo-classes.
+    /// tree-structural one such as `:only-child`) may follow `element` in
+    /// its compound; `:is()`, `:where()` and `:not()` are asked about what
+    /// they hold instead. `None`: upstream's rule, a user-action
+    /// pseudo-class after a pseudo-element that accepts state
+    /// pseudo-classes, and after an element-backed one (`::details-content`)
+    /// CSS's rule, any pseudo-class that is not tree-structural
+    /// (`selectors::parser::valid_after_element_backed`).
     fn valid_after(
         &self,
         element: &PseudoElement,
@@ -777,6 +781,12 @@ mod selector_names_tests {
             element: &PseudoElement,
             simple: &Component<SelectorImpl>,
         ) -> Option<bool> {
+            // VIPER-PATCH(selectors-element-backed-after): `:focus` alone
+            // after `::details-content`.
+            if *element == PseudoElement::DetailsContent {
+                let focus = Component::NonTSPseudoClass(NonTSPseudoClass::Focus);
+                return Some(*simple == focus);
+            }
             let PseudoElement::Unmatched(name) = element else {
                 return None;
             };
@@ -868,6 +878,28 @@ mod selector_names_tests {
 
     fn author(selectors: &str) -> bool {
         parse(Origin::Author, with_names(), selectors).is_some()
+    }
+
+    // VIPER-PATCH(selectors-element-backed-after): the hook decides what
+    // follows an element-backed pseudo-element, and without an answer CSS's
+    // rule does.
+    #[test]
+    fn selector_names_hook_decides_after_element_backed() {
+        let none = |selectors| parse(Origin::Author, Default::default(), selectors).is_some();
+        let no_answer = ParseOptions {
+            selector_names: Some(&NO_TEST_NAMES),
+            ..Default::default()
+        };
+        for selectors in ["details::details-content:hover", "::details-content:open:focus"] {
+            assert!(none(selectors), "{selectors}");
+            assert!(parse(Origin::Author, no_answer, selectors).is_some(), "{selectors}");
+        }
+        assert!(!none("::details-content:first-child"));
+        assert!(author("::details-content:focus"));
+        assert!(author("::details-content:not(:focus)"));
+        for selectors in ["::details-content:hover", "::details-content:open"] {
+            assert!(!author(selectors), "{selectors}");
+        }
     }
 
     #[test]
