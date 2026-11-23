@@ -986,7 +986,8 @@ fn need_to_unconditionally_recascade_for_reset_change(
     //
     // Similarly, we could potentially do better, but this really
     // seems not common enough to care about.
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(servo-justify-items-legacy): in every build, as the
+    // adjuster's step.
     {
         use crate::values::specified::align::AlignFlags;
 

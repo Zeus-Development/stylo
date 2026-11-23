@@ -844,7 +844,11 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
     /// to comply with:
     ///
     /// <https://drafts.csswg.org/css-align/#valdef-justify-items-legacy>
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(servo-justify-items-legacy): CSS Box Alignment 3 section
+    // 7.1 computes a bare `legacy` to the inherited value when that includes
+    // `legacy`; upstream compiled this step for its other build only, so a
+    // servo build computed it to `normal` and a grid's `legacy center` never
+    // reached its descendants.
     fn adjust_for_justify_items(&mut self) {
         use crate::values::specified::align;
         let justify_items = self.style.get_position().clone_justify_items();
@@ -862,9 +866,19 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
             return;
         }
 
+        #[cfg(feature = "gecko")]
         self.style
             .mutate_position()
             .set_computed_justify_items(parent_justify_items.computed);
+        // VIPER-PATCH(servo-justify-items-legacy): servo's struct holds the
+        // computed value whole, the specified `legacy` kept.
+        #[cfg(feature = "servo")]
+        self.style.mutate_position().set_justify_items(
+            crate::values::computed::JustifyItems {
+                computed: parent_justify_items.computed,
+                ..justify_items
+            },
+        );
     }
 
     /// If '-webkit-appearance' is 'menulist' on a <select> element then
@@ -1209,8 +1223,9 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         {
             self.adjust_for_contain();
             self.adjust_for_contain_intrinsic_size();
-            self.adjust_for_justify_items();
         }
+        // VIPER-PATCH(servo-justify-items-legacy): in every build.
+        self.adjust_for_justify_items();
         self.adjust_for_table_text_align();
         self.adjust_for_writing_mode(layout_parent_style);
         #[cfg(feature = "gecko")]
