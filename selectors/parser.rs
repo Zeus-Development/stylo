@@ -379,31 +379,21 @@ pub trait Parser<'i> {
     // accepts state pseudo-classes. The hook is on the parser because the
     // pseudo-element trait has no `SelectorImpl` to name the pseudo-classes.
     // https://drafts.csswg.org/selectors-4/#pseudo-element-states
-    /// Whether the simple selector `simple` may follow `pseudo_element`,
-    /// which is not element-backed, in its compound. `:is()`, `:where()`
-    /// and `:not()` never come here: the parser asks about what they
-    /// contain instead, forgivingly for the first two. The default is
-    /// upstream's rule: a user-action pseudo-class after a pseudo-element
-    /// that accepts state pseudo-classes and is not in a pseudo-element
-    /// tree; in such a tree, `:only-child` after one that accepts state
-    /// pseudo-classes, and the functional tree-structural pseudo-classes.
+    /// Whether the simple selector `simple` may follow `pseudo_element` in
+    /// its compound. `:is()`, `:where()` and `:not()` never come here: the
+    /// parser asks about what they contain instead, forgivingly for the
+    /// first two. The default is upstream's rule: a user-action
+    /// pseudo-class after a pseudo-element that accepts state
+    /// pseudo-classes and is not in a pseudo-element tree; in such a tree,
+    /// `:only-child` after one that accepts state pseudo-classes, and the
+    /// functional tree-structural pseudo-classes; after an element-backed
+    /// one, [`valid_after_element_backed`].
     fn valid_after_pseudo_element(
         &self,
         pseudo_element: &<Self::Impl as SelectorImpl>::PseudoElement,
         simple: &Component<Self::Impl>,
     ) -> bool {
-        let stateful = pseudo_element.accepts_state_pseudo_classes();
-        let in_tree = pseudo_element.is_in_pseudo_element_tree();
-        match simple {
-            Component::NonTSPseudoClass(class) => {
-                stateful && !in_tree && class.is_user_action_state()
-            },
-            Component::Nth(nth) if !nth.is_function => {
-                stateful && in_tree && *nth == NthSelectorData::only(false)
-            },
-            Component::Nth(..) | Component::NthOf(..) | Component::Host(Some(..)) => in_tree,
-            _ => false,
-        }
+        default_valid_after_pseudo_element(pseudo_element, simple)
     }
 
     /// This function can return an "Err" pseudo-element in order to support CSS2.1
@@ -3561,10 +3551,11 @@ where
                 }
                 // VIPER-PATCH(selectors-after-pseudo-element-hook): the parser
                 // decides what follows this one (`::slotted()` keeps its
-                // own rule; element-backed ones that of `::part()`).
-                if !p.parses_as_element_backed()
-                    && !state.intersects(SelectorParsingState::AFTER_SLOTTED)
-                {
+                // own rule).
+                // VIPER-PATCH(selectors-element-backed-after): element-backed
+                // ones too, the parser's default being CSS's rule for them
+                // (`valid_after_element_backed`).
+                if !state.intersects(SelectorParsingState::AFTER_SLOTTED) {
                     state.insert(SelectorParsingState::CHECK_AFTER_PSEUDO_ELEMENT);
                     restricting = Some(p.clone());
                 }
@@ -3574,6 +3565,50 @@ where
         }
     }
     Ok(empty)
+}
+
+// VIPER-PATCH(selectors-element-backed-after): CSS Pseudo-Elements 4
+// section 5 allows every pseudo-class after an element-backed pseudo-element
+// "just as if the pseudo-element were a type selector", though the
+// structural ones, `:has()`, `:scope` and `:host` never match there; CSS
+// Shadow Parts 1 section 4.2 says the same of `::part()`, which upstream
+// follows by refusing the tree-structural ones. Upstream never asked the
+// parser after an element-backed pseudo-element, and refused every
+// pseudo-class after one that does not accept state pseudo-classes
+// (`::details-content`), so an embedder could not allow `:open` or `:hover`
+// there.
+// https://drafts.csswg.org/css-pseudo-4/#element-backed
+// https://drafts.csswg.org/css-shadow-parts/#part
+/// Whether `simple` may follow an element-backed pseudo-element by CSS's
+/// rule, as after `::part()`: any pseudo-class that is not
+/// tree-structural (the `NonTSPseudoClass` ones), and nothing else.
+pub fn valid_after_element_backed<Impl: SelectorImpl>(simple: &Component<Impl>) -> bool {
+    matches!(simple, Component::NonTSPseudoClass(..))
+}
+
+// VIPER-PATCH(selectors-after-pseudo-element-hook): the default of
+// `Parser::valid_after_pseudo_element`, a function so that a parser
+// answering some pseudo-elements itself can keep it for the others.
+/// Whether `simple` may follow `pseudo_element` in its compound by the
+/// rule `Parser::valid_after_pseudo_element` documents as its default.
+pub fn default_valid_after_pseudo_element<Impl: SelectorImpl>(
+    pseudo_element: &Impl::PseudoElement,
+    simple: &Component<Impl>,
+) -> bool {
+    // VIPER-PATCH(selectors-element-backed-after): CSS's rule.
+    if pseudo_element.parses_as_element_backed() {
+        return valid_after_element_backed(simple);
+    }
+    let stateful = pseudo_element.accepts_state_pseudo_classes();
+    let in_tree = pseudo_element.is_in_pseudo_element_tree();
+    match simple {
+        Component::NonTSPseudoClass(class) => stateful && !in_tree && class.is_user_action_state(),
+        Component::Nth(nth) if !nth.is_function => {
+            stateful && in_tree && *nth == NthSelectorData::only(false)
+        },
+        Component::Nth(..) | Component::NthOf(..) | Component::Host(Some(..)) => in_tree,
+        _ => false,
+    }
 }
 
 // VIPER-PATCH(selectors-after-pseudo-element-hook): the parser's check of
@@ -4168,6 +4203,9 @@ pub mod tests {
         active_only_after_pseudo_element: bool,
         // VIPER-PATCH(selectors-host-context): refuse `:host-context()`.
         refuse_host_context: bool,
+        // VIPER-PATCH(selectors-element-backed-after): refuse everything
+        // after an element-backed pseudo-element.
+        refuse_after_element_backed: bool,
     }
 
     impl DummyParser {
@@ -4289,6 +4327,19 @@ pub mod tests {
         // VIPER-PATCH(selectors-attr-flag-hook): the test parser's switch.
         fn parse_case_sensitive_attribute_flag(&self) -> bool {
             !self.refuse_case_sensitive_flag
+        }
+
+        // VIPER-PATCH(selectors-element-backed-after): the test parser's switch.
+        fn valid_after_pseudo_element(
+            &self,
+            pseudo_element: &PseudoElement,
+            simple: &Component<DummySelectorImpl>,
+        ) -> bool {
+            let backed = parser::PseudoElement::parses_as_element_backed(pseudo_element);
+            if self.refuse_after_element_backed && backed {
+                return false;
+            }
+            default_valid_after_pseudo_element(pseudo_element, simple)
         }
 
         fn parse_non_ts_pseudo_class(
@@ -5349,6 +5400,47 @@ pub mod tests {
             inner.slice()[1].iter().next(),
             Some(Component::Invalid(..))
         ));
+    }
+
+    // VIPER-PATCH(selectors-element-backed-after): after an element-backed
+    // pseudo-element, the parser is asked; its default is CSS's rule, any
+    // pseudo-class that is not tree-structural, whether or not the
+    // pseudo-element accepts state pseudo-classes.
+    #[test]
+    fn after_element_backed_pseudo_element_asks_the_parser() {
+        for input in [
+            "::details-content:hover",
+            "::details-content:hover:active",
+            "::details-content:not(:hover)",
+            "::details-content:is(:hover, :first-child)",
+            "::details-content::before",
+        ] {
+            assert!(parse(input).is_ok(), "{input}");
+        }
+        for input in [
+            "::details-content:first-child",
+            "::details-content:nth-child(1)",
+            "::details-content:not(:first-child)",
+            "::details-content:host",
+        ] {
+            assert!(parse(input).is_err(), "{input}");
+        }
+        // The parser's own names after a pseudo-element apply here too.
+        let parser = DummyParser {
+            active_only_after_pseudo_element: true,
+            ..Default::default()
+        };
+        assert!(parse_ns("::details-content:active", &parser).is_ok());
+        // A parser that refuses what follows is followed.
+        let parser = DummyParser {
+            refuse_after_element_backed: true,
+            ..Default::default()
+        };
+        for input in ["::details-content:hover", "::details-content:not(:hover)"] {
+            assert!(parse_ns(input, &parser).is_err(), "{input}");
+        }
+        assert!(parse_ns("::details-content::before", &parser).is_ok());
+        assert!(parse_ns("::before:hover", &parser).is_ok());
     }
 
     // VIPER-PATCH(selectors-after-pseudo-element-hook): a name the parser accepts

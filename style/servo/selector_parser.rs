@@ -1118,7 +1118,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     // VIPER-PATCH(selector-names-hook): the embedder's answer, and without
     // a hook or an answer upstream's rule: a user-action pseudo-class after
     // a pseudo-element that accepts state pseudo-classes (servo's are in
-    // no pseudo-element tree).
+    // no pseudo-element tree), and CSS's rule after an element-backed one.
     fn valid_after_pseudo_element(
         &self,
         pseudo_element: &PseudoElement,
@@ -1130,6 +1130,11 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             .and_then(|names| names.valid_after(pseudo_element, simple));
         answer.unwrap_or_else(|| {
             use selectors::parser::{NonTSPseudoClass as _, PseudoElement as _};
+            // VIPER-PATCH(selectors-element-backed-after): CSS's rule after an
+            // element-backed pseudo-element when the names do not answer.
+            if pseudo_element.parses_as_element_backed() {
+                return selectors::parser::valid_after_element_backed(simple);
+            }
             matches!(simple, selectors::parser::Component::NonTSPseudoClass(class)
             if pseudo_element.accepts_state_pseudo_classes() && class.is_user_action_state())
         })
