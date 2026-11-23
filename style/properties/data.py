@@ -1318,7 +1318,7 @@ class PropertyRestrictions:
     # https://drafts.csswg.org/css-lists-3/#marker-properties
     @staticmethod
     def marker(data):
-        return set(
+        props = set(
             [
                 "color",
                 "content",
@@ -1347,6 +1347,20 @@ class PropertyRestrictions:
             + PropertyRestrictions.spec(data, "css-animations")
             + PropertyRestrictions.spec(data, "css-transitions")
         )
+        # VIPER-PATCH(servo-marker-placeholder-properties): CSS Lists 3
+        # section 3.1.1 lets a marker's rules set the inherited properties
+        # that apply to text, "these will inherit to and take effect on its
+        # text contents" (letter-spacing and word-spacing among its
+        # examples); upstream's set leaves most of CSS Text's out, so their
+        # declarations were dropped. Servo builds add the inherited
+        # properties of CSS Text and CSS Text Decoration.
+        if data.engine == "servo":
+            props |= set(
+                p.name
+                for p in data.longhands
+                if p.style_struct.inherited and "css-text" in p.spec
+            )
+        return props
 
     # https://www.w3.org/TR/webvtt1/#the-cue-pseudo-element
     @staticmethod

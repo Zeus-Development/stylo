@@ -486,7 +486,11 @@ impl PseudoElement {
             PseudoElement::Marker if crate::pref!("layout.css.marker.restricted") => {
                 PropertyFlags::APPLIES_TO_MARKER
             },
-            PseudoElement::Placeholder => PropertyFlags::APPLIES_TO_PLACEHOLDER,
+            // VIPER-PATCH(servo-marker-placeholder-properties): no restriction
+            // for `::placeholder`: CSS Pseudo-Elements 4 section 4.3 names the
+            // properties that apply to it, and CSS Cascade 5 section 4.4 gives
+            // every other property a computed value all the same, where the
+            // restriction dropped their declarations.
             _ => return None,
         })
     }
@@ -1785,5 +1789,30 @@ mod registered_pseudo_elements_tests {
         map.clear();
         assert_eq!(map.iter().count(), 0);
         assert_eq!(entry(&map, "-x-a", None), None);
+    }
+}
+
+// VIPER-PATCH(servo-marker-placeholder-properties): the patch's fork test.
+#[cfg(test)]
+mod servo_marker_placeholder_properties_tests {
+    use super::PseudoElement;
+    use crate::properties::{LonghandId, PropertyFlags};
+
+    #[test]
+    fn markers_take_inherited_text_properties_and_placeholders_all() {
+        let marker = PropertyFlags::APPLIES_TO_MARKER;
+        for id in [
+            LonghandId::LetterSpacing,
+            LonghandId::WordSpacing,
+            LonghandId::TextTransform,
+            LonghandId::Color,
+            LonghandId::FontSize,
+        ] {
+            assert!(id.flags().contains(marker), "{id:?}");
+        }
+        for id in [LonghandId::MarginLeft, LonghandId::Display, LonghandId::TextDecorationLine] {
+            assert!(!id.flags().contains(marker), "{id:?}");
+        }
+        assert_eq!(PseudoElement::Placeholder.property_restriction(), None);
     }
 }
