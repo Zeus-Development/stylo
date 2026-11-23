@@ -7,8 +7,8 @@ COUNTED_UNKNOWN_PROPERTIES = [
     "speak",
     "text-size-adjust",
     "-webkit-user-drag",
-    "orphans",
-    "widows",
+    # VIPER-PATCH(orphans-widows-longhands): orphans and widows are
+    # longhands of servo builds, so not counted as unknown.
     "-webkit-user-modify",
     "-webkit-margin-before",
     "-webkit-margin-after",
