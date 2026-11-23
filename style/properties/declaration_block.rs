@@ -2375,3 +2375,22 @@ mod servo_standard_keywords_tests {
         assert_eq!(declared("font-variant-caps", "titling"), None);
     }
 }
+
+// VIPER-PATCH(servo-justify-items-legacy): the patch's fork test; the
+// fork's tests build no element, so the adjuster is tested in Viper.
+#[cfg(test)]
+mod servo_justify_items_legacy_tests {
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::values::computed::JustifyItems;
+    use crate::values::specified::align::AlignFlags;
+
+    #[test]
+    fn justify_items_legacy_parses_and_starts_normal() {
+        for value in ["legacy", "legacy center", "legacy left", "legacy right"] {
+            assert_eq!(declared("justify-items", value).as_deref(), Some(value));
+        }
+        let initial = JustifyItems::legacy();
+        assert!(initial.specified.contains(AlignFlags::LEGACY));
+        assert!(!initial.computed.contains(AlignFlags::LEGACY));
+    }
+}
