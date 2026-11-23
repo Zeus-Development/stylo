@@ -110,6 +110,9 @@ impl<T: Zero> Zero for NonNegative<T> {
     ToCss,
     ToResolvedValue,
     ToShmem,
+    // VIPER-PATCH(orphans-widows-longhands): the typed value every
+    // longhand's value has, which `orphans` and `widows` need.
+    ToTyped,
 )]
 #[repr(transparent)]
 pub struct GreaterThanOrEqualToOne<T>(pub T);
