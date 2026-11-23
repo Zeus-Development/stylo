@@ -781,11 +781,11 @@ mod selector_names_tests {
             element: &PseudoElement,
             simple: &Component<SelectorImpl>,
         ) -> Option<bool> {
-            // VIPER-PATCH(selectors-element-backed-after): `:focus` alone
+            // VIPER-PATCH(selectors-element-backed-after): `:hover` alone
             // after `::details-content`.
             if *element == PseudoElement::DetailsContent {
-                let focus = Component::NonTSPseudoClass(NonTSPseudoClass::Focus);
-                return Some(*simple == focus);
+                let hover = Component::NonTSPseudoClass(NonTSPseudoClass::Hover);
+                return Some(*simple == hover);
             }
             let PseudoElement::Unmatched(name) = element else {
                 return None;
@@ -901,9 +901,9 @@ mod selector_names_tests {
             );
         }
         assert!(!none("::details-content:first-child"));
-        assert!(author("::details-content:focus"));
-        assert!(author("::details-content:not(:focus)"));
-        for selectors in ["::details-content:hover", "::details-content:open"] {
+        assert!(author("::details-content:hover"));
+        assert!(author("::details-content:not(:hover)"));
+        for selectors in ["::details-content:active", "::details-content:open"] {
             assert!(!author(selectors), "{selectors}");
         }
     }
