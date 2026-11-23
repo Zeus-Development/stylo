@@ -3750,7 +3750,10 @@ animation_type = "discrete"
 affects = "paint"
 servo_restyle_damage = "repaint"
 vector = {}
-keyword = { values = ["scroll", "fixed"], extra_gecko_values = ["local"], gecko_enum_prefix = "StyleImageLayerAttachment" }
+# VIPER-PATCH(servo-standard-keywords): CSS Backgrounds 3 section 2.5's
+# <attachment> is scroll, fixed or local; local was an extra value of
+# upstream's other build, so servo builds dropped a declaration holding it.
+keyword = { values = ["scroll", "fixed", "local"], gecko_enum_prefix = "StyleImageLayerAttachment" }
 
 [background-clip]
 type = "BackgroundClip"
@@ -3885,8 +3888,10 @@ gecko_ffi_name = "mFont.variantCaps"
 servo_restyle_damage = "rebuild_box"
 
 [font-variant-caps.keyword]
-values = ["normal", "small-caps"]
-extra_gecko_values = ["all-small-caps", "petite-caps", "all-petite-caps", "unicase", "titling-caps"]
+# VIPER-PATCH(servo-standard-keywords): CSS Fonts 4 section 6.6 defines all
+# seven values; the five after small-caps were extra values of upstream's
+# other build, so servo builds dropped a declaration holding one.
+values = ["normal", "small-caps", "all-small-caps", "petite-caps", "all-petite-caps", "unicase", "titling-caps"]
 gecko_constant_prefix = "NS_FONT_VARIANT_CAPS"
 
 [font-kerning]

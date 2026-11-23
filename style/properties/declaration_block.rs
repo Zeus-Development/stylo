@@ -2350,3 +2350,28 @@ mod orphans_widows_longhands_tests {
         assert!(LonghandId::Widows.inherited());
     }
 }
+
+// VIPER-PATCH(servo-standard-keywords): the patch's fork test.
+#[cfg(test)]
+mod servo_standard_keywords_tests {
+    use super::servo_scrollbars_margin_trim_tests::declared;
+
+    #[test]
+    fn servo_standard_keywords_parse() {
+        for (name, value) in [
+            ("background-attachment", "local"),
+            ("background-attachment", "fixed, local"),
+            ("font-variant-caps", "all-small-caps"),
+            ("font-variant-caps", "petite-caps"),
+            ("font-variant-caps", "all-petite-caps"),
+            ("font-variant-caps", "unicase"),
+            ("font-variant-caps", "titling-caps"),
+            ("writing-mode", "sideways-rl"),
+            ("writing-mode", "sideways-lr"),
+        ] {
+            assert_eq!(declared(name, value).as_deref(), Some(value), "{name}");
+        }
+        assert_eq!(declared("background-attachment", "locale"), None);
+        assert_eq!(declared("font-variant-caps", "titling"), None);
+    }
+}
