@@ -27,6 +27,9 @@ use crate::selector_parser::{PseudoElement, RestyleDamage};
 use crate::shared_lock::Locked;
 use crate::style_resolver::StyleResolverForElement;
 use crate::style_resolver::{PseudoElementResolution, ResolvedElementStyles};
+// VIPER-PATCH(animation-underlying-value)
+#[cfg(feature = "servo")]
+use crate::style_resolver::PrimaryStyle;
 use crate::stylesheets::layer_rule::LayerOrder;
 use crate::stylist::RuleInclusion;
 use crate::traversal_flags::TraversalFlags;
@@ -235,15 +238,22 @@ trait PrivateMatchMethods: TElement {
 
     // VIPER-PATCH(animation-underlying-value)
     /// `primary_style` cascaded without its animations and transitions
-    /// levels: the underlying values of a CSS animation's keyframes.
+    /// levels: the underlying values of a CSS animation's keyframes. A
+    /// pseudo-element's (`pseudo`, with its originating element's primary
+    /// style) inherits from that element, as its own style does.
     #[cfg(feature = "servo")]
     fn underlying_style(
         &self,
         context: &mut StyleContext<Self>,
         primary_style: &Arc<ComputedValues>,
+        pseudo: Option<(&PseudoElement, &PrimaryStyle)>,
     ) -> Arc<ComputedValues> {
         let rules = primary_style.rules();
-        let without = context.shared.stylist.rule_tree().remove_animation_rules(rules);
+        let without = context
+            .shared
+            .stylist
+            .rule_tree()
+            .remove_animation_rules(rules);
         if without == *rules {
             return primary_style.clone();
         }
@@ -253,14 +263,28 @@ trait PrivateMatchMethods: TElement {
             flags: primary_style.flags.for_cascade_inputs(),
             included_cascade_flags: RuleCascadeFlags::empty(),
         };
-        StyleResolverForElement::new(
+        let mut resolver = StyleResolverForElement::new(
             *self,
             context,
             RuleInclusion::All,
             PseudoElementResolution::IfApplicable,
-        )
-        .cascade_style_and_visited_with_default_parents(inputs)
-        .0
+        );
+        match pseudo {
+            Some((pseudo, originating)) => {
+                resolver
+                    .cascade_style_and_visited_for_pseudo_with_default_parents(
+                        inputs,
+                        pseudo,
+                        originating,
+                    )
+                    .0
+            },
+            None => {
+                resolver
+                    .cascade_style_and_visited_with_default_parents(inputs)
+                    .0
+            },
+        }
     }
 
     fn needs_animations_update(
@@ -585,6 +609,7 @@ trait PrivateMatchMethods: TElement {
             &mut old_styles.primary,
             new_resolved_styles.primary_style_mut(),
             /* pseudo_element = */ None,
+            /* originating = */ None, // VIPER-PATCH(animation-underlying-value)
         );
 
         // If we have modified animation or transitions, we recascade style for this node.
@@ -672,6 +697,9 @@ trait PrivateMatchMethods: TElement {
             &old_style,
             &style,
             Some(pseudo_element.clone()),
+            // VIPER-PATCH(animation-underlying-value): the pseudo-element's
+            // underlying style inherits from its originating element.
+            Some(&new_resolved_styles.primary),
         );
 
         let declarations = context.shared.animations.get_all_declarations(
@@ -734,6 +762,9 @@ trait PrivateMatchMethods: TElement {
         old_values: &Option<Arc<ComputedValues>>,
         new_values: &Arc<ComputedValues>,
         pseudo_element: Option<PseudoElement>,
+        // VIPER-PATCH(animation-underlying-value): for a pseudo-element,
+        // its originating element's new primary style.
+        originating: Option<&PrimaryStyle>,
     ) -> bool {
         use crate::animation::{AnimationSetKey, AnimationState};
 
@@ -766,7 +797,8 @@ trait PrivateMatchMethods: TElement {
         let underlying_style = if needs_animations_update
             || self.has_css_animations(context.shared, pseudo_element.clone())
         {
-            Some(self.underlying_style(context, new_values))
+            let parent = pseudo_element.as_ref().zip(originating);
+            Some(self.underlying_style(context, new_values, parent))
         } else {
             None
         };
