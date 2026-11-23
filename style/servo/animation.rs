@@ -286,6 +286,12 @@ enum AnimationValueOrReference {
     AnimationValue(AnimationValue),
     /// This keyframe does not declare the property.
     NotDefinedHere(PropertyDeclarationOffsets),
+    // VIPER-PATCH(animation-underlying-value): an implicit 0% or 100%
+    // keyframe's value.
+    /// The property's underlying value, filled in when the animation is
+    /// sampled (CSS Animations 1's implicit keyframes, Web Animations 1's
+    /// underlying value).
+    Underlying,
 }
 
 /// A single computed keyframe for a CSS Animation.
@@ -354,7 +360,9 @@ struct KeyframeDataForProperty<'a> {
     /// at what point in an animation iteration this step is.
     start_percentage: f64,
 
-    value: &'a AnimationValue,
+    // VIPER-PATCH(animation-underlying-value): owned, since an underlying
+    // value is made when the animation is sampled.
+    value: AnimationValue,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -383,13 +391,20 @@ impl Animation {
         property_index: usize,
         keyframe_index: usize,
         direction: Direction,
+        map: &AnimationValueMap,
     ) -> Option<KeyframeDataForProperty<'_>> {
         let relevant_keyframe = &self.computed_steps[keyframe_index];
         let parameters = match &relevant_keyframe.values[property_index] {
             AnimationValueOrReference::AnimationValue(animation_value) => KeyframeDataForProperty {
                 timing_function: &relevant_keyframe.timing_function,
                 start_percentage: relevant_keyframe.start_percentage,
-                value: animation_value,
+                value: animation_value.clone(),
+            },
+            // VIPER-PATCH(animation-underlying-value)
+            AnimationValueOrReference::Underlying => KeyframeDataForProperty {
+                timing_function: &relevant_keyframe.timing_function,
+                start_percentage: relevant_keyframe.start_percentage,
+                value: self.underlying_value(property_index, map),
             },
             AnimationValueOrReference::NotDefinedHere(offsets) => {
                 let next_relevant_keyframe_index = match direction {
@@ -397,16 +412,24 @@ impl Animation {
                     Direction::Backward => offsets.preceding_declaration,
                 };
                 let next_relevant_keyframe = &self.computed_steps[next_relevant_keyframe_index];
-                let AnimationValueOrReference::AnimationValue(animation_value) =
-                    &next_relevant_keyframe.values[property_index]
-                else {
-                    panic!("Referenced keyframe does not set property");
+                // VIPER-PATCH(animation-underlying-value): the referenced
+                // keyframe may be an implicit first or last one.
+                let value = match &next_relevant_keyframe.values[property_index] {
+                    AnimationValueOrReference::AnimationValue(animation_value) => {
+                        animation_value.clone()
+                    },
+                    AnimationValueOrReference::Underlying => {
+                        self.underlying_value(property_index, map)
+                    },
+                    AnimationValueOrReference::NotDefinedHere(_) => {
+                        panic!("Referenced keyframe does not set property")
+                    },
                 };
 
                 KeyframeDataForProperty {
                     timing_function: &next_relevant_keyframe.timing_function,
                     start_percentage: next_relevant_keyframe.start_percentage,
-                    value: &animation_value,
+                    value,
                 }
             },
         };
@@ -429,13 +452,9 @@ impl ComputedKeyframe {
     where
         E: TElement,
     {
-        let animation_values_from_style: Vec<AnimationValue> = animating_properties
-            .iter()
-            .map(|property| {
-                AnimationValue::from_computed_values(property, &**base_style)
-                    .expect("Unexpected non-animatable property.")
-            })
-            .collect();
+        // VIPER-PATCH(animation-underlying-value): `base_style` is the
+        // element's style without animations and transitions.
+        let animation_values_from_style = underlying_values(&animating_properties, base_style);
 
         let intermediate_steps =
             IntermediateComputedKeyframe::generate_for_keyframes(animation, context, base_style);
@@ -487,10 +506,13 @@ impl ComputedKeyframe {
                         // > using the computed values of the properties being animated. If a 100% or to keyframe is
                         // > not specified, then the user agent constructs a 100% keyframe using the computed values
                         // > of the properties being animated.
+                        //
+                        // VIPER-PATCH(animation-underlying-value): those
+                        // values are the property's underlying value when the
+                        // animation is sampled, so that a restyle never takes
+                        // the animation's own value for them.
                         if step_index == 0 || remaining_steps.as_slice().is_empty() {
-                            return AnimationValueOrReference::AnimationValue(
-                                animation_values_from_style[property_index].clone(),
-                            );
+                            return AnimationValueOrReference::Underlying;
                         }
 
                         // This animating property is not defined on this keyframe - we should act as if this keyframe
@@ -540,16 +562,24 @@ impl ComputedKeyframe {
         // The first and last steps (at 0% and 100% respectively) should declare all animating properties.
         // If they don't then we should have filled the missing properties with the computed values.
         debug_assert!(computed_steps.first().is_none_or(|first_step| {
-            first_step
-                .values
-                .iter()
-                .all(|value| matches!(value, AnimationValueOrReference::AnimationValue(_)))
+            first_step.values.iter().all(|value| {
+                matches!(
+                    value,
+                    // VIPER-PATCH(animation-underlying-value)
+                    AnimationValueOrReference::AnimationValue(_)
+                        | AnimationValueOrReference::Underlying
+                )
+            })
         }));
         debug_assert!(computed_steps.last().is_none_or(|first_step| {
-            first_step
-                .values
-                .iter()
-                .all(|value| matches!(value, AnimationValueOrReference::AnimationValue(_)))
+            first_step.values.iter().all(|value| {
+                matches!(
+                    value,
+                    // VIPER-PATCH(animation-underlying-value)
+                    AnimationValueOrReference::AnimationValue(_)
+                        | AnimationValueOrReference::Underlying
+                )
+            })
         }));
 
         computed_steps.into_boxed_slice()
@@ -605,9 +635,29 @@ pub struct Animation {
     /// Whether or not this animation is new and or has already been tracked
     /// by the script thread.
     pub is_new: bool,
+
+    // VIPER-PATCH(animation-underlying-value)
+    /// The properties this animation animates, in the order of each
+    /// keyframe's values.
+    animating_properties: PropertyDeclarationIdSet,
+
+    // VIPER-PATCH(animation-underlying-value)
+    /// Each animating property's value without animations and transitions,
+    /// the underlying value of the implicit keyframes when no earlier
+    /// animation sets it; refreshed on each restyle of the element.
+    underlying_values: Box<[AnimationValue]>,
 }
 
 impl Animation {
+    // VIPER-PATCH(animation-underlying-value)
+    /// The underlying value of the property at `property_index`: the result
+    /// of the earlier animations on it in composite order (`map`), else the
+    /// element's value without animations.
+    fn underlying_value(&self, property_index: usize, map: &AnimationValueMap) -> AnimationValue {
+        let own = &self.underlying_values[property_index];
+        map.get(&own.id().to_owned()).unwrap_or(own).clone()
+    }
+
     /// Whether or not this animation is cancelled by changes from a new style.
     fn is_cancelled_in_new_style(&self, new_style: &Arc<ComputedValues>) -> bool {
         let new_ui = new_style.get_ui();
@@ -878,10 +928,17 @@ impl Animation {
         // in order to avoid doing more work.
         let mut add_declarations_to_map = |keyframe: &ComputedKeyframe| {
             for value_or_reference in keyframe.values.iter() {
-                let AnimationValueOrReference::AnimationValue(value) = value_or_reference else {
-                    unreachable!("First or last keyframes define all properties");
-                };
-                map.insert(value.id().to_owned(), value.clone());
+                match value_or_reference {
+                    AnimationValueOrReference::AnimationValue(value) => {
+                        map.insert(value.id().to_owned(), value.clone());
+                    },
+                    // VIPER-PATCH(animation-underlying-value): the underlying
+                    // value is already the map's or the element's own.
+                    AnimationValueOrReference::Underlying => {},
+                    AnimationValueOrReference::NotDefinedHere(_) => {
+                        unreachable!("First or last keyframes define all properties")
+                    },
+                }
             }
         };
 
@@ -976,6 +1033,7 @@ impl Animation {
                 property_index,
                 prev_keyframe_index,
                 Direction::Backward.relative_to_animation_direction(reversed),
+                map, // VIPER-PATCH(animation-underlying-value)
             ) else {
                 // Animation of this property has not started yet
                 continue;
@@ -985,6 +1043,7 @@ impl Animation {
                 property_index,
                 next_keyframe_index,
                 Direction::Forward.relative_to_animation_direction(reversed),
+                map, // VIPER-PATCH(animation-underlying-value)
             ) else {
                 // This property has finished animating, just use the previous data
                 map.insert(
@@ -1286,6 +1345,21 @@ impl ElementAnimationSet {
         self.transitions
             .iter()
             .any(|transition| transition.state != AnimationState::Canceled)
+    }
+
+    // VIPER-PATCH(animation-underlying-value)
+    /// Refreshes each animation's underlying values from `underlying_style`,
+    /// the element's style without animations and transitions, marking the
+    /// set dirty when one changed so that the element cascades them again
+    /// (Web Animations 1: an implicit keyframe follows its underlying value).
+    pub fn update_underlying_values(&mut self, underlying_style: &ComputedValues) {
+        for animation in self.animations.iter_mut() {
+            let values = underlying_values(&animation.animating_properties, underlying_style);
+            if values != animation.underlying_values {
+                animation.underlying_values = values;
+                self.dirty = true;
+            }
+        }
     }
 
     /// Update our animations given a new style, canceling or starting new animations
@@ -1828,6 +1902,21 @@ fn name_entry(
     entries.into_iter().rev().nth(name_index)
 }
 
+// VIPER-PATCH(animation-underlying-value)
+/// The value of each of `properties` in `style`.
+fn underlying_values(
+    properties: &PropertyDeclarationIdSet,
+    style: &ComputedValues,
+) -> Box<[AnimationValue]> {
+    properties
+        .iter()
+        .map(|property| {
+            AnimationValue::from_computed_values(property, style)
+                .expect("Unexpected non-animatable property.")
+        })
+        .collect()
+}
+
 /// Triggers animations for a given node looking at the animation property
 /// values.
 pub fn maybe_start_animations<E>(
@@ -1904,6 +1993,9 @@ pub fn maybe_start_animations<E>(
             }
         }
 
+        // VIPER-PATCH(animation-underlying-value): `new_style` is the
+        // element's style without animations and transitions.
+        let underlying_values = underlying_values(&animating_properties, new_style);
         let computed_steps = ComputedKeyframe::generate_for_keyframes(
             element,
             &keyframe_animation,
@@ -1912,7 +2004,7 @@ pub fn maybe_start_animations<E>(
             style.animation_timing_function_mod(i),
             style.animation_composition_mod(i),
             resolver,
-            animating_properties,
+            animating_properties.clone(), // VIPER-PATCH(animation-underlying-value)
             number_of_animating_properties,
         );
 
@@ -1932,6 +2024,9 @@ pub fn maybe_start_animations<E>(
             current_direction: initial_direction,
             number_of_animating_properties,
             is_new: true,
+            // VIPER-PATCH(animation-underlying-value)
+            animating_properties,
+            underlying_values,
         };
 
         // If we started with a negative delay, make sure we iterate the animation if
@@ -1963,5 +2058,122 @@ pub fn maybe_start_animations<E>(
         }
 
         animation_state.animations.push(new_animation);
+    }
+}
+
+// VIPER-PATCH(animation-underlying-value)
+#[cfg(test)]
+mod underlying_value_tests {
+    //! Implicit keyframes sampled from the underlying value: the element's
+    //! own (without animations) or an earlier animation's result.
+
+    use super::*;
+    use crate::properties::OwnedPropertyDeclarationId;
+    use crate::values::generics::easing::TimingKeyword;
+
+    fn opacity_set() -> PropertyDeclarationIdSet {
+        let mut set = PropertyDeclarationIdSet::default();
+        set.insert(PropertyDeclarationId::Longhand(LonghandId::Opacity));
+        set
+    }
+
+    fn step(start_percentage: f64, value: AnimationValueOrReference) -> ComputedKeyframe {
+        ComputedKeyframe {
+            timing_function: TimingFunction::Keyword(TimingKeyword::Linear),
+            start_percentage,
+            values: vec![value].into_boxed_slice(),
+        }
+    }
+
+    /// A 100 ms linear animation of `opacity` over `steps`, the element's
+    /// own opacity being `underlying`.
+    fn animation(steps: Vec<ComputedKeyframe>, underlying: f32) -> Animation {
+        Animation {
+            name: Atom::from("fade"),
+            name_index: 0,
+            properties_changed: opacity_set(),
+            computed_steps: steps.into_boxed_slice(),
+            started_at: 0.,
+            duration: 100.,
+            delay: 0.,
+            fill_mode: AnimationFillMode::None,
+            iteration_state: KeyframesIterationState::Finite(0., 1.),
+            state: AnimationState::Running,
+            direction: AnimationDirection::Normal,
+            current_direction: AnimationDirection::Normal,
+            number_of_animating_properties: 1,
+            is_new: false,
+            animating_properties: opacity_set(),
+            underlying_values: vec![AnimationValue::Opacity(underlying)].into_boxed_slice(),
+        }
+    }
+
+    fn value(opacity: f32) -> AnimationValueOrReference {
+        AnimationValueOrReference::AnimationValue(AnimationValue::Opacity(opacity))
+    }
+
+    /// The opacity `animation` gives at `now`, over `map`'s earlier results.
+    fn sample(animation: &Animation, now: f64, mut map: AnimationValueMap) -> f32 {
+        animation.get_property_declaration_at_time(now, &mut map);
+        match map.get(&OwnedPropertyDeclarationId::Longhand(LonghandId::Opacity)) {
+            Some(AnimationValue::Opacity(opacity)) => *opacity,
+            other => panic!("no opacity: {:?}", other),
+        }
+    }
+
+    fn earlier(opacity: f32) -> AnimationValueMap {
+        let mut map = AnimationValueMap::default();
+        map.insert(
+            OwnedPropertyDeclarationId::Longhand(LonghandId::Opacity),
+            AnimationValue::Opacity(opacity),
+        );
+        map
+    }
+
+    #[test]
+    fn an_implicit_from_keyframe_takes_the_underlying_value_when_sampled() {
+        let fade = animation(
+            vec![
+                step(0., AnimationValueOrReference::Underlying),
+                step(1., value(0.)),
+            ],
+            1.,
+        );
+        assert_eq!(sample(&fade, 50., Default::default()), 0.5);
+        assert_eq!(
+            sample(&fade, 50., Default::default()),
+            0.5,
+            "the same at the same time"
+        );
+        let over_earlier = sample(&fade, 50., earlier(0.6));
+        assert!((over_earlier - 0.3).abs() < 1e-6, "{}", over_earlier);
+    }
+
+    #[test]
+    fn an_implicit_to_keyframe_takes_the_underlying_value_when_sampled() {
+        let rise = animation(
+            vec![
+                step(0., value(0.)),
+                step(1., AnimationValueOrReference::Underlying),
+            ],
+            1.,
+        );
+        assert_eq!(sample(&rise, 50., Default::default()), 0.5);
+        let over_earlier = sample(&rise, 25., earlier(0.8));
+        assert!((over_earlier - 0.2).abs() < 1e-6, "{}", over_earlier);
+    }
+
+    #[test]
+    fn a_changed_underlying_value_is_used_from_the_next_sample() {
+        let mut fade = animation(
+            vec![
+                step(0., AnimationValueOrReference::Underlying),
+                step(1., value(0.)),
+            ],
+            1.,
+        );
+        assert_eq!(sample(&fade, 50., Default::default()), 0.5);
+        fade.underlying_values = vec![AnimationValue::Opacity(0.5)].into_boxed_slice();
+        assert_eq!(sample(&fade, 50., Default::default()), 0.25);
     }
 }

@@ -233,6 +233,36 @@ trait PrivateMatchMethods: TElement {
         .after_change_style(primary_style)
     }
 
+    // VIPER-PATCH(animation-underlying-value)
+    /// `primary_style` cascaded without its animations and transitions
+    /// levels: the underlying values of a CSS animation's keyframes.
+    #[cfg(feature = "servo")]
+    fn underlying_style(
+        &self,
+        context: &mut StyleContext<Self>,
+        primary_style: &Arc<ComputedValues>,
+    ) -> Arc<ComputedValues> {
+        let rules = primary_style.rules();
+        let without = context.shared.stylist.rule_tree().remove_animation_rules(rules);
+        if without == *rules {
+            return primary_style.clone();
+        }
+        let inputs = CascadeInputs {
+            rules: Some(without),
+            visited_rules: primary_style.visited_rules().cloned(),
+            flags: primary_style.flags.for_cascade_inputs(),
+            included_cascade_flags: RuleCascadeFlags::empty(),
+        };
+        StyleResolverForElement::new(
+            *self,
+            context,
+            RuleInclusion::All,
+            PseudoElementResolution::IfApplicable,
+        )
+        .cascade_style_and_visited_with_default_parents(inputs)
+        .0
+    }
+
     fn needs_animations_update(
         &self,
         context: &mut StyleContext<Self>,
@@ -729,6 +759,18 @@ trait PrivateMatchMethods: TElement {
             after_change_style = self.after_change_style(context, new_values);
         }
 
+        // VIPER-PATCH(animation-underlying-value): the style without the
+        // animations and transitions levels gives the keyframes their
+        // underlying values, so a restyle never takes an animation's own
+        // value for them.
+        let underlying_style = if needs_animations_update
+            || self.has_css_animations(context.shared, pseudo_element.clone())
+        {
+            Some(self.underlying_style(context, new_values))
+        } else {
+            None
+        };
+
         let key = AnimationSetKey::new(self.as_node().opaque(), pseudo_element);
         let shared_context = context.shared;
         let mut animation_set = shared_context
@@ -752,9 +794,15 @@ trait PrivateMatchMethods: TElement {
             animation_set.update_animations_for_new_style::<Self>(
                 *self,
                 &shared_context,
-                &new_values,
+                // VIPER-PATCH(animation-underlying-value)
+                underlying_style.as_ref().unwrap_or(new_values),
                 &mut resolver,
             );
+        }
+
+        // VIPER-PATCH(animation-underlying-value)
+        if let Some(underlying_style) = &underlying_style {
+            animation_set.update_underlying_values(underlying_style);
         }
 
         animation_set.update_transitions_for_new_style(
