@@ -50,9 +50,11 @@ pub enum WritingModeProperty {
     #[parse(aliases = "tb,tb-rl")]
     VerticalRl,
     VerticalLr,
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(servo-standard-keywords): CSS Writing Modes 4 section 3.1's
+    // sideways-rl and sideways-lr were built for upstream's other build only,
+    // so servo builds dropped a declaration holding one; both builds have
+    // them, with the flags that build already gave them.
     SidewaysRl,
-    #[cfg(feature = "gecko")]
     SidewaysLr,
 }
 
@@ -163,14 +165,13 @@ impl WritingMode {
                     flags.insert(WritingMode::INLINE_REVERSED);
                 }
             },
-            #[cfg(feature = "gecko")]
+            // VIPER-PATCH(servo-standard-keywords): in every build.
             WritingModeProperty::SidewaysRl => {
                 flags.insert(WritingMode::WRITING_MODE_SIDEWAYS_RL);
                 if direction == Direction::Rtl {
                     flags.insert(WritingMode::INLINE_REVERSED);
                 }
             },
-            #[cfg(feature = "gecko")]
             WritingModeProperty::SidewaysLr => {
                 flags.insert(WritingMode::WRITING_MODE_SIDEWAYS_LR);
                 if direction == Direction::Ltr {
