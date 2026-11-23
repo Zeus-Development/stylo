@@ -178,6 +178,7 @@ apart from the packaging files.
 | `math-font-size-specified` | `stylo`: `properties/cascade.rs` | Standard: MathML Core section 4.5 scales the inherited `font-size` by the change of `math-depth` only for a specified `font-size: math`, but the cascade rescaled any computed size carrying the `math` keyword, which `font-size: inherit` copies from the parent, so MathML Core Appendix A's accent (`font-size: inherit` under `math-depth: add(1)`) shrank; the cascade now rescales only when the declaration it applied for the element, after substitution, is `font-size: math` | `viper-style::cascade stylo_pin_f::math_font_size_specified_keeps_the_accent_size` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 29 / 42 |
 | `servo-fragment-urls` | `stylo`: `url/servo.rs`, `properties/declaration_block.rs` (its test, and `servo-filter-url`'s) | Standard: CSS Values 4 section 4.5.1's fragment-only `url()` names an element of the current document whatever the sheet's base and serializes as just the fragment, but servo builds kept only the URL resolved against the base and could not tell a fragment (`CssUrl::is_fragment` logged an error and answered false); `is_fragment` answers from the original text, which starts with `#`, and such a URL computes to the new `ComputedUrl::Fragment`, its text as written, so it serializes as specified and two with the same text are equal; other URLs compute and serialize as before | `viper-style::cascade stylo_pin_f::servo_fragment_urls_compute_as_written` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 24 / 75 |
 | `deprecated-system-colors` | `stylo`: `device/system_colors.rs` | Standard: CSS Color 4's deprecated system colours (section 6.2.1, now its Appendix A) compute to the colour that section names, and it maps `ThreeDHighlight` and `ThreeDLightShadow` to `ButtonBorder`, as it does the other 3-D border colours, while upstream's match, which `system-color-palette` moved unchanged into `SystemColors::get`, gave them `ButtonFace`; `get` now answers them with `ButtonBorder`, and every other deprecated colour keeps its mapping, which the section's table confirms | `viper-style::cascade system_colors::deprecated_system_colors_follow_css_color_4` | Candidate; draft to the owner first | Viper STYLO-PIN-G | 10 / 50 |
+| `animation-underlying-value` | `stylo`: `servo/animation.rs`, `matching.rs` | Standard: CSS Animations 1 section 3 builds a missing 0% or 100% keyframe from the property's computed value, and Web Animations 1 composites a keyframe effect over its underlying value (the result of the effects under it, else the value without animations), while upstream baked those keyframes from the element's new style, which the animations level already animated, so each regeneration of the keyframes (a rule change, an `animation-*` change) took the animation's own value: a `to`-only fade halved again at each full restyle. The keyframes' base is now the style cascaded without the animations and transitions levels, and an implicit keyframe is an underlying value filled in when the animation is sampled: an earlier animation's result on the property, else the element's value without animations, refreshed on each restyle | `viper-style::animation underlying::an_implicit_from_keyframe_is_stable_across_full_restyles` (and the three other `underlying` tests) | Candidate; draft to the owner first | Viper STY-ANIM-IMPLICIT-1 | 177 / 114 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2380,6 +2381,59 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Viper proof.** `system_colors::deprecated_system_colors_follow_css_color_4`,
   which computes each deprecated keyword through Viper's cascade under a
   palette of distinct colours in both schemes.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `animation-underlying-value`
+
+- **Problem.** CSS Animations 1 section 3: when a `0%` or `from` keyframe
+  (or a `100%` or `to` one) is not specified, the user agent constructs it
+  from the computed values of the animated properties, and Web Animations 1
+  composites a keyframe effect over its underlying value: the result of the
+  effects lower in the composite order, else the value without animations.
+  Upstream's servo `maybe_start_animations` built the keyframes from
+  `process_animations_for_style`'s `new_values`, the element's style
+  cascaded with the animations level, and baked the missing keyframes (and
+  the base of `add` and `accumulate`) from it. Each regeneration of the
+  keyframes (a rule change's full restyle, an `animation-*` change) then
+  took the animation's own current value: `@keyframes fade { to { opacity:
+  0 } }` over 100 ms gave 0.25 at 50 ms after one rule insertion and 0.125
+  after another. And since the values were baked once, a changed base
+  value (a class change mid-animation) or an earlier animation on the same
+  property never reached the implicit keyframe.
+- **Change.** `process_animations_for_style` cascades the element's rule
+  node without its animations and transitions levels
+  (`RuleTree::remove_animation_rules`, the new `underlying_style`) whenever
+  the element has or may start CSS animations, and passes that style to
+  `update_animations_for_new_style` as the keyframes' base. A missing first
+  or last keyframe value is the new `AnimationValueOrReference::Underlying`,
+  filled in when the animation is sampled: the value an earlier animation
+  put in the sample's map for the property (composite order), else the
+  animation's `underlying_values`, each animating property's value in that
+  style. `ElementAnimationSet::update_underlying_values` refreshes them on
+  each restyle and marks the set dirty when one changed, so the element is
+  cascaded again with them. Explicit keyframes, transitions and the
+  animation events are unchanged; the base of an explicit keyframe's `add`
+  or `accumulate` is the style without animations, still taken when the
+  keyframes are built.
+- **Spots.** `style/servo/animation.rs` (the `Underlying` variant, the
+  keyframe lookup and the sampling of the first and last keyframes,
+  `Animation`'s `animating_properties` and `underlying_values` with
+  `underlying_value`, the helper `underlying_values`,
+  `update_underlying_values` and `maybe_start_animations`) and
+  `style/matching.rs` (`underlying_style` and its use in
+  `process_animations_for_style`).
+- **Fork tests.** `servo::animation::underlying_value_tests`: an implicit
+  `from` and an implicit `to` keyframe sampled from the element's
+  underlying value and from an earlier animation's result, and a changed
+  underlying value used from the next sample. Building and refreshing the
+  keyframes needs a `TElement`, which the fork's tests do not build.
+- **Viper proof.** The `underlying` tests of viper-style's `animation`
+  test binary: a `to`-only and a `from`-only animation keeping their value
+  through rule insertions, an implicit keyframe following a class change
+  mid-animation, and a later animation's implicit keyframe taking an
+  earlier one's result; each fails without the patch.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
