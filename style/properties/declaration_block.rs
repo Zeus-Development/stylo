@@ -2325,3 +2325,28 @@ mod text_spacing_trim_longhand_tests {
         assert!(LonghandId::TextSpacingTrim.inherited());
     }
 }
+
+// VIPER-PATCH(orphans-widows-longhands): the patch's fork test.
+#[cfg(test)]
+mod orphans_widows_longhands_tests {
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::properties::longhands::{orphans, widows};
+    use crate::properties::LonghandId;
+    use style_traits::ToCss;
+
+    #[test]
+    fn orphans_and_widows_parse_inherit_and_start_at_two() {
+        for name in ["orphans", "widows"] {
+            assert_eq!(declared(name, "3").as_deref(), Some("3"), "{name}");
+            assert_eq!(declared(name, "1").as_deref(), Some("1"), "{name}");
+            assert_eq!(declared(name, "inherit").as_deref(), Some("inherit"));
+            for refused in ["0", "-1", "1.5", "auto"] {
+                assert_eq!(declared(name, refused), None, "{name}: {refused}");
+            }
+        }
+        assert_eq!(orphans::get_initial_value().to_css_string(), "2");
+        assert_eq!(widows::get_initial_value().to_css_string(), "2");
+        assert!(LonghandId::Orphans.inherited());
+        assert!(LonghandId::Widows.inherited());
+    }
+}

@@ -2681,6 +2681,29 @@ spec = "https://drafts.csswg.org/css-text-4/#text-spacing-trim-property"
 servo_restyle_damage = "rebuild_box"
 affects = "layout"
 
+# VIPER-PATCH(orphans-widows-longhands): CSS Fragmentation 3 section 4.4's
+# orphans and widows (inherited, a positive integer, initial 2) are in neither
+# upstream build, so their declarations were dropped and a paginating layout
+# could not read them; servo builds parse and compute them.
+[orphans]
+type = "PositiveInteger"
+initial = "From::from(2)"
+struct = "inherited_text"
+engine = "servo"
+spec = "https://drafts.csswg.org/css-break/#widows-orphans"
+servo_restyle_damage = "rebuild_box"
+affects = "layout"
+
+# VIPER-PATCH(orphans-widows-longhands): see orphans.
+[widows]
+type = "PositiveInteger"
+initial = "From::from(2)"
+struct = "inherited_text"
+engine = "servo"
+spec = "https://drafts.csswg.org/css-break/#widows-orphans"
+servo_restyle_damage = "rebuild_box"
+affects = "layout"
+
 [text-box-edge]
 type = "TextBoxEdge"
 initial = "computed::TextBoxEdge::Auto"
