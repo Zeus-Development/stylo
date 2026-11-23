@@ -179,6 +179,10 @@ apart from the packaging files.
 | `servo-fragment-urls` | `stylo`: `url/servo.rs`, `properties/declaration_block.rs` (its test, and `servo-filter-url`'s) | Standard: CSS Values 4 section 4.5.1's fragment-only `url()` names an element of the current document whatever the sheet's base and serializes as just the fragment, but servo builds kept only the URL resolved against the base and could not tell a fragment (`CssUrl::is_fragment` logged an error and answered false); `is_fragment` answers from the original text, which starts with `#`, and such a URL computes to the new `ComputedUrl::Fragment`, its text as written, so it serializes as specified and two with the same text are equal; other URLs compute and serialize as before | `viper-style::cascade stylo_pin_f::servo_fragment_urls_compute_as_written` | Candidate; draft to the owner first | Viper STYLO-PIN-F | 24 / 75 |
 | `deprecated-system-colors` | `stylo`: `device/system_colors.rs` | Standard: CSS Color 4's deprecated system colours (section 6.2.1, now its Appendix A) compute to the colour that section names, and it maps `ThreeDHighlight` and `ThreeDLightShadow` to `ButtonBorder`, as it does the other 3-D border colours, while upstream's match, which `system-color-palette` moved unchanged into `SystemColors::get`, gave them `ButtonFace`; `get` now answers them with `ButtonBorder`, and every other deprecated colour keeps its mapping, which the section's table confirms | `viper-style::cascade system_colors::deprecated_system_colors_follow_css_color_4` | Candidate; draft to the owner first | Viper STYLO-PIN-G | 10 / 50 |
 | `animation-underlying-value` | `stylo`: `servo/animation.rs`, `matching.rs` | Standard: CSS Animations 1 section 3 builds a missing 0% or 100% keyframe from the property's computed value, and Web Animations 1 composites a keyframe effect over its underlying value (the result of the effects under it, else the value without animations), while upstream baked those keyframes from the element's new style, which the animations level already animated, so each regeneration of the keyframes (a rule change, an `animation-*` change) took the animation's own value: a `to`-only fade halved again at each full restyle. The keyframes' base is now the style cascaded without the animations and transitions levels, and an implicit keyframe is an underlying value filled in when the animation is sampled: an earlier animation's result on the property, else the element's value without animations, refreshed on each restyle | `viper-style::animation underlying::an_implicit_from_keyframe_is_stable_across_full_restyles` (and the three other `underlying` tests) | Candidate; draft to the owner first | Viper STY-ANIM-IMPLICIT-1 | 209 / 114 |
+| `selectors-element-backed-after` | `selectors`: `parser.rs`; `stylo`: `servo/selector_parser.rs`, `stylesheets/parse_options.rs` (its docs and test) | Standard and embedder control: CSS Pseudo-Elements 4 section 5 allows every pseudo-class after an element-backed pseudo-element, as after `::part()` (CSS Shadow Parts 1), but upstream never asked the parser after one and refused every pseudo-class after one that accepts no state pseudo-classes, so `::details-content:hover` or `:open` was a syntax error that no embedder could allow. The parser now sets `CHECK_AFTER_PSEUDO_ELEMENT` for element-backed pseudo-elements too, so `Parser::valid_after_pseudo_element` (and servo's `SelectorNames::valid_after`) decides; without an answer, CSS's rule: any pseudo-class that is not tree-structural (`valid_after_element_backed`) | `viper-style::cascade stylo_pin_h::element_backed_pseudo_elements_ask_the_hook` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 92 / 103 |
+| `orphans-widows-longhands` | `stylo`: `properties/longhands.toml`, `properties/counted_unknown_properties.py`, `properties/declaration_block.rs` (its test) | Standard: CSS Fragmentation 3's `orphans` and `widows` (section 4.4: inherited, `<integer [1,∞]>`, initial 2) were in neither upstream build, so their declarations were dropped and a paginating layout could not read them; servo builds parse and compute them, and they leave the list of counted unknown properties | `viper-style::cascade stylo_pin_h::orphans_and_widows_compute_and_inherit` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 27 / 25 |
+| `servo-standard-keywords` | `stylo`: `properties/longhands.toml`, `logical_geometry.rs`, `properties/declaration_block.rs` (its test) | Standard: `background-attachment: local` (CSS Backgrounds 3 section 2.5), `font-variant-caps`' `all-small-caps`, `petite-caps`, `all-petite-caps`, `unicase` and `titling-caps` (CSS Fonts 4 section 6.6) and `writing-mode`'s `sideways-rl` and `sideways-lr` (CSS Writing Modes 4 section 3.1) were values of upstream's other build only, so servo builds dropped a declaration holding one; they parse and compute in every build, the sideways values with the writing-mode flags that build gave them | `viper-style::cascade stylo_pin_h::servo_standard_keywords_compute` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 20 / 25 |
+| `servo-justify-items-legacy` | `stylo`: `style_adjuster.rs`, `matching.rs`, `properties/declaration_block.rs` (its test) | Standard: CSS Box Alignment 3 section 7.1 computes a bare `legacy` `justify-items` to the inherited value when that value includes `legacy`, but upstream compiled that adjustment, and the restyle of children when an element's `legacy` value changes, for its other build only, so servo builds computed it to `normal`; both run in servo builds, which set the computed value whole, the specified `legacy` kept | `viper-style::cascade stylo_pin_h::servo_justify_items_legacy_takes_the_inherited_value` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 22 / 19 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2439,6 +2443,124 @@ Problem, change, every spot, the Miri commands and the before/after results:
   mid-animation, a `::before`'s implicit `font-size` inherited from its
   element, and a later animation's implicit keyframe taking an earlier
   one's result; each fails without the patch.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `selectors-element-backed-after`
+
+- **Problem.** CSS Pseudo-Elements 4 section 5: "All pseudo-classes and
+  pseudo-elements are syntactically allowed after an element-backed
+  pseudo-element ... just as if the pseudo-element were a type selector",
+  though the structural pseudo-classes, `:has()`, `:scope` and `:host`
+  never match there; CSS Shadow Parts 1 says the same of `::part()`.
+  `selectors-after-pseudo-element-hook` asked the parser what may follow a
+  pseudo-element only when it was not element-backed. After an
+  element-backed one (servo's `::details-content`) upstream's state flags
+  decided alone, and since `::details-content` accepts no state
+  pseudo-classes they refused every pseudo-class after it: an embedder's
+  hook could not allow `::details-content:hover` or `:open`.
+- **Change.** `parse_compound_selector` sets `CHECK_AFTER_PSEUDO_ELEMENT`
+  after every pseudo-element that does not follow `::slotted()`, so the
+  parser's `valid_after_pseudo_element` is asked after an element-backed
+  one too. Its default is now the free function
+  `default_valid_after_pseudo_element` (a parser that answers some
+  pseudo-elements itself keeps it for the others): upstream's rule, and
+  after an element-backed pseudo-element `valid_after_element_backed`,
+  CSS's rule, any pseudo-class that is not tree-structural (the
+  `NonTSPseudoClass` ones), as upstream allows after `::part()`. servo's
+  parser asks the embedder's `SelectorNames::valid_after` as before, and
+  without an answer takes the same rule after an element-backed one.
+  `::part()` and `::slotted()` keep their own rules; a pseudo-element
+  after the element-backed one is unchanged.
+- **Spots.** `selectors/parser.rs` (the flag's use, the default hook and
+  its two functions, the test parser's switch and the test),
+  `style/servo/selector_parser.rs` (the fallback) and
+  `style/stylesheets/parse_options.rs` (the hook's documentation and its
+  test).
+- **Fork tests.** `after_element_backed_pseudo_element_asks_the_parser`
+  (the default rule after `::details-content`, structural pseudo-classes
+  refused, the parser's own names after it, and a parser that refuses
+  everything there followed) and
+  `selector_names_hook_decides_after_element_backed` (servo's parser with
+  no hook, a hook without an answer and a hook that allows `:focus`
+  alone).
+- **Viper proof.** `stylo_pin_h::element_backed_pseudo_elements_ask_the_hook`:
+  a provider's hook allowing `:hover`, `:focus` and `:open` after
+  `::details-content`, and one refusing them, followed in stylesheets and
+  the DOM selector APIs; Viper's Basic answers CSS's rule.
+- **Commands.** `cargo test -p selectors --lib` and
+  `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `orphans-widows-longhands`
+
+- **Problem.** CSS Fragmentation 3 section 4.4 defines `orphans` and
+  `widows`: inherited, `<integer [1,∞]>`, initial value 2, the fewest line
+  boxes a break between lines leaves before and after it in a block
+  container. Neither upstream build has them (they were only counted as
+  unknown properties), so their declarations were dropped and a
+  paginating layout had only the initial value.
+- **Change.** Two longhands of the `inherited_text` struct, built in servo
+  builds (`engine = "servo"`), of type `PositiveInteger`, initial 2,
+  animated as integers; both leave `COUNTED_UNKNOWN_PROPERTIES`, whose
+  names may not also be properties.
+- **Spots.** `style/properties/longhands.toml`,
+  `style/properties/counted_unknown_properties.py` and
+  `style/properties/declaration_block.rs` (the test).
+- **Fork tests.** `orphans_and_widows_parse_inherit_and_start_at_two`:
+  positive integers and `inherit` parse, 0, negative, fractional and
+  keyword values do not, both start at 2 and are inherited.
+- **Viper proof.** `stylo_pin_h::orphans_and_widows_compute_and_inherit`
+  (`DocumentStyle::line_breaks`, which viper-layout's pagination reads).
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-standard-keywords`
+
+- **Problem.** Three properties had standard values in upstream's other
+  build only, so servo builds dropped a declaration holding one:
+  `background-attachment: local` (CSS Backgrounds 3 section 2.5),
+  `font-variant-caps`' `all-small-caps`, `petite-caps`,
+  `all-petite-caps`, `unicase` and `titling-caps` (CSS Fonts 4 section
+  6.6), and `writing-mode`'s `sideways-rl` and `sideways-lr` (CSS Writing
+  Modes 4 section 3.1).
+- **Change.** The keywords join each property's values in every build,
+  and `WritingModeProperty`'s two sideways variants and their arms in
+  `WritingMode::new` lose their build gate, keeping the flags they had
+  (`WRITING_MODE_SIDEWAYS_RL` and `_LR`, inline-reversed by direction).
+- **Spots.** `style/properties/longhands.toml`, `style/logical_geometry.rs`
+  and `style/properties/declaration_block.rs` (the test).
+- **Fork tests.** `servo_standard_keywords_parse`: each value parses and
+  serializes as written; a misspelt one does not.
+- **Viper proof.** `stylo_pin_h::servo_standard_keywords_compute`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-justify-items-legacy`
+
+- **Problem.** CSS Box Alignment 3 section 7.1: a bare `legacy`
+  `justify-items` (its initial value) "computes to the inherited value" when
+  that value includes `legacy`, and to `normal` otherwise. Upstream
+  computes it to `normal` and fixes it up in the style adjuster
+  (`adjust_for_justify_items`), and restyles the children of an element
+  whose `legacy` value changes (`need_to_unconditionally_recascade_for_reset_change`),
+  both for its other build only, so in servo builds a grid's
+  `justify-items: legacy center` never reached its descendants.
+- **Change.** Both run in every build. servo's style struct has no setter
+  of the computed half alone, so the adjuster sets the whole value, the
+  parent's computed value with the specified `legacy` kept, as the
+  other build's setter does.
+- **Spots.** `style/style_adjuster.rs`, `style/matching.rs` and
+  `style/properties/declaration_block.rs` (the test).
+- **Fork tests.** `justify_items_legacy_parses_and_starts_normal`; the
+  fork's tests build no element, so the adjuster is tested in Viper.
+- **Viper proof.** `stylo_pin_h::servo_justify_items_legacy_takes_the_inherited_value`:
+  `legacy center` and `legacy right` inherited down the tree, and `normal`
+  under `start`.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
