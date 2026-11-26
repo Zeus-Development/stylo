@@ -60,6 +60,13 @@ impl PropertyAnimation {
         self.from.id()
     }
 
+    // VIPER-PATCH(property-animation-timing-function)
+    /// The timing function, a transition's easing (CSS Transitions 2
+    /// section 6.1: its effect's easing in `getTiming()`).
+    pub fn timing_function(&self) -> &TimingFunction {
+        &self.timing_function
+    }
+
     /// The output of the timing function given the progress ration of this animation.
     fn timing_function_output(&self, progress: f64) -> f64 {
         let epsilon = 1. / (200. * self.duration);
@@ -2476,5 +2483,24 @@ mod zero_duration_tests {
         endless.iteration_state = KeyframesIterationState::Infinite(0.);
         assert_eq!(endless.iterate_by(f64::INFINITY), 0.);
         assert_eq!(endless.iterate_by(f64::NAN), 0.);
+    }
+}
+
+// VIPER-PATCH(property-animation-timing-function)
+#[cfg(test)]
+mod timing_function_tests {
+    use super::*;
+    use crate::values::generics::easing::TimingKeyword;
+
+    #[test]
+    fn a_property_animation_gives_its_timing_function() {
+        let ease = TimingFunction::Keyword(TimingKeyword::EaseIn);
+        let animation = PropertyAnimation {
+            from: AnimationValue::Opacity(0.),
+            to: AnimationValue::Opacity(1.),
+            timing_function: ease.clone(),
+            duration: 1.,
+        };
+        assert_eq!(animation.timing_function(), &ease);
     }
 }
