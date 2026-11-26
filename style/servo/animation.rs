@@ -646,6 +646,17 @@ pub struct Animation {
     /// the underlying value of the implicit keyframes when no earlier
     /// animation sets it; refreshed on each restyle of the element.
     underlying_values: Box<[AnimationValue]>,
+
+    // VIPER-PATCH(script-animations)
+    /// The embedder's id of an animation script made (Web Animations 1's
+    /// `Element.animate()`), which no `animation-name` entry starts,
+    /// updates or cancels; `None` for a CSS animation.
+    pub script: Option<u64>,
+
+    // VIPER-PATCH(script-animations)
+    /// Whether script cancelled this CSS animation: it gives no value, and
+    /// its entry of `animation-name` does not start it again while it stays.
+    pub script_cancelled: bool,
 }
 
 impl Animation {
@@ -658,8 +669,50 @@ impl Animation {
         map.get(&own.id().to_owned()).unwrap_or(own).clone()
     }
 
+    // VIPER-PATCH(script-animations)
+    /// The animation `script` starts at `now`, without its steps yet.
+    fn for_script(script: &ScriptKeyframes, now: f64) -> Self {
+        let iteration_state = if script.iterations.is_infinite() {
+            KeyframesIterationState::Infinite(0.0)
+        } else {
+            KeyframesIterationState::Finite(0.0, script.iterations)
+        };
+        let current_direction = match script.direction {
+            AnimationDirection::Reverse | AnimationDirection::AlternateReverse => {
+                AnimationDirection::Reverse
+            },
+            _ => AnimationDirection::Normal,
+        };
+        let mut animation = Animation {
+            name: Atom::from(""),
+            name_index: 0,
+            properties_changed: script.keyframes.properties_changed.clone(),
+            computed_steps: Box::new([]),
+            started_at: now + script.delay,
+            duration: script.duration,
+            delay: script.delay,
+            fill_mode: script.fill_mode,
+            iteration_state,
+            state: AnimationState::Pending,
+            direction: script.direction,
+            current_direction,
+            number_of_animating_properties: 0,
+            is_new: true,
+            animating_properties: PropertyDeclarationIdSet::default(),
+            underlying_values: Box::new([]),
+            script: Some(script.id),
+            script_cancelled: false,
+        };
+        animation.iterate_by(-script.delay / script.duration);
+        animation
+    }
+
     /// Whether or not this animation is cancelled by changes from a new style.
     fn is_cancelled_in_new_style(&self, new_style: &Arc<ComputedValues>) -> bool {
+        // VIPER-PATCH(script-animations): no entry owns a script's.
+        if self.script.is_some() {
+            return false;
+        }
         let new_ui = new_style.get_ui();
         // VIPER-PATCH(animation-name-entries): this animation's own entry.
         let index = name_entry(new_ui, &self.name, self.name_index);
@@ -896,7 +949,8 @@ impl Animation {
     /// Fill in an `AnimationValueMap` with values calculated from this animation at
     /// the given time value.
     fn get_property_declaration_at_time(&self, now: f64, map: &mut AnimationValueMap) {
-        if self.computed_steps.is_empty() {
+        // VIPER-PATCH(script-animations): a cancelled one gives no value.
+        if self.computed_steps.is_empty() || self.script_cancelled {
             // Nothing to do.
             return;
         }
@@ -1251,9 +1305,86 @@ pub struct ElementAnimationSet {
     /// Whether or not this ElementAnimationSet has had animations or transitions
     /// which have been added, removed, or had their state changed.
     pub dirty: bool,
+
+    // VIPER-PATCH(script-animations)
+    /// The keyframes of animations script made or gave new keyframes, which
+    /// the element's next restyle turns into animations or their new steps.
+    pub script_keyframes: Vec<ScriptKeyframes>,
+}
+
+// VIPER-PATCH(script-animations)
+/// An animation script made, or its new keyframes (`setKeyframes()`).
+#[derive(Clone, Debug, MallocSizeOf)]
+pub struct ScriptKeyframes {
+    /// The embedder's id of the animation ([`Animation::script`]).
+    pub id: u64,
+    /// The keyframes, built by `KeyframesAnimation::from_keyframes`.
+    pub keyframes: KeyframesAnimation,
+    /// The timing function of a keyframe that declares none.
+    pub timing_function: TimingFunction,
+    /// The composite operation of a keyframe that declares none.
+    pub composition: AnimationComposition,
+    /// A new animation's iteration duration, in seconds.
+    pub duration: f64,
+    /// A new animation's start delay, in seconds.
+    pub delay: f64,
+    /// A new animation's iteration count, infinite allowed.
+    pub iterations: f64,
+    /// A new animation's direction.
+    pub direction: AnimationDirection,
+    /// A new animation's fill mode.
+    pub fill_mode: AnimationFillMode,
 }
 
 impl ElementAnimationSet {
+    // VIPER-PATCH(script-animations)
+    /// Turns the queued script keyframes into animations started now, their
+    /// keyframes resolved against `base_style` (the style without
+    /// animations), or into the new steps of the animation of their id.
+    pub fn start_script_animations<E: TElement>(
+        &mut self,
+        element: E,
+        context: &SharedStyleContext,
+        base_style: &Arc<ComputedValues>,
+        resolver: &mut StyleResolverForElement<E>,
+    ) {
+        for script in std::mem::take(&mut self.script_keyframes) {
+            let mut new = Animation::for_script(&script, context.current_time_for_animations);
+            for property in script.keyframes.properties_changed.iter() {
+                let property = property.to_physical(base_style.writing_mode);
+                if new.animating_properties.insert(property) {
+                    new.number_of_animating_properties += 1;
+                }
+            }
+            new.underlying_values = underlying_values(&new.animating_properties, base_style);
+            new.computed_steps = ComputedKeyframe::generate_for_keyframes(
+                element,
+                &script.keyframes,
+                context,
+                base_style,
+                script.timing_function.clone(),
+                script.composition,
+                resolver,
+                new.animating_properties.clone(),
+                new.number_of_animating_properties,
+            );
+            self.dirty = true;
+            let old = self
+                .animations
+                .iter_mut()
+                .find(|old| old.script == Some(script.id) && old.state != AnimationState::Canceled);
+            let Some(old) = old else {
+                self.animations.push(new);
+                continue;
+            };
+            old.properties_changed = new.properties_changed;
+            old.computed_steps = new.computed_steps;
+            old.number_of_animating_properties = new.number_of_animating_properties;
+            old.animating_properties = new.animating_properties;
+            old.underlying_values = new.underlying_values;
+        }
+    }
+
     /// Cancel all animations in this `ElementAnimationSet`. This is typically called
     /// when the element has been removed from the DOM.
     pub fn cancel_all_animations(&mut self) {
@@ -2027,6 +2158,9 @@ pub fn maybe_start_animations<E>(
             // VIPER-PATCH(animation-underlying-value)
             animating_properties,
             underlying_values,
+            // VIPER-PATCH(script-animations)
+            script: None,
+            script_cancelled: false,
         };
 
         // If we started with a negative delay, make sure we iterate the animation if
@@ -2037,7 +2171,10 @@ pub fn maybe_start_animations<E>(
 
         // If the animation was already present in the list for the node, just update its state.
         for existing_animation in animation_state.animations.iter_mut() {
-            if existing_animation.state == AnimationState::Canceled {
+            // VIPER-PATCH(script-animations): no entry is a script's.
+            if existing_animation.state == AnimationState::Canceled
+                || existing_animation.script.is_some()
+            {
                 continue;
             }
 
@@ -2048,8 +2185,12 @@ pub fn maybe_start_animations<E>(
             if new_animation.name == existing_animation.name
                 && new_animation.name_index == existing_animation.name_index
             {
-                existing_animation
-                    .update_from_other(&new_animation, context.current_time_for_animations);
+                // VIPER-PATCH(script-animations): one script cancelled stays
+                // cancelled while its entry stays.
+                if !existing_animation.script_cancelled {
+                    existing_animation
+                        .update_from_other(&new_animation, context.current_time_for_animations);
+                }
                 // VIPER-PATCH(animation-names-continue): every later name of
                 // `animation-name` still starts or updates its own animation
                 // (CSS Animations 1 section 3); upstream returned here.
@@ -2105,6 +2246,9 @@ mod underlying_value_tests {
             is_new: false,
             animating_properties: opacity_set(),
             underlying_values: vec![AnimationValue::Opacity(underlying)].into_boxed_slice(),
+            // VIPER-PATCH(script-animations)
+            script: None,
+            script_cancelled: false,
         }
     }
 
@@ -2119,6 +2263,20 @@ mod underlying_value_tests {
             Some(AnimationValue::Opacity(opacity)) => *opacity,
             other => panic!("no opacity: {:?}", other),
         }
+    }
+
+    // VIPER-PATCH(script-animations): for `script_animation_tests`.
+    /// A fade from 1 to 0 over 100 ms.
+    pub(super) fn fade() -> Animation {
+        animation(vec![step(0., value(1.)), step(1., value(0.))], 1.)
+    }
+
+    // VIPER-PATCH(script-animations)
+    /// The values `animation` gives at `now`.
+    pub(super) fn sample_map(animation: &Animation, now: f64) -> AnimationValueMap {
+        let mut map = AnimationValueMap::default();
+        animation.get_property_declaration_at_time(now, &mut map);
+        map
     }
 
     fn earlier(opacity: f32) -> AnimationValueMap {
@@ -2175,5 +2333,69 @@ mod underlying_value_tests {
         assert_eq!(sample(&fade, 50., Default::default()), 0.5);
         fade.underlying_values = vec![AnimationValue::Opacity(0.5)].into_boxed_slice();
         assert_eq!(sample(&fade, 50., Default::default()), 0.25);
+    }
+}
+
+// VIPER-PATCH(script-animations)
+#[cfg(test)]
+mod script_animation_tests {
+    //! Animations script makes, and CSS animations script cancelled.
+
+    use super::underlying_value_tests::{fade, sample_map};
+    use super::*;
+    use crate::shared_lock::SharedRwLock;
+    use crate::values::generics::easing::TimingKeyword;
+
+    /// Keyframes without values, with the timing of the arguments.
+    fn script(delay: f64, iterations: f64, direction: AnimationDirection) -> ScriptKeyframes {
+        let lock = SharedRwLock::new();
+        ScriptKeyframes {
+            id: 7,
+            keyframes: KeyframesAnimation::from_keyframes(&[], None, &lock.read()),
+            timing_function: TimingFunction::Keyword(TimingKeyword::Linear),
+            composition: AnimationComposition::Replace,
+            duration: 100.,
+            delay,
+            iterations,
+            direction,
+            fill_mode: AnimationFillMode::Both,
+        }
+    }
+
+    #[test]
+    fn a_script_animation_starts_now_with_its_timing() {
+        let animation = Animation::for_script(&script(20., 2., AnimationDirection::Reverse), 10.);
+        assert_eq!(animation.script, Some(7));
+        assert_eq!(
+            (animation.started_at, animation.duration, animation.delay),
+            (30., 100., 20.)
+        );
+        assert_eq!(animation.fill_mode, AnimationFillMode::Both);
+        assert_eq!(animation.current_direction, AnimationDirection::Reverse);
+        assert!(matches!(
+            animation.iteration_state,
+            KeyframesIterationState::Finite(0., 2.)
+        ));
+        assert_eq!(animation.state, AnimationState::Pending);
+    }
+
+    #[test]
+    fn a_negative_delay_starts_a_script_animation_in_a_later_iteration() {
+        let infinite = script(-250., f64::INFINITY, AnimationDirection::AlternateReverse);
+        let animation = Animation::for_script(&infinite, 0.);
+        assert!(matches!(
+            animation.iteration_state,
+            KeyframesIterationState::Infinite(2.)
+        ));
+        assert_eq!(animation.current_direction, AnimationDirection::Reverse);
+        assert_eq!(animation.started_at, -50.);
+    }
+
+    #[test]
+    fn a_css_animation_script_cancelled_gives_no_value() {
+        let mut animation = fade();
+        assert!(!sample_map(&animation, 50.).is_empty());
+        animation.script_cancelled = true;
+        assert!(sample_map(&animation, 50.).is_empty());
     }
 }

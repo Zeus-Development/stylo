@@ -794,7 +794,15 @@ trait PrivateMatchMethods: TElement {
         // animations and transitions levels gives the keyframes their
         // underlying values, so a restyle never takes an animation's own
         // value for them.
+        // VIPER-PATCH(script-animations): and for queued script keyframes.
+        let key = AnimationSetKey::new(self.as_node().opaque(), pseudo_element.clone());
+        let sets = context.shared.animations.sets.read();
+        let queued = sets
+            .get(&key)
+            .is_some_and(|set| !set.script_keyframes.is_empty());
+        drop(sets);
         let underlying_style = if needs_animations_update
+            || queued
             || self.has_css_animations(context.shared, pseudo_element.clone())
         {
             let parent = pseudo_element.as_ref().zip(originating);
@@ -803,7 +811,6 @@ trait PrivateMatchMethods: TElement {
             None
         };
 
-        let key = AnimationSetKey::new(self.as_node().opaque(), pseudo_element);
         let shared_context = context.shared;
         let mut animation_set = shared_context
             .animations
@@ -827,6 +834,22 @@ trait PrivateMatchMethods: TElement {
                 *self,
                 &shared_context,
                 // VIPER-PATCH(animation-underlying-value)
+                underlying_style.as_ref().unwrap_or(new_values),
+                &mut resolver,
+            );
+        }
+
+        // VIPER-PATCH(script-animations)
+        if queued {
+            let mut resolver = StyleResolverForElement::new(
+                *self,
+                context,
+                RuleInclusion::All,
+                PseudoElementResolution::IfApplicable,
+            );
+            animation_set.start_script_animations::<Self>(
+                *self,
+                &shared_context,
                 underlying_style.as_ref().unwrap_or(new_values),
                 &mut resolver,
             );
