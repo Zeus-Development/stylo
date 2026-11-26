@@ -832,9 +832,13 @@ impl Animation {
         let progress = match self.state {
             AnimationState::Finished => return true,
             AnimationState::Paused(progress) => progress,
-            // VIPER-PATCH(animation-zero-duration)
-            AnimationState::Running => progress_at(time, self.started_at, self.duration),
-            AnimationState::Pending | AnimationState::Canceled => return false,
+            // VIPER-PATCH(animation-zero-duration): a pending one, sampled
+            // as a running one, ends as it does (a 0s animation in the
+            // restyle that starts it).
+            AnimationState::Running | AnimationState::Pending => {
+                progress_at(time, self.started_at, self.duration)
+            },
+            AnimationState::Canceled => return false,
         };
 
         progress >= self.current_iteration_end_progress()
@@ -2465,6 +2469,16 @@ mod zero_duration_tests {
         assert_eq!(opacity(AnimationFillMode::Both, 50.), Some(0.));
         assert_eq!(opacity(AnimationFillMode::None, 10.), None);
         assert_eq!(opacity(AnimationFillMode::Backwards, 10.), None);
+    }
+
+    #[test]
+    fn a_pending_zero_duration_animation_has_ended_at_its_start() {
+        let mut animation = fade();
+        (animation.duration, animation.started_at) = (0., 10.);
+        animation.state = AnimationState::Pending;
+        assert!(animation.has_ended(10.));
+        assert!(!animation.has_ended(5.));
+        assert!(sample_map(&animation, 10.).is_empty(), "no fill");
     }
 
     #[test]
