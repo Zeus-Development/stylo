@@ -703,7 +703,8 @@ impl Animation {
             script: Some(script.id),
             script_cancelled: false,
         };
-        animation.iterate_by(-script.delay / script.duration);
+        // VIPER-PATCH(animation-zero-duration)
+        animation.iterate_by(progress_at(now, animation.started_at, script.duration));
         animation
     }
 
@@ -716,12 +717,8 @@ impl Animation {
         let new_ui = new_style.get_ui();
         // VIPER-PATCH(animation-name-entries): this animation's own entry.
         let index = name_entry(new_ui, &self.name, self.name_index);
-        let index = match index {
-            Some(index) => index,
-            None => return true,
-        };
-
-        new_ui.animation_duration_mod(index).seconds() == 0.
+        // VIPER-PATCH(animation-zero-duration): a 0s duration cancels none.
+        index.is_none()
     }
 
     /// Given the current time, advances this animation to the next iteration,
@@ -745,7 +742,9 @@ impl Animation {
     /// Returns the actual number of iterations that happened.
     fn iterate_by(&mut self, n: f64) -> f64 {
         let n = n.trunc().min(self.remaining_iterations().ceil() - 1.0);
-        if n < 1. {
+        // VIPER-PATCH(animation-zero-duration): a 0s animation's infinite
+        // (or undefined) progress iterates no further than its last.
+        if !(1.0..f64::INFINITY).contains(&n) {
             return 0.;
         }
 
@@ -826,7 +825,8 @@ impl Animation {
         let progress = match self.state {
             AnimationState::Finished => return true,
             AnimationState::Paused(progress) => progress,
-            AnimationState::Running => (time - self.started_at) / self.duration,
+            // VIPER-PATCH(animation-zero-duration)
+            AnimationState::Running => progress_at(time, self.started_at, self.duration),
             AnimationState::Pending | AnimationState::Canceled => return false,
         };
 
@@ -867,7 +867,9 @@ impl Animation {
 
             match old_state {
                 Paused(old_progress) => {
-                    let mut progress = old_progress + (old_delay - self.delay) / self.duration;
+                    // VIPER-PATCH(animation-zero-duration)
+                    let shift = progress_at(old_delay, self.delay, self.duration);
+                    let mut progress = old_progress + shift;
                     progress -= self.iterate_by(progress);
                     self.state = Paused(progress);
                 },
@@ -882,7 +884,8 @@ impl Animation {
                 },
                 Canceled | Pending | Running => {
                     // Re-advance iterations from a fresh iteration state.
-                    let new_starting_progress = (now - self.started_at) / self.duration;
+                    // VIPER-PATCH(animation-zero-duration)
+                    let new_starting_progress = progress_at(now, self.started_at, self.duration);
                     match self.iteration_state {
                         KeyframesIterationState::Finite(ref mut current, _) => *current = 0.0,
                         _ => {},
@@ -933,7 +936,8 @@ impl Animation {
                 },
                 (&mut Paused(ref mut new), &Paused(old)) => *new = old,
                 (&mut Paused(ref mut progress), &Running) => {
-                    *progress = (now - old_started_at) / old_duration
+                    // VIPER-PATCH(animation-zero-duration)
+                    *progress = progress_at(now, old_started_at, old_duration)
                 },
                 _ => {},
             }
@@ -959,7 +963,8 @@ impl Animation {
         // >1.0 (after end or during multiple iterations).
         let progress = match self.state {
             AnimationState::Running | AnimationState::Pending | AnimationState::Finished => {
-                (now - self.started_at) / self.duration
+                // VIPER-PATCH(animation-zero-duration)
+                progress_at(now, self.started_at, self.duration)
             },
             AnimationState::Paused(progress) => progress,
             AnimationState::Canceled => return,
@@ -2006,6 +2011,22 @@ pub fn start_transitions_if_applicable(
     properties_that_transition
 }
 
+// VIPER-PATCH(animation-zero-duration)
+/// The progress at `time` of an animation started at `started_at` whose
+/// iterations last `duration` seconds: the time since its start in
+/// iterations; with a 0s duration, negative infinity before its start and
+/// positive infinity from it on (Web Animations 1 section 4.6.9: an effect
+/// whose active duration is zero is in its after phase from its start).
+fn progress_at(time: f64, started_at: f64, duration: f64) -> f64 {
+    if duration != 0. {
+        (time - started_at) / duration
+    } else if time < started_at {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    }
+}
+
 // VIPER-PATCH(animation-name-entries): an entry's index among those of
 // its name, counted from the last, and back.
 /// The number of entries of `animation-name` after entry `index` that list
@@ -2069,10 +2090,8 @@ pub fn maybe_start_animations<E>(
         };
 
         debug!("maybe_start_animations: name={}", name);
+        // VIPER-PATCH(animation-zero-duration): a 0s animation runs too.
         let duration = style.animation_duration_mod(i).seconds() as f64;
-        if duration == 0. {
-            continue;
-        }
 
         let Some(keyframe_animation) = context.stylist.lookup_keyframes(name, element) else {
             continue;
@@ -2105,7 +2124,8 @@ pub fn maybe_start_animations<E>(
 
         let now = context.current_time_for_animations;
         let started_at = now + delay;
-        let starting_progress = (now - started_at) / duration;
+        // VIPER-PATCH(animation-zero-duration)
+        let starting_progress = progress_at(now, started_at, duration);
         let state = match style.animation_play_state_mod(i) {
             AnimationPlayState::Paused => AnimationState::Paused(starting_progress),
             AnimationPlayState::Running => AnimationState::Pending,
@@ -2397,5 +2417,64 @@ mod script_animation_tests {
         assert!(!sample_map(&animation, 50.).is_empty());
         animation.script_cancelled = true;
         assert!(sample_map(&animation, 50.).is_empty());
+    }
+}
+
+// VIPER-PATCH(animation-zero-duration)
+#[cfg(test)]
+mod zero_duration_tests {
+    //! Animations whose iterations last 0s: before their start, and in
+    //! their after phase from it on.
+
+    use super::underlying_value_tests::{fade, sample_map};
+    use super::*;
+    use crate::properties::OwnedPropertyDeclarationId;
+
+    /// The opacity a 0s `fade` started at 10 with `fill` gives at `now`.
+    fn opacity(fill: AnimationFillMode, now: f64) -> Option<f32> {
+        let mut animation = fade();
+        (
+            animation.duration,
+            animation.started_at,
+            animation.fill_mode,
+        ) = (0., 10., fill);
+        let map = sample_map(&animation, now);
+        match map.get(&OwnedPropertyDeclarationId::Longhand(LonghandId::Opacity)) {
+            Some(AnimationValue::Opacity(opacity)) => Some(*opacity),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_progress_of_a_zero_duration_is_infinite_and_never_undefined() {
+        assert_eq!(progress_at(10., 10., 0.), f64::INFINITY);
+        assert_eq!(progress_at(9., 10., 0.), f64::NEG_INFINITY);
+        assert_eq!(progress_at(15., 10., 10.), 0.5);
+    }
+
+    #[test]
+    fn a_zero_duration_animation_fills_its_end_from_its_start() {
+        assert_eq!(opacity(AnimationFillMode::Forwards, 10.), Some(0.));
+        assert_eq!(opacity(AnimationFillMode::Both, 50.), Some(0.));
+        assert_eq!(opacity(AnimationFillMode::None, 10.), None);
+        assert_eq!(opacity(AnimationFillMode::Backwards, 10.), None);
+    }
+
+    #[test]
+    fn a_zero_duration_animation_fills_its_start_backwards_before_it() {
+        assert_eq!(opacity(AnimationFillMode::Backwards, 5.), Some(1.));
+        assert_eq!(opacity(AnimationFillMode::Both, 5.), Some(1.));
+        assert_eq!(opacity(AnimationFillMode::Forwards, 5.), None);
+    }
+
+    #[test]
+    fn an_infinite_progress_iterates_to_the_last_iteration_only() {
+        let mut animation = fade();
+        animation.iteration_state = KeyframesIterationState::Finite(0., 3.);
+        assert_eq!(animation.iterate_by(f64::INFINITY), 2.);
+        let mut endless = fade();
+        endless.iteration_state = KeyframesIterationState::Infinite(0.);
+        assert_eq!(endless.iterate_by(f64::INFINITY), 0.);
+        assert_eq!(endless.iterate_by(f64::NAN), 0.);
     }
 }
