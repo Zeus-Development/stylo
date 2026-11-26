@@ -183,6 +183,9 @@ apart from the packaging files.
 | `orphans-widows-longhands` | `stylo`: `properties/longhands.toml`, `properties/counted_unknown_properties.py`, `values/generics/mod.rs`, `properties/declaration_block.rs` (its test) | Standard: CSS Fragmentation 3's `orphans` and `widows` (section 4.4: inherited, `<integer [1,∞]>`, initial 2) were in neither upstream build, so their declarations were dropped and a paginating layout could not read them; servo builds parse and compute them, and they leave the list of counted unknown properties | `viper-style::cascade stylo_pin_h::orphans_and_widows_compute_and_inherit` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 30 / 25 |
 | `servo-standard-keywords` | `stylo`: `properties/longhands.toml`, `logical_geometry.rs`, `properties/declaration_block.rs` (its test) | Standard: `background-attachment: local` (CSS Backgrounds 3 section 2.5), `font-variant-caps`' `all-small-caps`, `petite-caps`, `all-petite-caps`, `unicase` and `titling-caps` (CSS Fonts 4 section 6.6) and `writing-mode`'s `sideways-rl` and `sideways-lr` (CSS Writing Modes 4 section 3.1) were values of upstream's other build only, so servo builds dropped a declaration holding one; they parse and compute in every build, the sideways values with the writing-mode flags that build gave them | `viper-style::cascade stylo_pin_h::servo_standard_keywords_compute` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 20 / 25 |
 | `servo-justify-items-legacy` | `stylo`: `style_adjuster.rs`, `matching.rs`, `properties/declaration_block.rs` (its test) | Standard: CSS Box Alignment 3 section 7.1 computes a bare `legacy` `justify-items` to the inherited value when that value includes `legacy`, but upstream compiled that adjustment, and the restyle of children when an element's `legacy` value changes, for its other build only, so servo builds computed it to `normal`; both run in servo builds, which set the computed value whole, the specified `legacy` kept | `viper-style::cascade stylo_pin_h::servo_justify_items_legacy_takes_the_inherited_value` | Candidate; draft to the owner first | Viper STYLO-PIN-H | 22 / 19 |
+| `script-animations` | `stylo`: `servo/animation.rs`, `matching.rs` | Embedder control: Web Animations 1's `Element.animate()` and `KeyframeEffect` make animations no `animation-name` entry owns, and `cancel()` removes a CSS animation's effect without its entry starting it again (CSS Animations 2 section 4.2: a cancelled CSS animation stays cancelled until its entry leaves the list), but upstream's servo model holds only the animations its style starts, a `KeyframesAnimation` can be resolved only inside the traversal (it needs the element's resolver), and a cancelled animation is started again at the next restyle. An `Animation` now has a script origin (`script`) and a script-cancelled mark (`script_cancelled`); `ElementAnimationSet::script_keyframes` queues `ScriptKeyframes`, which `process_animations_for_style` turns into animations started now or into new steps of the live animation of their id; no entry starts, updates or cancels a script animation, and a script-cancelled one gives no value and its entry does not restart it | Viper S4-STY-8b2's engine tests (the queue and the tombstone are unused until then) | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 162 / 73 |
+| `animation-zero-duration` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 and Web Animations 1 section 4.6 run a 0s animation with an active duration of 0, in its after phase from its start, so it dispatches `animationstart` and `animationend` and fills as `animation-fill-mode` says, but upstream's servo `maybe_start_animations` started none and `is_cancelled_in_new_style` cancelled a running one whose duration became 0. Both now keep it, and its progress (`progress_at`) is negative infinity before its start and positive infinity from it on, never undefined; `iterate_by` stops at the last iteration for an infinite progress | `viper-style::animation css_animation_cases` (the five `zero-duration` cases) | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 36 / 52 |
+| `property-animation-timing-function` | `stylo`: `servo/animation.rs` | Embedder control: CSS Transitions 2 section 6.1 gives a transition's effect the transition's timing function as its easing, which `getTiming()` reports, but `PropertyAnimation`'s timing function was private; `PropertyAnimation::timing_function` returns it | Viper S4-STY-8b2's engine tests | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 6 / 17 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2566,6 +2569,108 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
+
+## Patch `script-animations`
+
+- **Problem.** Web Animations 1's `Element.animate()` and the
+  `KeyframeEffect` constructor make keyframe animations that no
+  `animation-name` entry owns, cascaded at the animations origin after the
+  CSS animations (section 5.4.2's composite order), and `cancel()` removes
+  a CSS animation's effect, which its entry does not start again while it
+  stays in the list (CSS Animations 2 section 4.2). Upstream's servo model
+  holds only the animations an element's style starts: an embedder cannot
+  add one, since a `KeyframesAnimation` becomes an animation's computed
+  steps only inside the traversal, with the element's style resolver; the
+  traversal's recascade reads the document's set alone, so values kept
+  outside it are lost; and a cancelled animation that leaves the set is
+  started again by the next restyle.
+- **Change.** `Animation` has `script`, the embedder's id of an animation
+  script made (`None` for a CSS animation), and `script_cancelled`.
+  `ElementAnimationSet::script_keyframes` is a queue of `ScriptKeyframes`:
+  a `KeyframesAnimation` (from `KeyframesAnimation::from_keyframes`), the
+  timing function and composite operation of a keyframe that declares
+  none, and a new animation's duration, delay, iteration count, direction
+  and fill mode. `process_animations_for_style` computes the style without
+  animations when the queue is not empty and calls
+  `start_script_animations`, which turns each entry into an animation
+  started at the document time (`Animation::for_script`, a negative delay
+  moving it to its iteration) with its keyframes resolved as a CSS
+  animation's are, or, when the set has a live animation of that id, into
+  its new steps, its timing kept (`setKeyframes()`). A script animation is
+  pushed after the set's animations, so it composites after them.
+  `maybe_start_animations` matches no entry with a script animation and
+  does not update a script-cancelled one, and `is_cancelled_in_new_style`
+  never cancels a script animation; a script-cancelled animation gives no
+  value. When its entry leaves `animation-name` it is cancelled as before,
+  and a later entry starts a new one.
+- **Spots.** `style/servo/animation.rs` (the two fields of `Animation`,
+  `for_script`, `is_cancelled_in_new_style`,
+  `get_property_declaration_at_time`, `ScriptKeyframes`,
+  `script_keyframes`, `start_script_animations` and
+  `maybe_start_animations`) and `style/matching.rs`
+  (`process_animations_for_style`).
+- **Fork tests.** `servo::animation::script_animation_tests`: a script
+  animation starts with its timing, a negative delay starts one in a later
+  iteration, and a script-cancelled animation gives no value. Starting one
+  in a restyle needs a `TElement`, which the fork's tests do not build.
+- **Viper proof.** Viper S4-STY-8b2 (#1771), which makes and cancels
+  animations through the queue and the mark; until it merges nothing uses
+  them and every Viper suite is unchanged.
+- **Size.** 162 code lines, above the patch rules' target of 100: an
+  animation's 18 fields are written once for a script animation, and its
+  keyframes are resolved and swapped in by `setKeyframes()`.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** A generic hook, so a candidate; a draft goes to the Viper
+  owner first.
+
+## Patch `animation-zero-duration`
+
+- **Problem.** CSS Animations 1 runs an animation whose
+  `animation-duration` is 0s, and Web Animations 1 section 4.6 gives its
+  effect an active duration of 0: in its before phase during a positive
+  delay, in its after phase from its start (section 4.6.9), so it
+  dispatches `animationstart` and `animationend` and
+  `animation-fill-mode` applies its first or last keyframe. Upstream's
+  servo `maybe_start_animations` skipped a 0s entry, and
+  `is_cancelled_in_new_style` cancelled a running animation whose
+  duration became 0, since its progress, the time since its start divided
+  by its duration, was undefined.
+- **Change.** Both keep a 0s animation. `progress_at` gives the progress
+  each spot computed: for a 0s duration negative infinity before the
+  start and positive infinity from it on. `maybe_start_animations`,
+  `has_ended`, `update_from_other`, `get_property_declaration_at_time` and
+  `for_script` use it, and `iterate_by` iterates no further than the last
+  iteration for an infinite or undefined count, so a finite animation
+  ends on its last iteration in that iteration's direction.
+- **Spots.** `style/servo/animation.rs` only.
+- **Fork tests.** `servo::animation::zero_duration_tests`: the progress
+  at the start, before it and of a nonzero duration; the end keyframe
+  filled forwards from the start and none without a forwards fill; the
+  first keyframe filled backwards before the start; and an infinite
+  progress iterating a three-iteration animation to its last iteration
+  and an infinite one not at all.
+- **Viper proof.** The five `zero-duration` cases of viper-style's
+  `css_animation_cases`: a 0s animation's events and value, filled
+  forwards after three iterations, alternating, delayed with both fills,
+  and a running animation's duration changed to 0s.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `property-animation-timing-function`
+
+- **Problem.** CSS Transitions 2 section 6.1 gives a transition's effect
+  the transition's timing function as its easing, which Web Animations 1's
+  `getTiming()` reports and `getComputedTiming()`'s progress follows, but
+  `PropertyAnimation` kept its timing function private.
+- **Change.** `PropertyAnimation::timing_function` returns it.
+- **Spots.** `style/servo/animation.rs` only.
+- **Fork tests.** `servo::animation::timing_function_tests`.
+- **Viper proof.** Viper S4-STY-8b2 (#1771), the transition effect's
+  easing.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** A generic accessor, so a candidate; a draft goes to the
+  Viper owner first.
 
 ## Retired patches
 
