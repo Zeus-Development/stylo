@@ -2394,3 +2394,61 @@ mod servo_justify_items_legacy_tests {
         assert!(!initial.computed.contains(AlignFlags::LEGACY));
     }
 }
+
+// VIPER-PATCH(servo-appearance): the patch's fork test.
+#[cfg(test)]
+mod servo_appearance_tests {
+    use super::parse_style_attribute;
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::context::QuirksMode;
+    use crate::properties::longhands::appearance;
+    use crate::properties::{LonghandId, PropertyDeclarationId};
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+    use style_traits::ToCss;
+
+    #[test]
+    fn servo_appearance_parses_its_standard_values() {
+        for value in [
+            "none",
+            "auto",
+            "textfield",
+            "menulist-button",
+            "searchfield",
+            "textarea",
+            "checkbox",
+            "radio",
+            "menulist",
+            "listbox",
+            "meter",
+            "progress-bar",
+            "button",
+        ] {
+            assert_eq!(declared("appearance", value).as_deref(), Some(value));
+        }
+        assert_eq!(declared("appearance", "NONE").as_deref(), Some("none"));
+        for value in ["base", "base-select", "menupopup", "-moz-menulist-arrow-button", "10px"] {
+            assert_eq!(declared("appearance", value), None, "{value}");
+        }
+        assert_eq!(appearance::get_initial_value().to_css_string(), "none");
+    }
+
+    /// The longhands `css`, a style attribute, declares.
+    fn longhands(css: &str) -> Vec<Option<LonghandId>> {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let block =
+            parse_style_attribute(css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let longhand = |id| match id {
+            PropertyDeclarationId::Longhand(id) => Some(id),
+            PropertyDeclarationId::Custom(_) => None,
+        };
+        block.declarations().iter().map(|d| longhand(d.id())).collect()
+    }
+
+    #[test]
+    fn servo_appearance_takes_its_webkit_alias() {
+        let appearance = Some(LonghandId::Appearance);
+        assert_eq!(longhands("-webkit-appearance: none"), [appearance]);
+        assert_eq!(longhands("-webkit-appearance: checkbox"), [appearance]);
+        assert_eq!(longhands("-moz-appearance: none"), []);
+    }
+}

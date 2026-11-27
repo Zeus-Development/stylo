@@ -366,7 +366,14 @@ affects = ""
 type = "Appearance"
 initial = "computed::Appearance::None"
 struct = "box"
-servo_pref = "layout.unimplemented"
+# VIPER-PATCH(servo-appearance): parsed and computed in servo builds, a
+# standard longhand (CSS UI 4 section 5.2; `-webkit-appearance` its legacy
+# alias, section 5.2.1) that upstream keeps behind `layout.unimplemented`,
+# which servo builds never set, so an author's `appearance: none` was
+# dropped and no embedder could lay out a form control without its widget.
+# The values parse as upstream's: `base` and `base-select` stay behind
+# their own preferences, the internal ones in chrome rules alone. Laying
+# out and painting a widget by it is the embedder's.
 extra_prefixes = ["webkit"]
 spec = "https://drafts.csswg.org/css-ui-4/#propdef-appearance"
 animation_type = "discrete"
