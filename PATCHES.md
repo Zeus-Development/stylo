@@ -187,6 +187,7 @@ apart from the packaging files.
 | `animation-zero-duration` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 and Web Animations 1 section 4.6 run a 0s animation with an active duration of 0, in its after phase from its start, so it dispatches `animationstart` and `animationend` and fills as `animation-fill-mode` says, but upstream's servo `maybe_start_animations` started none and `is_cancelled_in_new_style` cancelled a running one whose duration became 0. Both now keep it, and its progress (`progress_at`) is negative infinity before its start and positive infinity from it on, never undefined; `iterate_by` stops at the last iteration for an infinite progress, and `has_ended` judges a pending animation by its time, as a running one, and ends a 0s animation at its start whatever iterations remain; `iterate_if_necessary` moves a running 0s animation to its last iteration at its start, and a paused 0s animation's value is its time since its start (`paused_at`, `paused_progress`), so a resume keeps the rest of its delay | `viper-style::animation css_animation_cases` (the nine `zero-duration` cases) | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 103 / 101 |
 | `property-animation-timing-function` | `stylo`: `servo/animation.rs` | Embedder control: CSS Transitions 2 section 6.1 gives a transition's effect the transition's timing function as its easing, which `getTiming()` reports, but `PropertyAnimation`'s timing function was private; `PropertyAnimation::timing_function` returns it | `viper-style animation::api::tests::fork::a_transition_gives_its_timing_function` | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 6 / 17 |
 | `servo-appearance` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS UI 4's `appearance` (section 5.2) and its legacy prefixed alias (section 5.2.1) sat behind upstream's `layout.unimplemented` preference, which servo builds never set, so an author's `appearance: none` was dropped and no embedder could lay out a form control without its widget; the gate goes, and they parse and compute in servo builds with upstream's values (`base` and `base-select` behind their own preferences, the internal values in privileged sheets alone); laying out and painting a widget by it stay the embedder's | `viper-style::cascade style_appearance::appearance_computes_from_the_ua_sheet_and_authors` | Candidate; draft to the owner first | Viper STYLE-APPEARANCE-1 | 8 / 58 |
+| `servo-device-posture` | `stylo`: `servo/remaining_media_features.rs`, `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: the Device Posture API's `device-posture` media feature (section 5), which upstream's servo list lacks (upstream's gecko build has none either), so a query on it was unknown; it evaluates from `RemainingMediaFeatures::device_posture` (default `continuous`), matches in a boolean context for both postures, and joins the features the default parse options leave unknown, so they parse as upstream does | `viper-style::cascade stylo_pin_j::servo_device_posture_takes_the_config` | Candidate; draft to the owner first | Viper STYLO-PIN-J | 39 / 34 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2728,6 +2729,44 @@ Problem, change, every spot, the Miri commands and the before/after results:
   Viper's user-agent sheet gives the form controls `auto` and the hidden,
   file and image inputs `none`, and authors' values, through either name,
   compute over it.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-device-posture`
+
+- **Problem.** The Device Posture API section 5 defines the
+  `device-posture` media feature, a discrete feature with the values
+  `continuous` and `folded`, the device's posture. Upstream's servo media
+  feature list lacks it (upstream's gecko build has none either), so a
+  query on it parsed as `<general-enclosed>` and was unknown, never
+  matching.
+- **Change.** `servo/remaining_media_features.rs` gains the keyword type
+  `DevicePosture`, the field `RemainingMediaFeatures::device_posture`
+  (default `continuous`, a device without a fold) and its evaluator: a
+  value matches the device's posture, and in a boolean context the feature
+  matches for both postures, as the specification's two values are both
+  true. `device-posture` joins `REMAINING_MEDIA_FEATURES`, so
+  `ParseOptions::default()` still leaves it unknown and the default
+  options parse media queries as upstream does. The servo list gains its
+  entry (not a range feature: a `min-` or `max-` prefix is
+  `<general-enclosed>`) and `stylo_atoms` its atom.
+- **Spots.** `style/servo/remaining_media_features.rs` (the type, the
+  field, its default, the evaluator, the list of unknown features and the
+  tests), `style/servo/media_features.rs` (the entry and the list's
+  length) and `stylo_atoms/static_atoms.txt`.
+- **Fork tests.** `servo_device_posture_evaluates` (each posture's
+  answers, in a boolean context and negated too, a value parsed
+  case-insensitively, another value, a number and a prefix as
+  `<general-enclosed>`, and the feature unknown when the parse options
+  name it); `servo_remaining_media_features_evaluate` sets it folded, and
+  `servo_remaining_media_features_default_to_unknown` covers it through
+  the list.
+- **Viper proof.** `stylo_pin_j::servo_device_posture_takes_the_config`:
+  Viper hands the device its configuration's posture, so
+  `(device-posture: continuous)` matches by default and
+  `(device-posture: folded)` under a folded posture, in `matchMedia`'s
+  lists and in `@media` rules, and a change of posture restyles.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
