@@ -186,6 +186,7 @@ apart from the packaging files.
 | `script-animations` | `stylo`: `servo/animation.rs`, `matching.rs` | Embedder control: Web Animations 1's `Element.animate()` and `KeyframeEffect` make animations no `animation-name` entry owns, and `cancel()` removes a CSS animation's effect without its entry starting it again (CSS Animations 2 section 4.2: a cancelled CSS animation stays cancelled until its entry leaves the list), but upstream's servo model holds only the animations its style starts, a `KeyframesAnimation` can be resolved only inside the traversal (it needs the element's resolver), and a cancelled animation is started again at the next restyle. An `Animation` now has a script origin (`script`) and a script-cancelled mark (`script_cancelled`); `ElementAnimationSet::script_keyframes` queues `ScriptKeyframes`, which `process_animations_for_style` turns into animations started now or into new steps of the live animation of their id; no entry starts, updates or cancels a script animation, and a script-cancelled one gives no value and its entry does not restart it | `viper-style animation::api::tests::fork::script_keyframes_run_from_the_next_restyle` (and `a_css_animation_script_cancelled_gives_no_value_and_is_not_restarted`) | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 162 / 73 |
 | `animation-zero-duration` | `stylo`: `servo/animation.rs` | Standard: CSS Animations 1 and Web Animations 1 section 4.6 run a 0s animation with an active duration of 0, in its after phase from its start, so it dispatches `animationstart` and `animationend` and fills as `animation-fill-mode` says, but upstream's servo `maybe_start_animations` started none and `is_cancelled_in_new_style` cancelled a running one whose duration became 0. Both now keep it, and its progress (`progress_at`) is negative infinity before its start and positive infinity from it on, never undefined; `iterate_by` stops at the last iteration for an infinite progress, and `has_ended` judges a pending animation by its time, as a running one, and ends a 0s animation at its start whatever iterations remain; `iterate_if_necessary` moves a running 0s animation to its last iteration at its start, and a paused 0s animation's value is its time since its start (`paused_at`, `paused_progress`), so a resume keeps the rest of its delay | `viper-style::animation css_animation_cases` (the nine `zero-duration` cases) | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 103 / 101 |
 | `property-animation-timing-function` | `stylo`: `servo/animation.rs` | Embedder control: CSS Transitions 2 section 6.1 gives a transition's effect the transition's timing function as its easing, which `getTiming()` reports, but `PropertyAnimation`'s timing function was private; `PropertyAnimation::timing_function` returns it | `viper-style animation::api::tests::fork::a_transition_gives_its_timing_function` | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 6 / 17 |
+| `servo-appearance` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS UI 4's `appearance` (section 5.2) and its legacy alias `-webkit-appearance` (section 5.2.1) sat behind upstream's `layout.unimplemented` preference, which servo builds never set, so an author's `appearance: none` was dropped and no embedder could lay out a form control without its widget; the gate goes, and they parse and compute in servo builds with upstream's values (`base` and `base-select` behind their own preferences, the internal values in chrome rules alone); laying out and painting a widget by it stay the embedder's | `viper-style::cascade style_appearance::appearance_computes_from_the_ua_sheet_and_authors` | Candidate; draft to the owner first | Viper STYLE-APPEARANCE-1 | 8 / 58 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2698,6 +2699,38 @@ Problem, change, every spot, the Miri commands and the before/after results:
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** A generic accessor, so a candidate; a draft goes to the
   Viper owner first.
+
+## Patch `servo-appearance`
+
+- **Problem.** CSS UI 4 section 5.2 defines `appearance` for every user
+  agent (`none`, `auto`, the compatibility keywords that behave as `auto`,
+  `textfield` and `menulist-button`), with `-webkit-appearance` its legacy
+  alias (section 5.2.1). Upstream builds the longhand in servo builds but
+  behind its `layout.unimplemented` preference, which servo builds never
+  set, so a servo build's parser dropped every declaration of it and
+  every element computed `none`: an author's `appearance: none` could not
+  turn a checkbox into an ordinary box, and an embedder's user-agent sheet
+  could not give the form controls `auto`. Setting the preference instead
+  would also enable some fifty other properties it gates.
+- **Change.** The `servo_pref` line of `appearance` goes (its prefixed
+  alias takes the longhand's gate); nothing else changes. The values parse
+  as upstream's: `base` and `base-select` stay behind their own
+  preferences, and the internal values parse in chrome rules alone. The
+  longhand keeps upstream's `affects = "paint"`; laying out and painting
+  a widget by it are the embedder's.
+- **Spots.** `style/properties/longhands.toml` (the entry, with the reason
+  in full) and `style/properties/declaration_block.rs` (the test module).
+- **Fork tests.** `servo_appearance_parses_its_standard_values` (the
+  values it parses, case-insensitively, and refuses, and its initial
+  value) and `servo_appearance_takes_its_webkit_alias` (`-webkit-appearance`
+  declares `appearance`; `-moz-appearance` stays the other build's).
+- **Viper proof.** `style_appearance::appearance_computes_from_the_ua_sheet_and_authors`:
+  Viper's user-agent sheet gives the form controls `auto` and the hidden,
+  file and image inputs `none`, and authors' values, through either name,
+  compute over it.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
 
 ## Retired patches
 
