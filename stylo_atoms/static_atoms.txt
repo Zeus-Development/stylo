@@ -57,6 +57,7 @@ device-aspect-ratio
 dir
 device-height
 device-pixel-ratio
+device-posture
 device-width
 display-mode
 durationchange

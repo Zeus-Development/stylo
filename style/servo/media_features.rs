@@ -299,8 +299,9 @@ fn eval_forced_colors(context: &Context, query: Option<ForcedColors>) -> bool {
 
 // VIPER-PATCH(servo-device-media-features): five more entries (below).
 // VIPER-PATCH(servo-remaining-media-features): twenty more (below).
+// VIPER-PATCH(servo-device-posture): and `device-posture` (below).
 /// A list with all the media features that Servo supports.
-pub static MEDIA_FEATURES: [QueryFeatureDescription; 41] = [
+pub static MEDIA_FEATURES: [QueryFeatureDescription; 42] = [
     feature!(
         atom!("width"),
         AllowsRanges::Yes,
@@ -549,6 +550,13 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 41] = [
         atom!("ua-color-scheme"),
         AllowsRanges::No,
         keyword_evaluator!(eval_ua_color_scheme, PrefersColorScheme),
+        FeatureFlags::empty(),
+    ),
+    // VIPER-PATCH(servo-device-posture): the device's posture.
+    feature!(
+        atom!("device-posture"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_device_posture, DevicePosture),
         FeatureFlags::empty(),
     ),
 ];

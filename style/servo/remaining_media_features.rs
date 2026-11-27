@@ -46,6 +46,9 @@ pub const REMAINING_MEDIA_FEATURES: &[&str] = &[
     "prefers-reduced-data",
     "prefers-bold-text",
     "ua-color-scheme",
+    // VIPER-PATCH(servo-device-posture): the Device Posture API's feature,
+    // unknown by default as well.
+    "device-posture",
 ];
 
 /// An `update` value (Media Queries 5 section 5.4).
@@ -153,6 +156,19 @@ pub enum PrefersBoldText {
     Bold,
 }
 
+// VIPER-PATCH(servo-device-posture): the device's posture
+// (<https://w3c.github.io/device-posture/#the-device-posture-media-feature>);
+// upstream's gecko build has no such feature.
+/// A `device-posture` value (Device Posture API section 5).
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
+#[repr(u8)]
+pub enum DevicePosture {
+    /// A flat screen, or one the user sees as flat.
+    Continuous,
+    /// A foldable screen bent like a book or a laptop.
+    Folded,
+}
+
 /// The display's, the user agent's and the user's settings behind the
 /// features of [`REMAINING_MEDIA_FEATURES`] but `device-aspect-ratio`. The
 /// default is a conventional browser on a color screen: 8 bits per color
@@ -202,6 +218,9 @@ pub struct RemainingMediaFeatures {
     /// `ua-color-scheme`, the user's own scheme; `None` for the device's
     /// (`prefers-color-scheme`'s).
     pub ua_color_scheme: Option<PrefersColorScheme>,
+    /// VIPER-PATCH(servo-device-posture): `device-posture`, continuous by
+    /// default.
+    pub device_posture: DevicePosture,
 }
 
 impl Default for RemainingMediaFeatures {
@@ -226,6 +245,8 @@ impl Default for RemainingMediaFeatures {
             prefers_reduced_data: PrefersReduced::NoPreference,
             prefers_bold_text: PrefersBoldText::NoPreference,
             ua_color_scheme: None,
+            // VIPER-PATCH(servo-device-posture)
+            device_posture: DevicePosture::Continuous,
         }
     }
 }
@@ -350,6 +371,13 @@ pub(super) fn eval_ua_color_scheme(context: &Context, query: Option<PrefersColor
     keyword(value, query, None)
 }
 
+// VIPER-PATCH(servo-device-posture): `device-posture` (Device Posture API
+// section 5) matches its posture; in a boolean context it always matches,
+// both postures being true.
+pub(super) fn eval_device_posture(context: &Context, query: Option<DevicePosture>) -> bool {
+    keyword(settings(context).device_posture, query, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,6 +443,8 @@ mod tests {
             prefers_reduced_data: PrefersReduced::Reduce,
             prefers_bold_text: PrefersBoldText::Bold,
             ua_color_scheme: Some(PrefersColorScheme::Dark),
+            // VIPER-PATCH(servo-device-posture)
+            device_posture: DevicePosture::Folded,
         });
         let cases = [
             // (query, under the defaults, under `set`)
@@ -500,5 +530,38 @@ mod tests {
         assert_eq!(eval(&defaults, &[], "(min-width: 1px)"), (true, true));
         assert!(eval(&defaults, WIDTH, "(scripting) or (width > 1px)").0);
         assert!(!eval(&defaults, WIDTH, "(scripting) and (width > 1px)").0);
+    }
+
+    // VIPER-PATCH(servo-device-posture): the feature matches its posture,
+    // in a boolean context both; another value or a prefix is a
+    // `<general-enclosed>`, and a value parses case-insensitively.
+    #[test]
+    fn servo_device_posture_evaluates() {
+        let continuous = device(DeviceMediaFeatures::default());
+        let mut folded = device(DeviceMediaFeatures::default());
+        let mut settings = RemainingMediaFeatures::default();
+        settings.device_posture = DevicePosture::Folded;
+        folded.set_remaining_media_features(settings);
+        let cases = [
+            // (query, continuous, folded)
+            ("(device-posture)", true, true),
+            ("(device-posture: continuous)", true, false),
+            ("(device-posture: folded)", false, true),
+            ("(device-posture: FOLDED)", false, true),
+            ("not (device-posture: folded)", true, false),
+        ];
+        for (query, when_continuous, when_folded) in cases {
+            assert_eq!(eval(&continuous, &[], query).0, when_continuous, "{query}");
+            assert_eq!(eval(&folded, &[], query).0, when_folded, "{query}");
+        }
+        for query in [
+            "(device-posture: bogus)",
+            "(device-posture: 1)",
+            "(min-device-posture: folded)",
+        ] {
+            assert_eq!(eval(&folded, &[], query), (false, false), "{query}");
+        }
+        let (matches, feature) = eval(&continuous, REMAINING_MEDIA_FEATURES, "(device-posture)");
+        assert_eq!((matches, feature), (false, false));
     }
 }
