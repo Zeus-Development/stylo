@@ -191,6 +191,7 @@ apart from the packaging files.
 | `content-alt-counters` | `stylo`: `values/specified/counters.rs` | Standard: CSS Generated Content 3 section 1.1 lets `<counter>` (`counter()` and `counters()`, with their styles) follow the `/` of `content`'s alternative text, which an accessible name reads; upstream refused them past the `/`, so a declaration such as `content: "" / counter(n)` was invalid and its pseudo-element had no box. They now parse there; images and quotes stay refused after the `/`, as the grammar has them | `viper-style::cascade content_alt_counters::content_alt_counters_resolve_in_the_alternative_text` | Candidate; draft to the owner first | Viper A11Y-ALT-COUNTER-1 | 8 / 64 |
 | `servo-reset-only-difference` | `stylo`: `servo/restyle_damage.rs`, `properties/properties.mako.rs` | Performance: the servo build's style difference never set `reset_only` (upstream's "FIXME(emilio): Differentiate between reset and inherited properties"), so every change of an element recascaded all its children, and a `display: none` child lost its subtree's data. A change is reset only now when what a child inherits is equal: every inherited struct, the writing mode, the effective zoom, the inherited flags and the visited style (`ComputedValues::inherits_equal`); inherited custom properties are compared as before, and a child that inherits a reset property explicitly still recascades | `viper-style::cascade reset_only::a_reset_only_change_recascades_no_child` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 | 37 / 0 |
 | `named-container-requery` | `stylo`: `stylesheets/container_rule.rs` | Correctness: a container condition that names its container (`@container card`, with or without a query) is marked as a style query's too, so the restyle a `container-name` change sends (`RESTYLE_IF_AFFECTED_BY_NAMED_STYLE_CONTAINER`, which re-matches only those) reaches it on every descendant; upstream marked only `style()` conditions, so a renamed container's grandchildren kept their old match | `viper-style::cascade container_names::a_renamed_container_re_matches_its_grandchildren` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 (for STYLO-CONTAINER-NAME-RESTYLE-1) | 10 / 0 |
+| `position-visibility-anchor-keywords` | `stylo`: `values/specified/position.rs`, `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS Anchor Positioning 1 section 6.6 renamed `position-visibility`'s `anchors-valid` and `anchors-visible` to `anchor-valid` and `anchor-visible`, the initial value, and lets a user agent take the old names as legacy value aliases; upstream still parsed and serialized only the old names, so `anchor-visible` was refused. The new names parse and serialize, in the grammar's order; `anchors-visible` parses as the alias of `anchor-visible` and serializes as it, and `anchors-valid`, an optional alias, is not taken | `viper-style::cascade position_visibility::position_visibility_takes_the_anchor_keywords` | Candidate; draft to the owner first | Viper STYLE-POSITION-VISIBILITY-1 | 48 / 49 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2856,6 +2857,43 @@ Problem, change, every spot, the Miri commands and the before/after results:
   STYLO-CONTAINER-NAME-RESTYLE-1 adds the equality tests.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `position-visibility-anchor-keywords`
+
+- **Problem.** CSS Anchor Positioning 1 section 6.6 gives
+  `position-visibility` the grammar
+  `always | [ anchor-valid || anchor-visible || no-overflow ]` with the
+  initial value `anchor-visible`; the draft renamed the earlier
+  `anchors-valid` and `anchors-visible`, and lets a user agent recognize
+  them as legacy value aliases (CSS Cascade 5's parse-time aliases, which
+  serialize as the new name). Upstream still spells only the old names,
+  so `position-visibility: anchor-visible` was invalid and the initial
+  value serialized as `anchors-visible`.
+- **Change.** The flags take the new names (`ANCHOR_VALID`,
+  `ANCHOR_VISIBLE`), so the derived serialization writes them, in the
+  grammar's order. `Parse` is written out instead of derived: `always`
+  alone, or the other keywords once each in any order, ASCII
+  case-insensitively, with `anchors-visible` parsed as the
+  `anchor-visible` flag (so writing both is a repeat and invalid).
+  `anchors-valid` is not taken: the alias is optional. The computed value
+  is the specified one, as before.
+- **Spots.** `style/values/specified/position.rs` (the flags and the
+  parser, the reason in full), `style/properties/longhands.toml` (the
+  initial value's flag) and `style/properties/declaration_block.rs` (the
+  test module).
+- **Fork tests.** `position_visibility_parses_the_anchor_keywords` (each
+  keyword, case-insensitive, the combinations in the grammar's order, the
+  alias and the initial value) and `position_visibility_refuses_the_rest`
+  (`anchors-valid`, repeats, the alias beside its keyword, `always` with
+  another keyword, a comma, an unknown keyword, `auto`, `none` and
+  `normal`).
+- **Viper proof.**
+  `position_visibility::position_visibility_takes_the_anchor_keywords`:
+  the specified and computed values, through a sheet and the style
+  attribute, and `CSS.supports`' answer.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
 
 ## Retired patches
