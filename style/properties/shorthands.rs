@@ -2318,6 +2318,12 @@ pub mod background {
                     clip = Some(background_clip::single_value::SpecifiedValue::from(origin));
                 }
             }
+            // VIPER-PATCH(background-clip-text-border-area): CSS Backgrounds
+            // 4 section 2.12: a value valid only in `background-clip`
+            // sets `background-origin` to `border-box` when no box does.
+            if origin.is_none() && clip.as_ref().is_some_and(|clip| clip.is_clip_only()) {
+                origin = Some(background_origin::single_value::SpecifiedValue::BorderBox);
+            }
             if let Some(position) = position {
                 background_position_x.push(position.horizontal);
                 background_position_y.push(position.vertical);

@@ -209,12 +209,29 @@ pub enum BackgroundClip {
     #[cfg(feature = "gecko")]
     #[value_info(skip)]
     NoClip,
-    // TODO: text and border-area are supposed to combine in backgrounds-4...
-    #[cfg(feature = "gecko")]
+    // VIPER-PATCH(background-clip-text-border-area): CSS Backgrounds 4
+    // section 2.8's `text` is standard; upstream parsed it in its other
+    // build only, so servo builds dropped `background-clip: text`.
     Text,
     #[parse(condition = "background_clip_border_area_enabled")]
     #[value_info(skip)]
     BorderArea,
+    // VIPER-PATCH(background-clip-text-border-area): the grammar's
+    // `[ border-area || text ]` takes both keywords, in either order, as
+    // one value, serialized `border-area text` (WPT css-backgrounds
+    // parsing/background-clip-valid.html); `parse_for_background` combines
+    // them, never one identifier.
+    #[css(keyword = "border-area text")]
+    #[parse(condition = "background_clip_pair_from_one_keyword")]
+    #[value_info(skip)]
+    #[typed(skip)]
+    BorderAreaText,
+}
+
+// VIPER-PATCH(background-clip-text-border-area): `BorderAreaText` is never
+// one keyword (an escaped `border-area\ text` identifier is no value).
+fn background_clip_pair_from_one_keyword(_: &ParserContext) -> bool {
+    false
 }
 
 bitflags! {
@@ -241,9 +258,11 @@ impl BackgroundClip {
             Self::ViewBox => ClipValidity::MASK,
             #[cfg(feature = "gecko")]
             Self::NoClip => ClipValidity::MASK,
-            #[cfg(feature = "gecko")]
+            // VIPER-PATCH(background-clip-text-border-area): every build.
             Self::Text => ClipValidity::BACKGROUND,
             Self::BorderArea => ClipValidity::BACKGROUND,
+            // VIPER-PATCH(background-clip-text-border-area): the pair.
+            Self::BorderAreaText => ClipValidity::BACKGROUND,
         }
     }
 
@@ -256,7 +275,28 @@ impl BackgroundClip {
         if !clip.validity().intersects(ClipValidity::BACKGROUND) {
             return Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError));
         }
-        Ok(clip)
+        // VIPER-PATCH(background-clip-text-border-area): `text` and
+        // `border-area` combine with each other once, in either order.
+        let other = match clip {
+            Self::Text => Self::BorderArea,
+            Self::BorderArea => Self::Text,
+            _ => return Ok(clip),
+        };
+        let paired = input.try_parse(|input| match Self::parse(context, input)? {
+            next if next == other => Ok(()),
+            _ => Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError)),
+        });
+        Ok(if paired.is_ok() {
+            Self::BorderAreaText
+        } else {
+            clip
+        })
+    }
+
+    /// VIPER-PATCH(background-clip-text-border-area): whether the value is
+    /// valid for `background-clip` only, not for `background-origin`.
+    pub fn is_clip_only(&self) -> bool {
+        matches!(*self, Self::Text | Self::BorderArea | Self::BorderAreaText)
     }
 
     /// Parse the value of the `mask-clip` property.

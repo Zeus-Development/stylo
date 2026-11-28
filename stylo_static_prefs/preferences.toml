@@ -12,7 +12,10 @@
 "layout.css.anchor-positioning.enabled" = false
 "layout.css.appearance-base.enabled" = false
 "layout.css.at-scope.enabled" = false
-"layout.css.background-clip.border-area.enabled" = false
+# VIPER-PATCH(background-clip-text-border-area): `background-clip:
+# border-area` (CSS Backgrounds 4 section 2.8) parses; upstream's servo
+# default leaves it out.
+"layout.css.background-clip.border-area.enabled" = true
 "layout.css.basic-shape-shape.enabled" = false
 "layout.css.calc-typed-arithmetic.enabled" = true
 "layout.css.color-mix-multi-color.enabled" = true

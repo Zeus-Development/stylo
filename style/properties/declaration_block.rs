@@ -2511,3 +2511,124 @@ mod position_visibility_anchor_keywords_tests {
         }
     }
 }
+
+// VIPER-PATCH(background-clip-text-border-area): the patch's fork tests.
+#[cfg(test)]
+mod background_clip_text_border_area_tests {
+    use super::parse_style_attribute;
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::context::QuirksMode;
+    use crate::properties::PropertyId;
+    use crate::stylesheets::{CssRuleType, UrlExtraData};
+
+    /// The `background` shorthand `css` expanded: its `background-origin`,
+    /// its `background-clip` and the shorthand serialized again, or `None`
+    /// when the declaration is dropped.
+    fn background(css: &str) -> Option<[String; 3]> {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let css = format!("background: {css}");
+        let block =
+            parse_style_attribute(&css, &url, None, QuirksMode::NoQuirks, CssRuleType::Style);
+        let value = |name| {
+            let id = PropertyId::parse_enabled_for_all_content(name).unwrap();
+            let mut text = String::new();
+            block.property_value_to_css(&id, &mut text).unwrap();
+            text
+        };
+        (block.len() > 0).then(|| ["background-origin", "background-clip", "background"].map(value))
+    }
+
+    #[test]
+    fn background_clip_text_border_area_parse() {
+        for (css, serialized) in [
+            ("text", "text"),
+            ("TEXT", "text"),
+            ("border-area", "border-area"),
+            ("Border-Area", "border-area"),
+            ("border-area text", "border-area text"),
+            ("text border-area", "border-area text"),
+            ("text, border-box", "text, border-box"),
+            (
+                "border-area text, content-box",
+                "border-area text, content-box",
+            ),
+            (
+                "border-box, padding-box, content-box, border-area",
+                "border-box, padding-box, content-box, border-area",
+            ),
+        ] {
+            for name in ["background-clip", "-webkit-background-clip"] {
+                assert_eq!(
+                    declared(name, css).as_deref(),
+                    Some(serialized),
+                    "{name}: {css}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn background_clip_refuses_other_combinations() {
+        for css in [
+            "text text",
+            "border-area border-area",
+            "border-area text border-area",
+            "text border-area text",
+            "border-area padding-box",
+            "padding-box text",
+            "text padding-box",
+            "border-area\\ text",
+            "text,",
+        ] {
+            assert_eq!(declared("background-clip", css), None, "{css}");
+        }
+    }
+
+    #[test]
+    fn background_shorthand_takes_the_clip_only_values() {
+        let expanded = |origin: &str, clip: &str, shorthand: &str| {
+            Some([origin, clip, shorthand].map(String::from))
+        };
+        let cases = [
+            ("text", expanded("border-box", "text", "border-box text")),
+            (
+                "red text",
+                expanded("border-box", "text", "border-box text red"),
+            ),
+            (
+                "border-area",
+                expanded("border-box", "border-area", "border-box border-area"),
+            ),
+            (
+                "text border-area",
+                expanded(
+                    "border-box",
+                    "border-area text",
+                    "border-box border-area text",
+                ),
+            ),
+            (
+                "padding-box text",
+                expanded("padding-box", "text", "padding-box text"),
+            ),
+            (
+                "text content-box",
+                expanded("content-box", "text", "content-box text"),
+            ),
+            (
+                "border-area padding-box",
+                expanded("padding-box", "border-area", "padding-box border-area"),
+            ),
+            (
+                "padding-box",
+                expanded("padding-box", "padding-box", "padding-box"),
+            ),
+        ];
+        for (css, want) in cases {
+            assert_eq!(background(css), want, "{css}");
+        }
+        for css in ["red text text", "text padding-box content-box"] {
+            assert_eq!(background(css), None, "{css}");
+        }
+    }
+}
