@@ -178,16 +178,19 @@ impl Parse for Content {
                     ));
                 },
                 Token::Function(ref name) => {
-                    // FIXME(emilio): counter() / counters() should be valid per spec past
-                    // the alt marker, but it's likely non-trivial to support and other
-                    // browsers don't support it either, so restricting it for now.
+                    // VIPER-PATCH(content-alt-counters): CSS Generated Content 3
+                    // section 1.1 lets `<counter>` follow the `/` in the alternative
+                    // text (https://drafts.csswg.org/css-content/#alt), which an
+                    // accessible name reads; upstream refused it past the alt marker
+                    // (its FIXME: no other engine took it then), so the whole
+                    // declaration was invalid. Images and quotes stay refused there.
                     let result = match_ignore_ascii_case! { &name,
-                        "counter" if alt_start.is_none() => input.parse_nested_block(|input| {
+                        "counter" => input.parse_nested_block(|input| {
                             let name = CustomIdent::parse(input, &[])?;
                             let style = Content::parse_counter_style(context, input);
                             Ok(generics::ContentItem::Counter(name, style))
                         }),
-                        "counters" if alt_start.is_none() => input.parse_nested_block(|input| {
+                        "counters" => input.parse_nested_block(|input| {
                             let name = CustomIdent::parse(input, &[])?;
                             input.expect_comma()?;
                             let separator = input.expect_string()?.as_ref().to_owned().into();
@@ -238,5 +241,69 @@ impl Parse for Content {
             items,
             alt_start,
         }))
+    }
+}
+
+// VIPER-PATCH(content-alt-counters): the alternative text's grammar.
+#[cfg(test)]
+mod tests {
+    use super::Content;
+    use crate::context::QuirksMode;
+    use crate::parser::{Parse, ParserContext};
+    use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+    use crate::values::generics::counters::{GenericContent, GenericContentItem};
+    use cssparser::Parser;
+    use style_traits::{ParsingMode, ToCss};
+
+    fn parsed(text: &str) -> Option<Content> {
+        let url = UrlExtraData::from(::url::Url::parse("about:blank").unwrap());
+        let context = ParserContext::new(
+            Origin::Author,
+            &url,
+            Some(CssRuleType::Style),
+            ParsingMode::DEFAULT,
+            QuirksMode::NoQuirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        );
+        let mut parser = Parser::new(text);
+        parser.parse_entirely(|i| Content::parse(&context, i)).ok()
+    }
+
+    #[test]
+    fn content_alt_counters_parse_after_the_slash() {
+        let css = |text: &str| parsed(text).map(|value| value.to_css_string());
+        for (text, serialized) in [
+            (r#""" / counter(cnt)"#, r#""" / counter(cnt)"#),
+            (r#""a" / counter(cnt, upper-roman) " ""#, r#""a" / counter(cnt, upper-roman) " ""#),
+            (r#""a" / counters(c, ".")"#, r#""a" / counters(c, ".")"#),
+            (r#""a" / counters(c, ".", lower-alpha)"#, r#""a" / counters(c, ".", lower-alpha)"#),
+            (r#""a" / COUNTER(cnt, decimal)"#, r#""a" / counter(cnt)"#),
+        ] {
+            assert_eq!(css(text).as_deref(), Some(serialized), "{text}");
+        }
+        let Some(GenericContent::Items(items)) = parsed(r#""a" / "b" counter(n)"#) else {
+            panic!("an alternative with a counter parses");
+        };
+        assert_eq!(items.alt_start, 1);
+        assert!(matches!(items.items[2], GenericContentItem::Counter(..)));
+    }
+
+    #[test]
+    fn content_alt_counters_keep_the_other_refusals() {
+        for text in [
+            r#"/ counter(cnt)"#,
+            r#""a" / counter()"#,
+            r#""a" / counters(c)"#,
+            r#""a" / counter(cnt) / "b""#,
+            r#""a" / open-quote"#,
+            r#""a" / url(x.png)"#,
+            r#""a" / linear-gradient(red, blue)"#,
+            r#""a" / foo(cnt)"#,
+        ] {
+            assert!(parsed(text).is_none(), "{text}");
+        }
     }
 }
