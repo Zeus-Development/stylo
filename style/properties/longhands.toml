@@ -1832,7 +1832,9 @@ affects = "layout"
 
 [position-visibility]
 type = "PositionVisibility"
-initial = "computed::PositionVisibility::ANCHORS_VISIBLE"
+# VIPER-PATCH(position-visibility-anchor-keywords): the initial value keeps its
+# flag under the spec's new name, `anchor-visible`.
+initial = "computed::PositionVisibility::ANCHOR_VISIBLE"
 struct = "position"
 # VIPER-PATCH(engine-gates): see scroll-snap-type.
 animation_type = "discrete"

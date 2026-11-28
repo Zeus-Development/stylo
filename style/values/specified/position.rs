@@ -813,13 +813,18 @@ impl PositionTryOrder {
     }
 }
 
+// VIPER-PATCH(position-visibility-anchor-keywords): CSS Anchor Positioning 1
+// section 6.6 renamed `anchors-valid` and `anchors-visible` to `anchor-valid`
+// and `anchor-visible` (the initial value) and lets a user agent take the old
+// names as legacy value aliases; upstream still spells the old names. The
+// derived serialization writes the new names, and `Parse` is written out below
+// to take the alias.
 #[derive(
     Clone,
     Copy,
     Debug,
     Eq,
     MallocSizeOf,
-    Parse,
     PartialEq,
     Serialize,
     SpecifiedValueInfo,
@@ -829,7 +834,7 @@ impl PositionTryOrder {
     ToShmem,
     ToTyped,
 )]
-#[css(bitflags(single = "always", mixed = "anchors-valid,anchors-visible,no-overflow"))]
+#[css(bitflags(single = "always", mixed = "anchor-valid,anchor-visible,no-overflow"))]
 #[repr(C)]
 /// Specified keyword values for the position-visibility property.
 pub struct PositionVisibility(u8);
@@ -837,12 +842,46 @@ bitflags! {
     impl PositionVisibility: u8 {
         /// Element is displayed without regard for its anchors or its overflowing status.
         const ALWAYS = 0;
-        /// anchors-valid
-        const ANCHORS_VALID = 1 << 0;
-        /// anchors-visible
-        const ANCHORS_VISIBLE = 1 << 1;
+        /// anchor-valid
+        const ANCHOR_VALID = 1 << 0;
+        /// anchor-visible
+        const ANCHOR_VISIBLE = 1 << 1;
         /// no-overflow
         const NO_OVERFLOW = 1 << 2;
+    }
+}
+
+// VIPER-PATCH(position-visibility-anchor-keywords): `always`, or the other
+// keywords once each in any order, ASCII case-insensitively. `anchors-visible`
+// is a legacy value alias of `anchor-visible` (it parses as that flag, so
+// writing both is a repeat); `anchors-valid` is not taken, as the alias is
+// optional. A keyword this grammar does not know is left unconsumed, as the
+// derived parser leaves it.
+impl Parse for PositionVisibility {
+    fn parse(_: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
+        if input
+            .try_parse(|i| i.expect_ident_matching("always"))
+            .is_ok()
+        {
+            return Ok(Self::ALWAYS);
+        }
+        let mut result = Self::empty();
+        while let Ok(flag) = input.try_parse(|i| {
+            Ok(try_match_ident_ignore_ascii_case! { i,
+                "anchor-valid" => Self::ANCHOR_VALID,
+                "anchor-visible" | "anchors-visible" => Self::ANCHOR_VISIBLE,
+                "no-overflow" => Self::NO_OVERFLOW,
+            })
+        }) {
+            if result.intersects(flag) {
+                return Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError));
+            }
+            result.insert(flag);
+        }
+        if result.is_empty() {
+            return Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError));
+        }
+        Ok(result)
     }
 }
 

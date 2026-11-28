@@ -2452,3 +2452,62 @@ mod servo_appearance_tests {
         assert_eq!(longhands("-moz-appearance: none"), []);
     }
 }
+
+// VIPER-PATCH(position-visibility-anchor-keywords): the patch's fork test.
+#[cfg(test)]
+mod position_visibility_anchor_keywords_tests {
+    use super::servo_scrollbars_margin_trim_tests::declared;
+    use crate::properties::longhands::position_visibility;
+    use style_traits::ToCss;
+
+    #[test]
+    fn position_visibility_parses_the_anchor_keywords() {
+        let cases = [
+            ("always", "always"),
+            ("ALWAYS", "always"),
+            ("anchor-valid", "anchor-valid"),
+            ("Anchor-Visible", "anchor-visible"),
+            ("no-overflow", "no-overflow"),
+            ("anchor-visible anchor-valid", "anchor-valid anchor-visible"),
+            ("no-overflow anchor-visible", "anchor-visible no-overflow"),
+            (
+                "no-overflow anchor-visible anchor-valid",
+                "anchor-valid anchor-visible no-overflow",
+            ),
+            ("anchors-visible", "anchor-visible"),
+            (
+                "no-overflow anchors-visible anchor-valid",
+                "anchor-valid anchor-visible no-overflow",
+            ),
+        ];
+        for (css, serialized) in cases {
+            assert_eq!(
+                declared("position-visibility", css).as_deref(),
+                Some(serialized),
+                "{css}"
+            );
+        }
+        let initial = position_visibility::get_initial_value();
+        assert_eq!(initial.to_css_string(), "anchor-visible");
+    }
+
+    #[test]
+    fn position_visibility_refuses_the_rest() {
+        for css in [
+            "anchors-valid",
+            "anchors-valid no-overflow",
+            "anchor-visible anchors-visible",
+            "no-overflow no-overflow",
+            "always anchor-valid",
+            "anchor-valid always",
+            "anchor-valid no-overflow anchor-valid anchor-visible",
+            "anchor-valid, no-overflow",
+            "no-overflow foobar",
+            "auto",
+            "none",
+            "normal",
+        ] {
+            assert_eq!(declared("position-visibility", css), None, "{css}");
+        }
+    }
+}
