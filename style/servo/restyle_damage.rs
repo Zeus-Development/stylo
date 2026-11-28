@@ -72,10 +72,17 @@ impl ServoRestyleDamage {
         }
 
         let mut any_style_changed = !damage.is_empty();
-        // FIXME(emilio): Differentiate between reset and inherited
-        // properties here, and set `reset_only` appropriately so the
-        // optimization to skip the cascade in those cases applies.
-        let mut reset_only = !any_style_changed;
+        // VIPER-PATCH(servo-reset-only-difference): upstream's FIXME here
+        // ("Differentiate between reset and inherited properties here, and
+        // set `reset_only` appropriately so the optimization to skip the
+        // cascade in those cases applies") left `reset_only` false on every
+        // change, so each child of a changed element was recascaded, and a
+        // `display: none` child lost its subtree's data. A change is reset
+        // only when what a child inherits is equal (`inherits_equal`);
+        // inherited custom properties are compared below, and children
+        // that inherit a reset property explicitly still recascade
+        // (`RECASCADE_SELF_IF_INHERIT_RESET_STYLE`).
+        let mut reset_only = !any_style_changed || old.inherits_equal(new);
 
         let old_custom_props = old.custom_properties();
         let new_custom_props = new.custom_properties();

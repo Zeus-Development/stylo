@@ -2027,6 +2027,32 @@ impl ComputedValuesInner {
         self.visited_style.as_deref()
     }
 
+    /// VIPER-PATCH(servo-reset-only-difference): whether `other` has this
+    /// style's inherited structs, writing mode, effective zoom and inherited
+    /// flags, and visited styles that do too, so that a child inheriting
+    /// from either computes the same values but where it inherits a reset
+    /// property explicitly. `ServoRestyleDamage::compute_style_difference`
+    /// sets `reset_only` with it, which upstream's servo build never did
+    /// (its "FIXME(emilio): Differentiate between reset and inherited
+    /// properties"), so every change recascaded all the children.
+    pub fn inherits_equal(&self, other: &Self) -> bool {
+        let own = self.writing_mode == other.writing_mode
+            && self.effective_zoom == other.effective_zoom
+            && self.flags.inherited() == other.flags.inherited()
+        % for style_struct in data.active_style_structs():
+            % if style_struct.inherited:
+            && (Arc::ptr_eq(&self.${style_struct.ident}, &other.${style_struct.ident})
+                || *self.${style_struct.ident} == *other.${style_struct.ident})
+            % endif
+        % endfor
+            ;
+        own && match (self.visited_style(), other.visited_style()) {
+            (None, None) => true,
+            (Some(old), Some(new)) => old.inherits_equal(new),
+            _ => false,
+        }
+    }
+
     % for style_struct in data.active_style_structs():
         /// Clone the ${style_struct.name} struct.
         #[inline]
