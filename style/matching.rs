@@ -142,6 +142,37 @@ trait PrivateMatchMethods: TElement {
                     primary_rules,
                 );
             }
+            // VIPER-PATCH(animation-sample-replacements): a servo build
+            // samples animations in a normal traversal, with no
+            // animation-only traversal before it: the transitions and
+            // animations levels take the set's values at the context's time
+            // here, so that one cascade gives them, as Gecko's animation-only
+            // restyle does, instead of a cascade of the last time's values
+            // that `process_animations` then cascades again.
+            #[cfg(feature = "servo")]
+            if replacements.intersects(RestyleHint::for_animations()) {
+                use crate::animation::AnimationSetKey;
+                use crate::dom::TDocument;
+                let declarations = context.shared.animations.get_all_declarations(
+                    &AnimationSetKey::new_for_non_pseudo(self.as_node().opaque()),
+                    context.shared.current_time_for_animations,
+                    self.as_node().owner_doc().shared_lock(),
+                );
+                Self::replace_single_rule_node(
+                    context.shared,
+                    CascadeLevel::new(CascadeOrigin::Transitions),
+                    LayerOrder::root(),
+                    declarations.transitions.as_ref().map(|a| a.borrow_arc()),
+                    primary_rules,
+                );
+                Self::replace_single_rule_node(
+                    context.shared,
+                    CascadeLevel::new(CascadeOrigin::Animations),
+                    LayerOrder::root(),
+                    declarations.animations.as_ref().map(|a| a.borrow_arc()),
+                    primary_rules,
+                );
+            }
             return result;
         }
 
@@ -497,6 +528,7 @@ trait PrivateMatchMethods: TElement {
         old_styles: &mut ElementStyles,
         new_styles: &mut ResolvedElementStyles,
         important_rules_changed: bool,
+        _levels_replaced: bool, // VIPER-PATCH(animation-sample-replacements)
     ) {
         use crate::context::UpdateAnimationsTasks;
 
@@ -600,6 +632,9 @@ trait PrivateMatchMethods: TElement {
         old_styles: &mut ElementStyles,
         new_resolved_styles: &mut ResolvedElementStyles,
         _important_rules_changed: bool,
+        // VIPER-PATCH(animation-sample-replacements): whether the restyle
+        // only replaced the animation levels (`replace_rules_internal`).
+        levels_replaced: bool,
     ) {
         use crate::animation::AnimationSetKey;
         use crate::dom::TDocument;
@@ -610,6 +645,7 @@ trait PrivateMatchMethods: TElement {
             new_resolved_styles.primary_style_mut(),
             /* pseudo_element = */ None,
             /* originating = */ None, // VIPER-PATCH(animation-underlying-value)
+            levels_replaced,         // VIPER-PATCH(animation-sample-replacements)
         );
 
         // If we have modified animation or transitions, we recascade style for this node.
@@ -700,6 +736,9 @@ trait PrivateMatchMethods: TElement {
             // VIPER-PATCH(animation-underlying-value): the pseudo-element's
             // underlying style inherits from its originating element.
             Some(&new_resolved_styles.primary),
+            // VIPER-PATCH(animation-sample-replacements): a pseudo-element's
+            // levels are replaced below whatever the restyle replaced.
+            false,
         );
 
         let declarations = context.shared.animations.get_all_declarations(
@@ -765,6 +804,9 @@ trait PrivateMatchMethods: TElement {
         // VIPER-PATCH(animation-underlying-value): for a pseudo-element,
         // its originating element's new primary style.
         originating: Option<&PrimaryStyle>,
+        // VIPER-PATCH(animation-sample-replacements): whether the restyle
+        // only replaced the animation levels with the set's values now.
+        levels_replaced: bool,
     ) -> bool {
         use crate::animation::{AnimationSetKey, AnimationState};
 
@@ -801,9 +843,16 @@ trait PrivateMatchMethods: TElement {
             .get(&key)
             .is_some_and(|set| !set.script_keyframes.is_empty());
         drop(sets);
-        let underlying_style = if needs_animations_update
-            || queued
-            || self.has_css_animations(context.shared, pseudo_element.clone())
+        // VIPER-PATCH(animation-sample-replacements): a restyle that only
+        // replaced the animation levels left every other rule and the
+        // parent's style as the last restyle cascaded them, so the
+        // underlying values that restyle recorded still hold, and nothing
+        // asks for keyframes now: no underlying style is cascaded.
+        let sampled_only = levels_replaced && !needs_animations_update && !queued;
+        let underlying_style = if !sampled_only
+            && (needs_animations_update
+                || queued
+                || self.has_css_animations(context.shared, pseudo_element.clone()))
         {
             let parent = pseudo_element.as_ref().zip(originating);
             Some(self.underlying_style(context, new_values, parent))
@@ -818,6 +867,13 @@ trait PrivateMatchMethods: TElement {
             .write()
             .remove(&key)
             .unwrap_or_default();
+        // VIPER-PATCH(animation-sample-replacements): the cascade already
+        // gave the set's values at now, so only a change of the set from
+        // here on (a transition started or cancelled) asks for another;
+        // the embedder's mark before the traversal no longer does.
+        if sampled_only {
+            animation_set.dirty = false;
+        }
 
         // Starting animations is expensive, because we have to recalculate the style
         // for all the keyframes. We only want to do this if we think that there's a
@@ -1111,11 +1167,16 @@ pub trait MatchMethods: TElement {
         mut new_styles: ResolvedElementStyles,
         important_rules_changed: bool,
     ) -> RestyleHint {
+        // VIPER-PATCH(animation-sample-replacements): the restyle's only
+        // change was the animation levels' replacement.
+        let levels_replaced =
+            data.hint.has_animation_hint() && !data.hint.has_non_animation_invalidations();
         self.process_animations(
             context,
             &mut data.styles,
             &mut new_styles,
             important_rules_changed,
+            levels_replaced, // VIPER-PATCH(animation-sample-replacements)
         );
 
         // First of all, update the styles.

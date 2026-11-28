@@ -407,8 +407,11 @@ pub fn recalc_style_at<E, D, F>(
     // those operations and compute the propagated restyle hint (unless we're
     // not processing invalidations, in which case don't need to propagate it
     // and must avoid clearing it).
+    // VIPER-PATCH(animation-sample-replacements): servo builds handle the
+    // animation levels' replacement in a normal traversal.
     debug_assert!(
-        flags.for_animation_only() || !data.hint.has_animation_hint(),
+        // VIPER-PATCH(animation-sample-replacements)
+        flags.for_animation_only() || cfg!(feature = "servo") || !data.hint.has_animation_hint(),
         "animation restyle hint should be handled during \
          animation-only restyles"
     );

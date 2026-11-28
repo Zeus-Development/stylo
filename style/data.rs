@@ -589,8 +589,13 @@ impl ElementData {
         }
 
         if hint.has_replacements() {
+            // VIPER-PATCH(animation-sample-replacements): servo builds take
+            // the animation levels' replacement in a normal traversal (an
+            // animation-only sample), so only Gecko, which processes them in
+            // its animation-only traversal first, never sees them here.
             debug_assert!(
-                !hint.has_animation_hint(),
+                // VIPER-PATCH(animation-sample-replacements)
+                cfg!(feature = "servo") || !hint.has_animation_hint(),
                 "Animation only restyle hint should have already processed"
             );
             return Some(RestyleKind::CascadeWithReplacements(

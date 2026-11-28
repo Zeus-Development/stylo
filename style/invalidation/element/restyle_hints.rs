@@ -114,6 +114,11 @@ impl RestyleHint {
             return Self::empty();
         }
 
+        // VIPER-PATCH(animation-sample-replacements): in servo builds a
+        // normal traversal replaces the animation levels itself, and those
+        // hints concern the element alone, so they are dropped here.
+        #[cfg(feature = "servo")]
+        self.remove_animation_hints();
         debug_assert!(
             !self.has_animation_hint(),
             "There should not be any animation restyle hints \
