@@ -352,6 +352,16 @@ impl ContainerCondition {
         // VIPER-PATCH(servo-container-queries): every evaluated condition
         // marks the style, whatever it queries.
         invalidation_flags.insert(ComputedValueFlags::DEPENDS_ON_CONTAINER_QUERY);
+        // VIPER-PATCH(named-container-requery): a condition that names its
+        // container (`@container card`, with or without a query) depends on
+        // the ancestors' `container-name`, whose change sends descendants
+        // `RESTYLE_IF_AFFECTED_BY_NAMED_STYLE_CONTAINER`, which re-matches
+        // only the styles marked as style queries' (`needs_to_match_self`):
+        // upstream marked only `style()` conditions, so a named size or
+        // name-only condition below a renamed container kept its old match.
+        if !self.name.is_none() {
+            invalidation_flags.insert(ComputedValueFlags::DEPENDS_ON_CONTAINER_STYLE_QUERY);
+        }
         let result = self.find_container(element, originating_element_style);
         let condition = match self.condition {
             Some(ref c) => c,
