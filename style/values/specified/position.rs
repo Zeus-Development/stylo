@@ -834,6 +834,8 @@ impl PositionTryOrder {
     ToShmem,
     ToTyped,
 )]
+// VIPER-PATCH(position-visibility-anchor-keywords): the spec's new keyword
+// names, serialized in the grammar's order.
 #[css(bitflags(single = "always", mixed = "anchor-valid,anchor-visible,no-overflow"))]
 #[repr(C)]
 /// Specified keyword values for the position-visibility property.
