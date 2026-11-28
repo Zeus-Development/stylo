@@ -188,6 +188,7 @@ apart from the packaging files.
 | `property-animation-timing-function` | `stylo`: `servo/animation.rs` | Embedder control: CSS Transitions 2 section 6.1 gives a transition's effect the transition's timing function as its easing, which `getTiming()` reports, but `PropertyAnimation`'s timing function was private; `PropertyAnimation::timing_function` returns it | `viper-style animation::api::tests::fork::a_transition_gives_its_timing_function` | Candidate; draft to the owner first | Viper WAAPI-FORK-1 | 6 / 17 |
 | `servo-appearance` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS UI 4's `appearance` (section 5.2) and its legacy prefixed alias (section 5.2.1) sat behind upstream's `layout.unimplemented` preference, which servo builds never set, so an author's `appearance: none` was dropped and no embedder could lay out a form control without its widget; the gate goes, and they parse and compute in servo builds with upstream's values (`base` and `base-select` behind their own preferences, the internal values in privileged sheets alone); laying out and painting a widget by it stay the embedder's | `viper-style::cascade style_appearance::appearance_computes_from_the_ua_sheet_and_authors` | Candidate; draft to the owner first | Viper STYLE-APPEARANCE-1 | 8 / 58 |
 | `servo-device-posture` | `stylo`: `servo/remaining_media_features.rs`, `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: the Device Posture API's `device-posture` media feature (section 5), which upstream's servo list lacks, so a query on it was unknown; it evaluates from `RemainingMediaFeatures::device_posture` (default `continuous`), matches in a boolean context for both postures, and joins the features the default parse options leave unknown, so they parse as upstream does | `viper-style::cascade stylo_pin_j::servo_device_posture_takes_the_config` | Candidate; draft to the owner first | Viper STYLO-PIN-J | 39 / 34 |
+| `content-alt-counters` | `stylo`: `values/specified/counters.rs` | Standard: CSS Generated Content 3 section 1.1 lets `<counter>` (`counter()` and `counters()`, with their styles) follow the `/` of `content`'s alternative text, which an accessible name reads; upstream refused them past the `/`, so a declaration such as `content: "" / counter(n)` was invalid and its pseudo-element had no box. They now parse there; images and quotes stay refused after the `/`, as the grammar has them | `viper-style::cascade content_alt_counters::content_alt_counters_resolve_in_the_alternative_text` | Candidate; draft to the owner first | Viper A11Y-ALT-COUNTER-1 | 8 / 64 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2767,6 +2768,37 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `(device-posture: continuous)` matches by default and
   `(device-posture: folded)` under a folded posture, in `matchMedia`'s
   lists and in `@media` rules, and a change of posture restyles.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `content-alt-counters`
+
+- **Problem.** CSS Generated Content 3 section 1.1 gives `content` an
+  alternative text after a `/`: `[ <string> | <counter> | <attr()> ]+`,
+  which accessible names read in place of the visible content. Upstream's
+  parser refused `counter()` and `counters()` past the `/` (its comment:
+  likely non-trivial, and no other engine took them then), so a
+  declaration such as `content: "" / counter(n)` was invalid as a whole
+  and its `::before` generated no box.
+- **Change.** The two guards on `counter()` and `counters()` go, so they
+  parse after the `/` as before it, with their separator and counter
+  style; the computed value keeps them past `alt_start`, unresolved, as it
+  keeps the visible ones. Nothing else changes: images and quotes are
+  still refused after the `/`, an empty alternative or a second `/` still
+  invalid. Resolving the counters is the embedder's (Viper's counter walk).
+- **Spots.** `style/values/specified/counters.rs` (the guards, the reason
+  in full, and the test module).
+- **Fork tests.** `content_alt_counters_parse_after_the_slash` (each
+  function with and without a style, case-insensitive, serialized as
+  written, and the item kept past `alt_start`) and
+  `content_alt_counters_keep_the_other_refusals` (an empty visible part,
+  a function without its arguments, a second `/`, a quote, an image, a
+  gradient and another function after the `/`).
+- **Viper proof.** `content_alt_counters::content_alt_counters_resolve_in_the_alternative_text`:
+  a `::before` with `content: "" / counter(n)` generates its box, and
+  Viper's counter walk gives its alternative text the counter's value;
+  `counters()` takes its separator and style.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
