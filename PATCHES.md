@@ -189,6 +189,8 @@ apart from the packaging files.
 | `servo-appearance` | `stylo`: `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS UI 4's `appearance` (section 5.2) and its legacy prefixed alias (section 5.2.1) sat behind upstream's `layout.unimplemented` preference, which servo builds never set, so an author's `appearance: none` was dropped and no embedder could lay out a form control without its widget; the gate goes, and they parse and compute in servo builds with upstream's values (`base` and `base-select` behind their own preferences, the internal values in privileged sheets alone); laying out and painting a widget by it stay the embedder's | `viper-style::cascade style_appearance::appearance_computes_from_the_ua_sheet_and_authors` | Candidate; draft to the owner first | Viper STYLE-APPEARANCE-1 | 8 / 58 |
 | `servo-device-posture` | `stylo`: `servo/remaining_media_features.rs`, `servo/media_features.rs`; `stylo_atoms`: `static_atoms.txt` | Standard: the Device Posture API's `device-posture` media feature (section 5), which upstream's servo list lacks, so a query on it was unknown; it evaluates from `RemainingMediaFeatures::device_posture` (default `continuous`), matches in a boolean context for both postures, and joins the features the default parse options leave unknown, so they parse as upstream does | `viper-style::cascade stylo_pin_j::servo_device_posture_takes_the_config` | Candidate; draft to the owner first | Viper STYLO-PIN-J | 39 / 34 |
 | `content-alt-counters` | `stylo`: `values/specified/counters.rs` | Standard: CSS Generated Content 3 section 1.1 lets `<counter>` (`counter()` and `counters()`, with their styles) follow the `/` of `content`'s alternative text, which an accessible name reads; upstream refused them past the `/`, so a declaration such as `content: "" / counter(n)` was invalid and its pseudo-element had no box. They now parse there; images and quotes stay refused after the `/`, as the grammar has them | `viper-style::cascade content_alt_counters::content_alt_counters_resolve_in_the_alternative_text` | Candidate; draft to the owner first | Viper A11Y-ALT-COUNTER-1 | 8 / 64 |
+| `servo-reset-only-difference` | `stylo`: `servo/restyle_damage.rs`, `properties/properties.mako.rs` | Performance: the servo build's style difference never set `reset_only` (upstream's "FIXME(emilio): Differentiate between reset and inherited properties"), so every change of an element recascaded all its children, and a `display: none` child lost its subtree's data. A change is reset only now when what a child inherits is equal: every inherited struct, the writing mode, the effective zoom, the inherited flags and the visited style (`ComputedValues::inherits_equal`); inherited custom properties are compared as before, and a child that inherits a reset property explicitly still recascades | `viper-style::cascade reset_only::a_reset_only_change_recascades_no_child` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 | 37 / 0 |
+| `named-container-requery` | `stylo`: `stylesheets/container_rule.rs` | Correctness: a container condition that names its container (`@container card`, with or without a query) is marked as a style query's too, so the restyle a `container-name` change sends (`RESTYLE_IF_AFFECTED_BY_NAMED_STYLE_CONTAINER`, which re-matches only those) reaches it on every descendant; upstream marked only `style()` conditions, so a renamed container's grandchildren kept their old match | `viper-style::cascade container_names::a_renamed_container_re_matches_its_grandchildren` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 (for STYLO-CONTAINER-NAME-RESTYLE-1) | 10 / 0 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2801,6 +2803,59 @@ Problem, change, every spot, the Miri commands and the before/after results:
   `counters()` takes its separator and style.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `servo-reset-only-difference`
+
+- **Problem.** `ServoRestyleDamage::compute_style_difference` set
+  `reset_only = !any_style_changed`, under upstream's "FIXME(emilio):
+  Differentiate between reset and inherited properties here, and set
+  `reset_only` appropriately so the optimization to skip the cascade in
+  those cases applies". Every change of an element, a `margin-left` or a
+  `transform` too, gave each child `RECASCADE_SELF`; a `display: none`
+  child that is recascaded gets `clear_descendant_data`, so its whole
+  subtree was styled again.
+- **Change.** `ComputedValues::inherits_equal` (servo builds) holds when
+  the writing mode, the effective zoom, the inherited flags, every
+  inherited style struct (by pointer or by value) and the visited styles
+  are equal; a change is reset only when it holds. The inherited custom
+  properties are compared after it as before (a change clears
+  `reset_only`), and registered non-inherited ones count as reset. A reset
+  only change sends `RECASCADE_SELF_IF_INHERIT_RESET_STYLE`, which still
+  reaches a child that inherits a reset property explicitly, and
+  `need_to_unconditionally_recascade_for_reset_change` still recascades for
+  `display` and the other cases it names.
+- **Spots.** `style/servo/restyle_damage.rs` (the decision and the reason
+  in full), `style/properties/properties.mako.rs` (`inherits_equal`).
+- **Fork tests.** None: a style difference needs styles a cascade makes,
+  which the Viper proofs give.
+- **Viper proof.** `reset_only::a_reset_only_change_recascades_no_child`
+  and the equality tests beside it (an explicit `inherit`, `var()`,
+  writing mode, zoom, `display` to and from `none`, a visited link,
+  `::before` and `::after`, a class change, an inherited flag).
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `named-container-requery`
+
+- **Problem.** A change of an element's `container-name` sends its
+  children `RESTYLE_IF_AFFECTED_BY_NAMED_STYLE_CONTAINER`, which re-matches
+  only styles flagged `DEPENDS_ON_CONTAINER_STYLE_QUERY`
+  (`needs_to_match_self`). A container condition marked that flag only
+  for `style()` queries, so a name-only condition (`@container card`) or a
+  named size one below the renamed element, past its children, kept its
+  old match.
+- **Change.** A condition that names its container marks the flag too, in
+  `ContainerCondition::matches`; an unnamed condition is unchanged.
+- **Spots.** `style/stylesheets/container_rule.rs`.
+- **Fork tests.** None: the match needs a cascade, which the Viper proof
+  gives.
+- **Viper proof.**
+  `container_names::a_renamed_container_re_matches_its_grandchildren`;
+  STYLO-CONTAINER-NAME-RESTYLE-1 adds the equality tests.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
   first.
 
 ## Retired patches
