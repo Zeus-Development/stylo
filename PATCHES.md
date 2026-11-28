@@ -193,6 +193,7 @@ apart from the packaging files.
 | `named-container-requery` | `stylo`: `stylesheets/container_rule.rs` | Correctness: a container condition that names its container (`@container card`, with or without a query) is marked as a style query's too, so the restyle a `container-name` change sends (`RESTYLE_IF_AFFECTED_BY_NAMED_STYLE_CONTAINER`, which re-matches only those) reaches it on every descendant; upstream marked only `style()` conditions, so a renamed container's grandchildren kept their old match | `viper-style::cascade container_names::a_renamed_container_re_matches_its_grandchildren` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 (for STYLO-CONTAINER-NAME-RESTYLE-1) | 10 / 0 |
 | `position-visibility-anchor-keywords` | `stylo`: `values/specified/position.rs`, `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS Anchor Positioning 1 section 6.6 renamed `position-visibility`'s `anchors-valid` and `anchors-visible` to `anchor-valid` and `anchor-visible`, the initial value, and lets a user agent take the old names as legacy value aliases; upstream still parsed and serialized only the old names, so `anchor-visible` was refused. The new names parse and serialize, in the grammar's order; `anchors-visible` parses as the alias of `anchor-visible` and serializes as it, and `anchors-valid`, an optional alias, is not taken | `viper-style::cascade position_visibility::position_visibility_takes_the_anchor_keywords` | Candidate; draft to the owner first | Viper STYLE-POSITION-VISIBILITY-1 | 50 / 59 |
 | `animation-sample-replacements` | `stylo`: `matching.rs`, `data.rs`, `traversal.rs`, `invalidation/element/restyle_hints.rs` | Performance: a servo build samples animations in a normal traversal, with no animation-only traversal before it, and upstream asserted that no animation replacement hint reaches one; an embedder that only moved the timeline could restyle an animated element only by matching it or by cascading it from its last rules, after which `process_animations` cascaded its underlying style and, as every set is marked changed, the whole style again: three cascades for one new set of values. In a normal traversal the animation replacement hints now replace the element's transitions and animations levels with the set's values at the context's time before its one cascade, the servo `process_animations` learns whether that replacement was the restyle's only change (`levels_replaced`), and then cascades no underlying style (no other rule and no parent's style changed, so the recorded underlying values hold) and clears the set's changed mark, so that only a change of the set made in that step (a transition started or cancelled) cascades the style again; a pseudo-element's levels are replaced as before | `viper-style cascade::document::sample_tests::each_sampled_case_computes_what_a_restyle_from_scratch_does_without_matching` | Candidate; draft to the owner first | Viper STYLO-ANIMATION-CASCADE-COST-1 | 79 / 0 |
+| `background-clip-text-border-area` | `stylo`: `values/specified/background.rs`, `properties/shorthands.rs`, `properties/declaration_block.rs` (its tests); `stylo_static_prefs`: `preferences.toml` | Standard: CSS Backgrounds 4 section 2.8 gives `background-clip` the grammar `<visual-box> | [ border-area || text ]`; upstream parsed `text` in its other build only and `border-area` behind a preference that is off, and had no value for the two together, so servo builds dropped the declaration. Both keywords parse in every build, together as one value in either order serialized `border-area text`, any other combination refused, and the `background` shorthand sets `background-origin` to `border-box` for a value valid only in `background-clip` when no box is given (section 2.12) | `viper-style::cascade background_clip::background_clip_text_and_border_area_compute` | Candidate; draft to the owner first | Viper STYLE-BACKGROUND-CLIP-TEXT-1 | 54 / 121 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2944,6 +2945,49 @@ Problem, change, every spot, the Miri commands and the before/after results:
   the animation suites.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `background-clip-text-border-area`
+
+- **Problem.** CSS Backgrounds 4 section 2.8 gives `background-clip` the
+  grammar `<bg-clip>#` with `<bg-clip> = <visual-box> | [ border-area ||
+  text ]`. Upstream's `BackgroundClip` had `text` in its other build only,
+  `border-area` behind `layout.css.background-clip.border-area.enabled`,
+  off in servo builds, and no value for the two together (its "TODO: text
+  and border-area are supposed to combine"), so a servo build dropped the
+  declaration. Section 2.12 also has the `background` shorthand set
+  `background-origin` to `border-box` when a layer gives a value valid
+  only in `background-clip` and no box.
+- **Change.** `Text` is a value of every build, and the preference is on.
+  A new `BorderAreaText` holds the two together: `parse_for_background`
+  reads `text` or `border-area` and then, once, the other keyword, in
+  either order, and the value serializes as `border-area text` (WPT's
+  `css-backgrounds/parsing/background-clip-valid.html`); the derived
+  parser never takes it as one identifier, and it has no typed form. A
+  repeat, a third keyword or a box beside either keyword leaves input
+  unparsed, so the declaration is refused. `is_clip_only` names the three
+  values, and the shorthand gives such a layer the origin `border-box`
+  when it names no box (WPT's `background-valid.html`). The three are
+  valid for `background-clip` only, so `mask-clip` (unparsed in servo
+  builds) would refuse them.
+- **Spots.** `style/values/specified/background.rs` (the values, the pair's
+  parse and `is_clip_only`), `style/properties/shorthands.rs` (the origin),
+  `stylo_static_prefs/preferences.toml` (the preference) and
+  `style/properties/declaration_block.rs` (the test module).
+- **Fork tests.** `background_clip_text_border_area_parse` (each keyword,
+  case-insensitive, the pair in either order, lists, under the property
+  and its alias), `background_clip_refuses_other_combinations` (repeats,
+  a third keyword, a box beside a keyword, an escaped single identifier)
+  and `background_shorthand_takes_the_clip_only_values` (the
+  origin and clip each layer gets, with and without a box, and the
+  shorthand serialized again).
+- **Viper proof.**
+  `background_clip::background_clip_text_and_border_area_compute`: the
+  specified and computed values through a sheet, the style attribute and a
+  declaration block, under the property and its alias, with
+  `CSS.supports`' answers.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
   first.
 
 ## Retired patches
