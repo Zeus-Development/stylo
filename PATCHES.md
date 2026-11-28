@@ -192,6 +192,7 @@ apart from the packaging files.
 | `servo-reset-only-difference` | `stylo`: `servo/restyle_damage.rs`, `properties/properties.mako.rs` | Performance: the servo build's style difference never set `reset_only` (upstream's "FIXME(emilio): Differentiate between reset and inherited properties"), so every change of an element recascaded all its children, and a `display: none` child lost its subtree's data. A change is reset only now when what a child inherits is equal: every inherited struct, the writing mode, the effective zoom, the inherited flags and the visited style (`ComputedValues::inherits_equal`); inherited custom properties are compared as before, and a child that inherits a reset property explicitly still recascades | `viper-style::cascade reset_only::a_reset_only_change_recascades_no_child` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 | 37 / 0 |
 | `named-container-requery` | `stylo`: `stylesheets/container_rule.rs` | Correctness: a container condition that names its container (`@container card`, with or without a query) is marked as a style query's too, so the restyle a `container-name` change sends (`RESTYLE_IF_AFFECTED_BY_NAMED_STYLE_CONTAINER`, which re-matches only those) reaches it on every descendant; upstream marked only `style()` conditions, so a renamed container's grandchildren kept their old match | `viper-style::cascade container_names::a_renamed_container_re_matches_its_grandchildren` | Candidate; draft to the owner first | Viper STYLO-RESET-ONLY-1 (for STYLO-CONTAINER-NAME-RESTYLE-1) | 10 / 0 |
 | `position-visibility-anchor-keywords` | `stylo`: `values/specified/position.rs`, `properties/longhands.toml`, `properties/declaration_block.rs` (its tests) | Standard: CSS Anchor Positioning 1 section 6.6 renamed `position-visibility`'s `anchors-valid` and `anchors-visible` to `anchor-valid` and `anchor-visible`, the initial value, and lets a user agent take the old names as legacy value aliases; upstream still parsed and serialized only the old names, so `anchor-visible` was refused. The new names parse and serialize, in the grammar's order; `anchors-visible` parses as the alias of `anchor-visible` and serializes as it, and `anchors-valid`, an optional alias, is not taken | `viper-style::cascade position_visibility::position_visibility_takes_the_anchor_keywords` | Candidate; draft to the owner first | Viper STYLE-POSITION-VISIBILITY-1 | 50 / 59 |
+| `animation-sample-replacements` | `stylo`: `matching.rs`, `data.rs`, `traversal.rs`, `invalidation/element/restyle_hints.rs` | Performance: a servo build samples animations in a normal traversal, with no animation-only traversal before it, and upstream asserted that no animation replacement hint reaches one; an embedder that only moved the timeline could restyle an animated element only by matching it or by cascading it from its last rules, after which `process_animations` cascaded its underlying style and, as every set is marked changed, the whole style again: three cascades for one new set of values. In a normal traversal the animation replacement hints now replace the element's transitions and animations levels with the set's values at the context's time before its one cascade, the servo `process_animations` learns whether that replacement was the restyle's only change (`levels_replaced`), and then cascades no underlying style (no other rule and no parent's style changed, so the recorded underlying values hold) and clears the set's changed mark, so that only a change of the set made in that step (a transition started or cancelled) cascades the style again; a pseudo-element's levels are replaced as before | `viper-style cascade::document::sample_tests::each_sampled_case_computes_what_a_restyle_from_scratch_does_without_matching` | Candidate; draft to the owner first | Viper STYLO-ANIMATION-CASCADE-COST-1 | 44 / 0 |
 "Lines" counts added lines in the patched file, comments included, above
 and inside the test module. The `miri` proof is Viper's gate step `miri`, which runs
 `viper-style`'s API tests (selectors over Viper's DOM, through these thin
@@ -2894,6 +2895,55 @@ Problem, change, every spot, the Miri commands and the before/after results:
   attribute, and `CSS.supports`' answer.
 - **Commands.** `cargo test -p stylo --features servo --lib`.
 - **Upstream.** Standard, so a candidate; a draft goes to the Viper owner
+  first.
+
+## Patch `animation-sample-replacements`
+
+- **Problem.** Gecko samples animations in an animation-only traversal:
+  the animation replacement hints (`RESTYLE_CSS_ANIMATIONS`,
+  `RESTYLE_CSS_TRANSITIONS`) replace the element's animation levels in its
+  rule node, and one cascade gives the new values. A servo build has no
+  such traversal, and upstream asserted (`restyle_kind`, `recalc_style_at`,
+  `RestyleHint::propagate`) that those hints never reach a normal one, whose
+  `replace_rules_internal` replaced only the style attribute. An embedder
+  that moved only the timeline could restyle an animated element by
+  matching it again or by recascading it from its last rules, whose
+  animation levels hold the last time's values; the servo
+  `process_animations` then cascaded the element's underlying style (the
+  style without the animation levels, `animation-underlying-value`) and, as
+  every set is marked changed before the traversal, the style again with the
+  set's values at now. Three cascades, of which the last alone gives the
+  result, cost an animation-only sample of 24 elements about 0.4 ms on a
+  measured page.
+- **Change.** In a servo build's normal traversal the animation
+  replacement hints give `CascadeWithReplacements`, and
+  `replace_rules_internal` replaces the transitions and animations levels
+  with the set's declarations at the context's time
+  (`DocumentAnimationSet::get_all_declarations`), as `process_animations`
+  does when it recascades; `RestyleHint::propagate` drops those hints, which
+  concern the element alone. `finish_restyle` passes `process_animations`
+  whether the element's hint held nothing but animation hints
+  (`levels_replaced`): then no other rule and no parent's style changed, so
+  `process_animations_for_style` cascades no underlying style (the
+  recorded underlying values hold) when it starts no animation and runs no
+  queued script keyframes, and clears the set's changed mark before its
+  updates, so that only a change of the set it makes (a transition started
+  or cancelled) cascades the style again. A pseudo-element's levels are
+  replaced as before, whatever the restyle replaced.
+- **Spots.** `style/matching.rs` (the replacement, the flag and the
+  shortcut, the reason in full), `style/data.rs`, `style/traversal.rs` and
+  `style/invalidation/element/restyle_hints.rs` (the servo exceptions of the
+  three assertions).
+- **Fork tests.** None: a restyle needs a `TElement` and a document, which
+  the Viper proofs give.
+- **Viper proof.**
+  `sample_tests::each_sampled_case_computes_what_a_restyle_from_scratch_does_without_matching`
+  (a keyframe animation, a running transition, both on one element,
+  `animation-composition`, an inherited animated property: each sample
+  equal to a restyle from scratch), with the other sample tests beside it and
+  the animation suites.
+- **Commands.** `cargo test -p stylo --features servo --lib`.
+- **Upstream.** Generic, so a candidate; a draft goes to the Viper owner
   first.
 
 ## Retired patches
